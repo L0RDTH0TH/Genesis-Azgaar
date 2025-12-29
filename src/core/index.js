@@ -15,3 +15,5 @@ export * from './biomes.js';
 export * from './features.js';
 export * from './cultures.js';
 export * from './burgs.js';
+export * from './states.js';
+export * from './provinces.js';
