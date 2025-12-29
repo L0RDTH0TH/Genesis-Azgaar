@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@cursor/github-mcp-server"]
+    },
+    "browser-tools": {
+      "command": "npx",
+      "args": ["-y", "@agentdeskai/browser-tools-mcp@latest"]
+    },
+    "vitest-madrus": {
+      "command": "npx",
+      "args": ["-y", "@madrus/vitest-mcp-server@latest"]
+    }
+  }
+}
