@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Headless JSON Generation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      max-width: 1200px;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .controls {
+      margin-bottom: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+    }
+    .error {
+      color: #f44;
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a1a1a;
+      border-radius: 4px;
+    }
+    .success {
+      color: #4f4;
+      margin-top: 10px;
+      padding: 10px;
+      background: #1a2a1a;
+      border-radius: 4px;
+    }
+    .json-output {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      max-height: 600px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .stats {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+    }
+    .stat-item {
+      padding: 10px;
+      background: #1a1a1a;
+      border-radius: 4px;
+    }
+    .stat-label {
+      color: #aaa;
+      font-size: 12px;
+    }
+    .stat-value {
+      color: #fff;
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Headless JSON Generation</h1>
+  <p>Demonstrates fully headless usage: generate map data without any canvas rendering.</p>
+  
+  <div class="controls">
+    <button id="generateBtn">Generate Map (Seed: 42)</button>
+    <button id="randomBtn">Generate Random Map</button>
+    <button id="downloadBtn" disabled>Download JSON</button>
+  </div>
+
+  <div id="message"></div>
+  <div id="stats" class="stats" style="display: none;"></div>
+  <div id="jsonOutput" class="json-output" style="display: none;"></div>
+  <div class="info" id="info"></div>
+
+  <script type="module">
+    // Import Delaunator (peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData 
+    } from libraryPath;
+
+    const generateBtn = document.getElementById('generateBtn');
+    const randomBtn = document.getElementById('randomBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const messageDiv = document.getElementById('message');
+    const statsDiv = document.getElementById('stats');
+    const jsonOutputDiv = document.getElementById('jsonOutput');
+    const infoDiv = document.getElementById('info');
+
+    let currentJsonData = null;
+
+    function clearMessage() {
+      messageDiv.innerHTML = '';
+      messageDiv.className = '';
+    }
+
+    function showMessage(message, type = 'info') {
+      clearMessage();
+      messageDiv.innerHTML = message;
+      messageDiv.className = type;
+    }
+
+    function showInfo(message) {
+      infoDiv.textContent = message;
+    }
+
+    function showStats(data) {
+      const json = getMapData();
+      statsDiv.style.display = 'grid';
+      statsDiv.innerHTML = `
+        <div class="stat-item">
+          <div class="stat-label">Seed</div>
+          <div class="stat-value">${json.seed}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Grid Cells</div>
+          <div class="stat-value">${json.grid.cells.i.length.toLocaleString()}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Pack Cells</div>
+          <div class="stat-value">${json.pack.cells.i.length.toLocaleString()}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Features</div>
+          <div class="stat-value">${json.pack.features?.length || 0}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Burgs</div>
+          <div class="stat-value">${json.pack.burgs?.length || 0}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">States</div>
+          <div class="stat-value">${json.pack.states?.length || 0}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Cultures</div>
+          <div class="stat-value">${json.pack.cultures?.length || 0}</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Religions</div>
+          <div class="stat-value">${json.pack.religions?.length || 0}</div>
+        </div>
+      `;
+    }
+
+    function showJson(json) {
+      const jsonString = JSON.stringify(json, null, 2);
+      jsonOutputDiv.style.display = 'block';
+      jsonOutputDiv.textContent = jsonString;
+      currentJsonData = json;
+      downloadBtn.disabled = false;
+    }
+
+    async function generateMapWithSeed(seed) {
+      try {
+        clearMessage();
+        generateBtn.disabled = true;
+        randomBtn.disabled = true;
+        downloadBtn.disabled = true;
+        jsonOutputDiv.style.display = 'none';
+        statsDiv.style.display = 'none';
+        
+        showInfo('Initializing generator (headless mode)...');
+        
+        // Initialize without canvas (headless)
+        initGenerator({ canvas: null });
+        
+        showInfo('Loading options...');
+        loadOptions({
+          seed: seed || String(Date.now()),
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+          statesNumber: 18,
+          cultures: 12,
+        });
+        
+        showInfo('Generating map...');
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const generateTime = performance.now() - startTime;
+        
+        showInfo('Extracting JSON data...');
+        const jsonStart = performance.now();
+        const json = getMapData();
+        const jsonTime = performance.now() - jsonStart;
+        
+        const totalTime = performance.now() - startTime;
+        
+        showMessage(
+          `Map generated in ${generateTime.toFixed(2)}ms, JSON extracted in ${jsonTime.toFixed(2)}ms (total: ${totalTime.toFixed(2)}ms)`,
+          'success'
+        );
+        showInfo(`Complete! Seed: ${data.seed}`);
+        
+        showStats(data);
+        showJson(json);
+        
+        console.log('Generated map data:', {
+          seed: data.seed,
+          gridCells: data.grid.cells.i.length,
+          packCells: data.pack.cells.i.length,
+          features: data.pack.features?.length || 0,
+          burgs: data.pack.burgs?.length || 0,
+          states: data.pack.states?.length || 0,
+        });
+        console.log('Full JSON:', json);
+        
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Generation error:', error);
+      } finally {
+        generateBtn.disabled = false;
+        randomBtn.disabled = false;
+      }
+    }
+
+    // Download JSON as file
+    downloadBtn.addEventListener('click', () => {
+      if (!currentJsonData) return;
+      
+      const jsonString = JSON.stringify(currentJsonData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `azgaar-map-${currentJsonData.seed || 'map'}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showMessage('JSON file downloaded', 'success');
+    });
+
+    // Event listeners
+    generateBtn.addEventListener('click', () => generateMapWithSeed('42'));
+    randomBtn.addEventListener('click', () => generateMapWithSeed(null));
+
+    // Auto-generate on load with seed 42
+    window.addEventListener('load', () => {
+      setTimeout(() => generateMapWithSeed('42'), 100);
+    });
+  </script>
+</body>
+</html>

@@ -6,24 +6,32 @@
  * =============================================================================
  */
 
-import { describe, test, expect } from '@jest/globals';
-import { generateMap } from '../src/generator.js';
-import { getDefaultOptions } from '../src/options.js';
-import { RNG } from '../src/utils/rng.js';
+import { describe, test, expect, beforeEach } from '@jest/globals';
+import { initGenerator, loadOptions, generateMap } from '../src/generator.js';
 import Delaunator from 'delaunator';
 
 describe('Map Generator Integration', () => {
-  test('generateMap should return map data with grid and pack', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000; // Smaller map for faster tests
-    options.statesNumber = 5;
-    options.culturesNumber = 5;
-    options.manors = 100;
-    options.religionsNumber = 3;
+  beforeEach(() => {
+    // Initialize generator for each test
+    try {
+      initGenerator({ canvas: null });
+    } catch (e) {
+      // Already initialized, that's fine
+    }
+  });
 
-    const result = generateMap(options, Delaunator);
+  test('generateMap should return map data with grid and pack', () => {
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000, // Smaller map for faster tests
+      statesNumber: 5,
+      cultures: 5,
+      manors: 100,
+      religionsNumber: 3,
+    });
+
+    const result = generateMap(Delaunator);
 
     expect(result).toBeDefined();
     expect(result.grid).toBeDefined();
@@ -33,12 +41,13 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should create grid with cells', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.grid.cells).toBeDefined();
     expect(result.grid.cells.i).toBeDefined();
@@ -47,12 +56,13 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should create pack with cells', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.pack.cells).toBeDefined();
     expect(result.pack.cells.i).toBeDefined();
@@ -61,12 +71,13 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should generate heightmap', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.grid.cells.h).toBeDefined();
     expect(result.grid.cells.h.length).toBe(result.grid.cells.i.length);
@@ -76,13 +87,14 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should generate cultures', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
-    options.culturesNumber = 5;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      cultures: 5,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.pack.cultures).toBeDefined();
     expect(Array.isArray(result.pack.cultures)).toBe(true);
@@ -90,13 +102,14 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should generate burgs', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
-    options.manors = 100;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      manors: 100,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.pack.burgs).toBeDefined();
     expect(Array.isArray(result.pack.burgs)).toBe(true);
@@ -104,13 +117,14 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should generate states', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
-    options.statesNumber = 5;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      statesNumber: 5,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.pack.states).toBeDefined();
     expect(Array.isArray(result.pack.states)).toBe(true);
@@ -118,13 +132,14 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should generate provinces', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
-    options.statesNumber = 5;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      statesNumber: 5,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.pack.provinces).toBeDefined();
     expect(Array.isArray(result.pack.provinces)).toBe(true);
@@ -132,13 +147,14 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should generate religions if enabled', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
-    options.religionsNumber = 5;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      religionsNumber: 5,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.pack.religions).toBeDefined();
     expect(Array.isArray(result.pack.religions)).toBe(true);
@@ -146,13 +162,14 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should skip religions if disabled', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
-    options.religionsNumber = 0;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      religionsNumber: 0,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.pack.religions).toBeDefined();
     expect(result.pack.religions.length).toBe(1); // Only "No religion"
@@ -160,14 +177,24 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should be reproducible with same seed', () => {
-    const options = getDefaultOptions();
-    options.mapWidth = 1000;
-    options.mapHeight = 1000;
-    options.cellsDesired = 1000;
-    options.seed = 'test-seed-42';
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      seed: 'test-seed-42',
+    });
 
-    const result1 = generateMap(options);
-    const result2 = generateMap(options);
+    const result1 = generateMap(Delaunator);
+    
+    // Load same options again (state persists, but options are updated)
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      seed: 'test-seed-42',
+    });
+    
+    const result2 = generateMap(Delaunator);
 
     // Should generate same number of cells
     expect(result1.grid.cells.i.length).toBe(result2.grid.cells.i.length);
@@ -181,19 +208,27 @@ describe('Map Generator Integration', () => {
   });
 
   test('generateMap should use provided seed', () => {
-    const options = getDefaultOptions();
-    options.seed = 'custom-seed-123';
+    loadOptions({
+      seed: 'custom-seed-123',
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.seed).toBe('custom-seed-123');
   });
 
   test('generateMap should generate default seed if not provided', () => {
-    const options = getDefaultOptions();
-    delete options.seed;
+    loadOptions({
+      mapWidth: 1000,
+      mapHeight: 1000,
+      cellsDesired: 1000,
+      // seed not provided
+    });
 
-    const result = generateMap(options, Delaunator);
+    const result = generateMap(Delaunator);
 
     expect(result.seed).toBeDefined();
     expect(typeof result.seed).toBe('string');

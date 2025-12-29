@@ -1,12 +1,14 @@
 {
   "name": "azgaar-genesis-fork",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Modular JavaScript library fork of Azgaar's Fantasy Map Generator for Genesis Mythos integration",
   "type": "module",
-  "main": "dist/azgaar-library.js",
-  "module": "src/index.js",
+  "main": "dist/azgaar-genesis.umd.js",
+  "module": "dist/azgaar-genesis.esm.js",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build --mode minified",
+    "build:dev": "vite build",
+    "build:min": "vite build --mode minified",
     "dev": "vite",
     "preview": "vite preview",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Build Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    #canvas {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      margin-top: 20px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+      text-align: center;
+    }
+    .error {
+      color: #f44;
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a1a1a;
+      border-radius: 4px;
+    }
+    .success {
+      color: #4f4;
+      margin-top: 10px;
+      padding: 10px;
+      background: #1a2a1a;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Build Test</h1>
+  <p>Testing production bundles from dist/</p>
+  
+  <div>
+    <label>
+      <input type="radio" name="bundle" value="umd" checked> UMD Bundle
+    </label>
+    <label>
+      <input type="radio" name="bundle" value="esm"> ESM Bundle
+    </label>
+    <label>
+      <input type="radio" name="bundle" value="min"> Minified UMD
+    </label>
+  </div>
+  
+  <button id="testBtn">Test Bundle</button>
+  <canvas id="canvas" width="960" height="540"></canvas>
+  <div id="message"></div>
+  <div class="info" id="info"></div>
+
+  <script>
+    const testBtn = document.getElementById('testBtn');
+    const canvas = document.getElementById('canvas');
+    const messageDiv = document.getElementById('message');
+    const infoDiv = document.getElementById('info');
+
+    function clearMessage() {
+      messageDiv.innerHTML = '';
+      messageDiv.className = '';
+    }
+
+    function showMessage(message, type = 'info') {
+      clearMessage();
+      messageDiv.innerHTML = message;
+      messageDiv.className = type;
+    }
+
+    function showInfo(message) {
+      infoDiv.textContent = message;
+    }
+
+    async function testBundle() {
+      try {
+        clearMessage();
+        testBtn.disabled = true;
+        showInfo('Loading bundle...');
+
+        const bundleType = document.querySelector('input[name="bundle"]:checked').value;
+        
+        // Load Delaunator from CDN
+        const delaunatorScript = document.createElement('script');
+        delaunatorScript.src = 'https://cdn.jsdelivr.net/npm/delaunator@5/dist/delaunator.min.js';
+        document.head.appendChild(delaunatorScript);
+
+        await new Promise((resolve, reject) => {
+          delaunatorScript.onload = resolve;
+          delaunatorScript.onerror = reject;
+        });
+
+        if (bundleType === 'esm') {
+          // Test ESM bundle
+          showInfo('Loading ESM bundle...');
+          const { initGenerator, loadOptions, generateMap, renderPreview } = 
+            await import('../dist/azgaar-genesis.esm.js');
+          
+          initGenerator({ canvas });
+          loadOptions({ seed: '42', mapWidth: 960, mapHeight: 540, cellsDesired: 10000 });
+          
+          const startTime = performance.now();
+          const data = generateMap(window.Delaunator);
+          const generateTime = performance.now() - startTime;
+          
+          renderPreview();
+          
+          showMessage(`ESM bundle works! Generated in ${generateTime.toFixed(2)}ms (seed: ${data.seed})`, 'success');
+          showInfo('ESM bundle test complete');
+        } else {
+          // Test UMD bundle (or minified)
+          showInfo(`Loading ${bundleType === 'min' ? 'minified ' : ''}UMD bundle...`);
+          const script = document.createElement('script');
+          script.src = bundleType === 'min' 
+            ? '../dist/azgaar-genesis.min.js' 
+            : '../dist/azgaar-genesis.umd.js';
+          document.head.appendChild(script);
+
+          await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+          });
+
+          // Wait a bit for global variable to be available
+          await new Promise(resolve => setTimeout(resolve, 100));
+
+          if (!window.AzgaarGenesis) {
+            throw new Error('Global variable AzgaarGenesis not found');
+          }
+
+          const { initGenerator, loadOptions, generateMap, renderPreview } = window.AzgaarGenesis;
+          
+          initGenerator({ canvas });
+          loadOptions({ seed: '42', mapWidth: 960, mapHeight: 540, cellsDesired: 10000 });
+          
+          const startTime = performance.now();
+          const data = generateMap(window.Delaunator);
+          const generateTime = performance.now() - startTime;
+          
+          renderPreview();
+          
+          showMessage(
+            `${bundleType === 'min' ? 'Minified ' : ''}UMD bundle works! Generated in ${generateTime.toFixed(2)}ms (seed: ${data.seed})`,
+            'success'
+          );
+          showInfo(`${bundleType === 'min' ? 'Minified ' : ''}UMD bundle test complete`);
+        }
+
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Test error:', error);
+      } finally {
+        testBtn.disabled = false;
+      }
+    }
+
+    testBtn.addEventListener('click', testBundle);
+
+    // Auto-test on load
+    window.addEventListener('load', () => {
+      setTimeout(testBundle, 100);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Full API Preview</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: #2196F3;
+    }
+    button.secondary:hover {
+      background: #0b7dda;
+    }
+    button.danger {
+      background: #f44336;
+    }
+    button.danger:hover {
+      background: #da190b;
+    }
+    #canvas {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      margin-top: 20px;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+    }
+    .error {
+      color: #f44;
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a1a1a;
+      border-radius: 4px;
+    }
+    .success {
+      color: #4f4;
+      margin-top: 10px;
+      padding: 10px;
+      background: #1a2a1a;
+      border-radius: 4px;
+    }
+    .code-block {
+      background: #2a2a2a;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Full API Preview</h1>
+  <p>This example demonstrates the complete stateful API: initGenerator → loadOptions → generateMap → renderPreview → getMapData</p>
+  
+  <div class="controls">
+    <button id="initBtn">1. Initialize Generator</button>
+    <button id="loadBtn" disabled>2. Load Options (Seed: 42)</button>
+    <button id="generateBtn" disabled>3. Generate Map</button>
+    <button id="renderBtn" disabled>4. Render Preview</button>
+    <button id="getDataBtn" disabled class="secondary">Get Map Data (JSON)</button>
+    <button id="randomBtn" disabled class="secondary">Generate Random Map</button>
+    <button id="resetBtn" class="danger">Reset</button>
+  </div>
+
+  <canvas id="canvas"></canvas>
+  
+  <div class="info" id="info"></div>
+  <div id="message"></div>
+  <div id="jsonOutput" style="display: none;"></div>
+
+  <script type="module">
+    // Import Delaunator (peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library (using dev server or dist bundle)
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData, 
+      renderPreview 
+    } from libraryPath;
+
+    const canvas = document.getElementById('canvas');
+    const initBtn = document.getElementById('initBtn');
+    const loadBtn = document.getElementById('loadBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const renderBtn = document.getElementById('renderBtn');
+    const getDataBtn = document.getElementById('getDataBtn');
+    const randomBtn = document.getElementById('randomBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const infoDiv = document.getElementById('info');
+    const messageDiv = document.getElementById('message');
+    const jsonOutputDiv = document.getElementById('jsonOutput');
+
+    let currentStep = 0;
+
+    function clearMessage() {
+      messageDiv.innerHTML = '';
+      messageDiv.className = '';
+      jsonOutputDiv.style.display = 'none';
+      jsonOutputDiv.innerHTML = '';
+    }
+
+    function showMessage(message, type = 'info') {
+      clearMessage();
+      messageDiv.innerHTML = message;
+      messageDiv.className = type;
+    }
+
+    function showInfo(message) {
+      infoDiv.textContent = message;
+    }
+
+    function enableStep(step) {
+      currentStep = Math.max(currentStep, step);
+      if (step >= 1) loadBtn.disabled = false;
+      if (step >= 2) generateBtn.disabled = false;
+      if (step >= 3) renderBtn.disabled = false;
+      if (step >= 3) getDataBtn.disabled = false;
+      if (step >= 3) randomBtn.disabled = false;
+    }
+
+    function disableAll() {
+      loadBtn.disabled = true;
+      generateBtn.disabled = true;
+      renderBtn.disabled = true;
+      getDataBtn.disabled = true;
+      randomBtn.disabled = true;
+    }
+
+    // Step 1: Initialize
+    initBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        initGenerator({ canvas });
+        showMessage('Generator initialized with canvas', 'success');
+        showInfo('Step 1 complete: Generator initialized');
+        enableStep(1);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Initialization error:', error);
+      }
+    });
+
+    // Step 2: Load Options
+    loadBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        loadOptions({
+          seed: '42',
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+          statesNumber: 18,
+          cultures: 12,
+        });
+        showMessage('Options loaded (seed: 42)', 'success');
+        showInfo('Step 2 complete: Options loaded');
+        enableStep(2);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Load options error:', error);
+      }
+    });
+
+    // Step 3: Generate Map
+    generateBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        showInfo('Generating map...');
+        const startTime = performance.now();
+
+        const data = generateMap(Delaunator);
+
+        const generateTime = performance.now() - startTime;
+        showMessage(
+          `Map generated in ${generateTime.toFixed(2)}ms (seed: ${data.seed})`,
+          'success'
+        );
+        showInfo(`Step 3 complete: Map generated (${generateTime.toFixed(2)}ms)`);
+        enableStep(3);
+
+        console.log('Generated map data:', {
+          seed: data.seed,
+          gridCells: data.grid.cells.i.length,
+          packCells: data.pack.cells.i.length,
+          features: data.pack.features?.length || 0,
+          burgs: data.pack.burgs?.length || 0,
+          states: data.pack.states?.length || 0,
+        });
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Generation error:', error);
+      }
+    });
+
+    // Step 4: Render Preview
+    renderBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        const renderStart = performance.now();
+        renderPreview();
+        const renderTime = performance.now() - renderStart;
+        showMessage(`Map rendered in ${renderTime.toFixed(2)}ms`, 'success');
+        showInfo(`Step 4 complete: Map rendered (${renderTime.toFixed(2)}ms)`);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Render error:', error);
+      }
+    });
+
+    // Get Map Data (JSON)
+    getDataBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        const json = getMapData();
+        const jsonString = JSON.stringify(json, null, 2);
+        
+        showMessage('Map data retrieved (see JSON below)', 'success');
+        jsonOutputDiv.style.display = 'block';
+        jsonOutputDiv.innerHTML = `<div class="code-block">${jsonString.substring(0, 2000)}${jsonString.length > 2000 ? '...\n(truncated)' : ''}</div>`;
+        
+        console.log('Map data JSON:', json);
+        console.log('Full JSON string:', jsonString);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Get data error:', error);
+      }
+    });
+
+    // Generate Random Map
+    randomBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        showInfo('Generating random map...');
+        
+        // Load new random options
+        loadOptions({
+          seed: String(Date.now()),
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+        });
+        
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const generateTime = performance.now() - startTime;
+        
+        const renderStart = performance.now();
+        renderPreview();
+        const renderTime = performance.now() - renderStart;
+        
+        showMessage(
+          `Random map generated and rendered (${generateTime.toFixed(2)}ms)`,
+          'success'
+        );
+        showInfo(`Random map: seed ${data.seed}`);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Random generation error:', error);
+      }
+    });
+
+    // Reset
+    resetBtn.addEventListener('click', () => {
+      // Note: In a real implementation, we might want a reset function
+      // For now, just reload the page
+      location.reload();
+    });
+
+    // Auto-initialize on load
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        try {
+          initGenerator({ canvas });
+          showMessage('Auto-initialized generator', 'success');
+          enableStep(1);
+        } catch (error) {
+          showMessage(`Auto-init error: ${error.message}`, 'error');
+        }
+      }, 100);
+    });
+  </script>
+</body>
+</html>

@@ -6,7 +6,16 @@
  * =============================================================================
  */
 
-export { generateMap } from './generator.js';
+// Public API - stateful generator functions
+export {
+  initGenerator,
+  loadOptions,
+  generateMap,
+  getMapData,
+  renderPreview,
+} from './generator.js';
+
+// Utility exports (for advanced usage)
 export { getDefaultOptions, mergeOptions } from './options.js';
 export { RNG } from './utils/rng.js';
 

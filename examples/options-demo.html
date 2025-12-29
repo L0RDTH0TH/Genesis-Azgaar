@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Options Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 20px;
+    }
+    .controls {
+      background: #2a2a2a;
+      padding: 20px;
+      border-radius: 4px;
+    }
+    .control-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #aaa;
+      font-size: 14px;
+    }
+    input[type="range"], input[type="number"], input[type="text"], select {
+      width: 100%;
+      padding: 8px;
+      background: #1a1a1a;
+      border: 1px solid #444;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 14px;
+    }
+    input[type="range"] {
+      padding: 0;
+    }
+    .value-display {
+      color: #4CAF50;
+      font-weight: bold;
+      margin-left: 10px;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    #canvas {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      max-width: 100%;
+    }
+    .preview-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+      text-align: center;
+    }
+    .error {
+      color: #f44;
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a1a1a;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Options Demo</h1>
+  <p>Adjust options and see live preview. Demonstrates loadOptions flexibility.</p>
+
+  <div class="container">
+    <div class="controls">
+      <div class="control-group">
+        <label>
+          Seed: 
+          <input type="text" id="seedInput" value="42">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          Map Width: <span class="value-display" id="widthValue">960</span>
+          <input type="range" id="widthSlider" min="240" max="2000" step="10" value="960">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          Map Height: <span class="value-display" id="heightValue">540</span>
+          <input type="range" id="heightSlider" min="135" max="1500" step="10" value="540">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          Cells Desired: <span class="value-display" id="cellsValue">10000</span>
+          <input type="range" id="cellsSlider" min="1000" max="50000" step="1000" value="10000">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          States Number: <span class="value-display" id="statesValue">18</span>
+          <input type="range" id="statesSlider" min="0" max="50" step="1" value="18">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          Cultures: <span class="value-display" id="culturesValue">12</span>
+          <input type="range" id="culturesSlider" min="1" max="30" step="1" value="12">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          Religions: <span class="value-display" id="religionsValue">6</span>
+          <input type="range" id="religionsSlider" min="0" max="20" step="1" value="6">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <label>
+          Template:
+          <select id="templateSelect">
+            <option value="">Random</option>
+            <option value="fantasy">Fantasy</option>
+            <option value="atoll">Atoll</option>
+            <option value="volcano">Volcano</option>
+          </select>
+        </label>
+      </div>
+
+      <button id="generateBtn">Generate Map</button>
+      <button id="autoBtn">Auto-Generate on Change</button>
+    </div>
+
+    <div class="preview-area">
+      <canvas id="canvas"></canvas>
+      <div class="info" id="info"></div>
+      <div id="error"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      renderPreview 
+    } from libraryPath;
+
+    const canvas = document.getElementById('canvas');
+    const generateBtn = document.getElementById('generateBtn');
+    const autoBtn = document.getElementById('autoBtn');
+    const infoDiv = document.getElementById('info');
+    const errorDiv = document.getElementById('error');
+    
+    // Sliders and inputs
+    const seedInput = document.getElementById('seedInput');
+    const widthSlider = document.getElementById('widthSlider');
+    const widthValue = document.getElementById('widthValue');
+    const heightSlider = document.getElementById('heightSlider');
+    const heightValue = document.getElementById('heightValue');
+    const cellsSlider = document.getElementById('cellsSlider');
+    const cellsValue = document.getElementById('cellsValue');
+    const statesSlider = document.getElementById('statesSlider');
+    const statesValue = document.getElementById('statesValue');
+    const culturesSlider = document.getElementById('culturesSlider');
+    const culturesValue = document.getElementById('culturesValue');
+    const religionsSlider = document.getElementById('religionsSlider');
+    const religionsValue = document.getElementById('religionsValue');
+    const templateSelect = document.getElementById('templateSelect');
+
+    let autoGenerate = false;
+    let generating = false;
+
+    // Update value displays
+    widthSlider.addEventListener('input', (e) => {
+      widthValue.textContent = e.target.value;
+      canvas.width = parseInt(e.target.value);
+      if (autoGenerate && !generating) generate();
+    });
+
+    heightSlider.addEventListener('input', (e) => {
+      heightValue.textContent = e.target.value;
+      canvas.height = parseInt(e.target.value);
+      if (autoGenerate && !generating) generate();
+    });
+
+    cellsSlider.addEventListener('input', (e) => {
+      cellsValue.textContent = e.target.value;
+      if (autoGenerate && !generating) generate();
+    });
+
+    statesSlider.addEventListener('input', (e) => {
+      statesValue.textContent = e.target.value;
+      if (autoGenerate && !generating) generate();
+    });
+
+    culturesSlider.addEventListener('input', (e) => {
+      culturesValue.textContent = e.target.value;
+      if (autoGenerate && !generating) generate();
+    });
+
+    religionsSlider.addEventListener('input', (e) => {
+      religionsValue.textContent = e.target.value;
+      if (autoGenerate && !generating) generate();
+    });
+
+    autoBtn.addEventListener('click', () => {
+      autoGenerate = !autoGenerate;
+      autoBtn.textContent = autoGenerate ? 'Disable Auto-Generate' : 'Auto-Generate on Change';
+      autoBtn.style.background = autoGenerate ? '#f44336' : '#4CAF50';
+    });
+
+    function clearError() {
+      errorDiv.innerHTML = '';
+      errorDiv.className = '';
+    }
+
+    function showError(message) {
+      errorDiv.innerHTML = message;
+      errorDiv.className = 'error';
+    }
+
+    function showInfo(message) {
+      infoDiv.textContent = message;
+    }
+
+    async function generate() {
+      if (generating) return;
+      
+      try {
+        generating = true;
+        clearError();
+        generateBtn.disabled = true;
+        showInfo('Generating...');
+        
+        const options = {
+          seed: seedInput.value || String(Date.now()),
+          mapWidth: parseInt(widthSlider.value),
+          mapHeight: parseInt(heightSlider.value),
+          cellsDesired: parseInt(cellsSlider.value),
+          statesNumber: parseInt(statesSlider.value),
+          cultures: parseInt(culturesSlider.value),
+          religionsNumber: parseInt(religionsSlider.value),
+        };
+
+        if (templateSelect.value) {
+          options.template = templateSelect.value;
+        }
+
+        loadOptions(options);
+        
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const generateTime = performance.now() - startTime;
+        
+        renderPreview();
+        
+        showInfo(`Generated in ${generateTime.toFixed(0)}ms (seed: ${data.seed})`);
+        
+      } catch (error) {
+        showError(`Error: ${error.message}`);
+        console.error('Generation error:', error);
+      } finally {
+        generating = false;
+        generateBtn.disabled = false;
+      }
+    }
+
+    generateBtn.addEventListener('click', generate);
+
+    // Initialize
+    initGenerator({ canvas });
+    canvas.width = parseInt(widthSlider.value);
+    canvas.height = parseInt(heightSlider.value);
+
+    // Auto-generate on load
+    window.addEventListener('load', () => {
+      setTimeout(generate, 100);
+    });
+  </script>
+</body>
+</html>
