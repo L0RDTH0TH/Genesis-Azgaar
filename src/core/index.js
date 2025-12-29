@@ -10,3 +10,6 @@ export * from './voronoi.js';
 export * from './heightmap.js';
 export * from './flux.js';
 export * from './rivers.js';
+export * from './temperature.js';
+export * from './biomes.js';
+export * from './features.js';
