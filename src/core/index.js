@@ -17,3 +17,5 @@ export * from './cultures.js';
 export * from './burgs.js';
 export * from './states.js';
 export * from './provinces.js';
+export * from './religions.js';
+export * from './emblems.js';
