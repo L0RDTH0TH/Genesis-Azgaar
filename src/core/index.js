@@ -8,3 +8,5 @@
 
 export * from './voronoi.js';
 export * from './heightmap.js';
+export * from './flux.js';
+export * from './rivers.js';
