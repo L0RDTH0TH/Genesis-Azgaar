@@ -83,19 +83,22 @@ export function dist(p1, p2) {
 
 /**
  * Generate a random Gaussian (normal) distribution number
- * Note: Requires d3.randomNormal - will be available when D3 is added as peer dependency
  * @param {number} expected - Expected value (mean)
  * @param {number} deviation - Standard deviation
  * @param {number} min - Minimum value
  * @param {number} max - Maximum value
  * @param {number} round - Round to n decimals
- * @param {Function} randomNormal - d3.randomNormal function (optional, uses Math.random if not provided)
+ * @param {Object} rng - RNG instance (optional, uses Math.random if not provided)
  * @returns {number} Random Gaussian number
  */
-export function gauss(expected = 100, deviation = 30, min = 0, max = 300, round = 0, randomNormal = null) {
+export function gauss(expected = 100, deviation = 30, min = 0, max = 300, round = 0, rng = null) {
   let value;
-  if (randomNormal) {
-    value = randomNormal(expected, deviation)();
+  if (rng && typeof rng.random === 'function') {
+    // Use RNG for seeded randomness
+    const u1 = rng.random();
+    const u2 = rng.random();
+    const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    value = expected + deviation * z0;
   } else {
     // Simple Box-Muller transform approximation if d3 not available
     const u1 = Math.random();
