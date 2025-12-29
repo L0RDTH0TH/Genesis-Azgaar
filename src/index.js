@@ -6,6 +6,9 @@
  * =============================================================================
  */
 
-// Placeholder - to be implemented in Phase 2
-// Target API:
-// export { initGenerator, generateMap, renderPreview, getMapData, loadOptions };
+export { generateMap } from './generator.js';
+export { getDefaultOptions, mergeOptions } from './options.js';
+export { RNG } from './utils/rng.js';
+
+// Re-export core modules for advanced usage
+export * from './core/index.js';

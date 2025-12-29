@@ -16,7 +16,7 @@ import { createTypedArray } from '../utils/array.js';
  * @param {number} height - Map height
  * @returns {Object} Map coordinates {latT, latN, latS, lonT, lonW, lonE}
  */
-function calculateMapCoordinates(options, width, height) {
+export function calculateMapCoordinates(options, width, height) {
   const sizeFraction = (options.mapSize || 50) / 100;
   const latShift = options.latitude / 100;
   const lonShift = (options.longitude || 50) / 100;
