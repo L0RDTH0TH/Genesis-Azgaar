@@ -1,0 +1,29 @@
+{
+  "name": "azgaar-genesis-fork",
+  "version": "0.1.0",
+  "description": "Modular JavaScript library fork of Azgaar's Fantasy Map Generator for Genesis Mythos integration",
+  "type": "module",
+  "main": "dist/azgaar-library.js",
+  "module": "src/index.js",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "fantasy",
+    "map",
+    "generator",
+    "azgaar",
+    "genesis-mythos"
+  ],
+  "author": "Lordthoth",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/L0RDTH0TH/azgaar-genesis-fork.git"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}
