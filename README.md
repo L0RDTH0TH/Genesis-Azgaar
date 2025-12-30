@@ -10,6 +10,44 @@ The library is now **production-ready** with a complete stateful API, optional c
 
 This is a fork of [Azgaar's Fantasy Map Generator](https://github.com/Azgaar/Fantasy-Map-Generator) refactored into a modular, importable JavaScript library. The primary goal is seamless integration into Genesis Mythos' WebView-based world builder GUI (godot_wry + Alpine.js).
 
+## Build
+
+### Prerequisites
+
+- Node.js 18+ and npm
+
+### Installation
+
+```bash
+npm install
+```
+
+### Building
+
+Build the library for production:
+
+```bash
+npm run build
+```
+
+This generates two bundle files in `dist/`:
+- `azgaar-genesis.esm.js` - ES Module format for modern browsers/WebView
+- `azgaar-genesis.min.js` - Minified ES Module for production
+
+### Development
+
+For development with hot reload:
+
+```bash
+npm run dev
+```
+
+Preview the built files:
+
+```bash
+npm run preview
+```
+
 ## Current Status
 
 **Phase 1: Setup & Initial Fork** ✅ Complete
@@ -172,6 +210,23 @@ Renders stored map data to SVG. Returns SVG string if no container provided, or 
 
 **Note:** SVG rendering includes all layers: ocean, landmass, features (lakes/islands), biomes, states, borders, rivers, and burgs.
 
+**Example - SVG Rendering:**
+
+```javascript
+// Initialize with container for SVG
+const container = document.getElementById('mapContainer');
+initGenerator({ container });
+
+// Generate and render
+loadOptions({ seed: '42', mapWidth: 1200, mapHeight: 800 });
+generateMap(Delaunator);
+renderPreviewSVG(); // Automatically appends to container
+
+// Or get SVG string
+const svgString = renderPreviewSVG({ width: 1200, height: 800 });
+document.body.insertAdjacentHTML('beforeend', svgString);
+```
+
 #### `loadMapData(jsonData)`
 Loads map data from JSON (matching `getMapData()` output structure). Allows data-driven regeneration/display without re-running generation.
 
@@ -181,6 +236,22 @@ Loads map data from JSON (matching `getMapData()` output structure). Allows data
 **Throws:** `InitializationError` if not initialized, `InvalidOptionError` if JSON structure is invalid
 
 **Note:** After loading, you can call `renderPreviewSVG()` or `renderPreview()` to display the loaded data, or use the seed from loaded data to regenerate.
+
+**Example - Data-Driven Loading:**
+
+```javascript
+// Load previously exported JSON
+const savedJson = JSON.parse(fs.readFileSync('map.json', 'utf8'));
+loadMapData(savedJson);
+
+// Render without regeneration
+renderPreviewSVG();
+
+// Or regenerate with same seed
+loadOptions({ seed: savedJson.seed });
+generateMap(Delaunator);
+renderPreviewSVG();
+```
 
 ### Error Types
 
@@ -531,9 +602,23 @@ loadOptions({
 
 ## Godot Integration
 
+The library is designed for seamless integration into Genesis Mythos' WebView-based world builder GUI.
+
 ### File Placement
 
 Copy the built bundle files to your Godot project:
+
+```bash
+# Copy ESM bundle (recommended for modern WebView)
+cp dist/azgaar-genesis.esm.js /path/to/godot/project/res://assets/ui_web/js/azgaar/
+
+# Or copy minified version for production
+cp dist/azgaar-genesis.min.js /path/to/godot/project/res://assets/ui_web/js/azgaar/
+```
+
+**Recommended location:** `res://assets/ui_web/js/azgaar/azgaar-genesis.esm.js`
+
+**Note:** Delaunator is a required peer dependency. Include it separately:
 
 ```
 res://assets/ui_web/js/azgaar/

@@ -486,6 +486,40 @@ export function loadMapData(jsonData) {
       );
     }
 
+    // Validate required pack fields for rendering
+    const requiredPackFields = ['cells', 'states', 'burgs', 'rivers'];
+    const missingFields = requiredPackFields.filter(field => !jsonData.pack[field]);
+    
+    if (missingFields.length > 0) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`loadMapData: Missing pack fields: ${missingFields.join(', ')}. Rendering may be incomplete.`);
+      }
+    }
+
+    // Validate critical cell arrays
+    if (!jsonData.pack.cells || !Array.isArray(jsonData.pack.cells.i)) {
+      throw new InvalidOptionError(
+        'jsonData',
+        jsonData,
+        'JSON data must contain pack.cells.i array'
+      );
+    }
+
+    // Warn about missing rendering fields
+    const renderingFields = ['state', 'biome', 'culture', 'religion', 'province', 'p', 'c', 'v'];
+    const missingRenderingFields = renderingFields.filter(field => !jsonData.pack.cells[field]);
+    
+    if (missingRenderingFields.length > 0 && typeof console !== 'undefined' && console.warn) {
+      console.warn(`loadMapData: Missing rendering fields in pack.cells: ${missingRenderingFields.join(', ')}. Some layers may not render.`);
+    }
+
+    // Validate vertices for border rendering
+    if (!jsonData.pack.vertices || !jsonData.pack.vertices.p) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('loadMapData: Missing pack.vertices.p. Border rendering may fail.');
+      }
+    }
+
     // Reconstruct typed arrays from JSON arrays
     const reconstructTypedArray = (arr, TypedArray, maxValue) => {
       if (!arr || !Array.isArray(arr)) return null;

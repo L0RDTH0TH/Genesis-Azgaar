@@ -9,32 +9,33 @@ export default defineConfig(({ mode }) => {
         entry: 'src/index.js',
         name: 'AzgaarGenesis',
         fileName: (format) => {
+          if (format === 'es') {
+            return isMinified ? 'azgaar-genesis.min.js' : 'azgaar-genesis.esm.js';
+          }
           if (format === 'umd') {
             return isMinified ? 'azgaar-genesis.min.js' : 'azgaar-genesis.umd.js';
           }
-          if (format === 'es') {
-            return 'azgaar-genesis.esm.js';
-          }
           return `azgaar-genesis.${format}.js`;
         },
-        formats: isMinified ? ['umd'] : ['umd', 'es']
+        // Output ESM for browser/WebView embedding, UMD for compatibility
+        formats: isMinified ? ['es'] : ['es', 'umd']
       },
       rollupOptions: {
-        // Externalize peer dependencies (not bundled)
-        external: ['d3', 'delaunator'],
+        // Externalize Delaunator (required peer dependency)
+        // User must provide Delaunator separately in WebView
+        external: ['delaunator'],
         output: {
           dir: 'dist',
-          // Provide global variable names for UMD
+          // Preserve module exports for ESM version
           globals: {
-            'd3': 'd3',
             'delaunator': 'Delaunator'
-          },
+          }
         }
       },
       outDir: 'dist',
       minify: isMinified ? 'esbuild' : false,
       sourcemap: !isMinified, // Source maps for non-minified builds
-      emptyOutDir: !isMinified, // Don't clean dist when building minified (preserve UMD/ESM)
+      emptyOutDir: !isMinified, // Don't clean dist when building minified (preserve ESM)
     }
   };
 });
