@@ -13,6 +13,8 @@ export {
   generateMap,
   getMapData,
   renderPreview,
+  renderPreviewSVG,
+  loadMapData,
 } from './generator.js';
 
 // Utility exports (for advanced usage)

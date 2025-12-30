@@ -76,11 +76,16 @@ import {
   loadOptions, 
   generateMap, 
   getMapData, 
-  renderPreview 
+  renderPreview,
+  renderPreviewSVG,
+  loadMapData
 } from 'azgaar-genesis';
 
-// 1. Initialize with optional canvas for previews
-initGenerator({ canvas: document.getElementById('map') });
+// 1. Initialize with optional canvas for previews or container for SVG
+initGenerator({ 
+  canvas: document.getElementById('map'),  // For canvas rendering
+  container: document.getElementById('svgContainer')  // For SVG rendering (optional)
+});
 
 // 2. Load options from Genesis Mythos JSON with clamping
 loadOptions({
@@ -95,23 +100,32 @@ loadOptions({
 import Delaunator from 'delaunator';
 const data = generateMap(Delaunator);
 
-// 4. Get structured JSON data for Godot consumption
+// 4. Render to canvas (if canvas provided)
+renderPreview();
+
+// 5. Render to SVG (returns SVG string or appends to container)
+const svgString = renderPreviewSVG({ width: 1920, height: 1080 });
+// Or if container provided: renderPreviewSVG() will append automatically
+
+// 6. Get structured JSON data for Godot consumption
 const json = getMapData();
 console.log(JSON.stringify(json, null, 2));
 
-// 5. Render preview if canvas provided
-renderPreview();
+// 7. Load map data from JSON (for data-driven regeneration/display)
+loadMapData(json);
+renderPreviewSVG();  // Render loaded data
 ```
 
 ### API Functions
 
-#### `initGenerator({ canvas })`
-Initializes the generator state. Stores optional canvas reference for rendering.
+#### `initGenerator({ canvas, container })`
+Initializes the generator state. Stores optional canvas reference for canvas rendering or container for SVG rendering.
 
 **Parameters:**
-- `canvas` (HTMLCanvasElement | null): Optional canvas element for rendering previews
+- `canvas` (HTMLCanvasElement | null): Optional canvas element for canvas rendering previews
+- `container` (HTMLElement | null): Optional container element for SVG rendering
 
-**Throws:** `InitializationError` if already initialized or invalid canvas provided
+**Throws:** `InitializationError` if already initialized or invalid elements provided
 
 #### `loadOptions(curatedParams)`
 Merges provided params with defaults and updates internal options. Validates and clamps values.
@@ -142,6 +156,31 @@ Returns structured JSON from stored data. Format is optimized for Godot import (
 Renders stored data to the initialized canvas. No-op with warning if no canvas provided.
 
 **Throws:** `InitializationError` if not initialized, `NoDataError` if no data generated yet
+
+#### `renderPreviewSVG(options)`
+Renders stored map data to SVG. Returns SVG string if no container provided, or appends to container if provided.
+
+**Parameters:**
+- `options` (Object, optional): Rendering options
+  - `width` (number, optional): SVG width (defaults to map width or container width)
+  - `height` (number, optional): SVG height (defaults to map height or container height)
+  - `container` (HTMLElement, optional): Container element to append SVG to (overrides initGenerator container)
+
+**Returns:** `string | null` - SVG string if no container, null if appended to container
+
+**Throws:** `InitializationError` if not initialized, `NoDataError` if no data generated yet, `GenerationError` if rendering fails
+
+**Note:** SVG rendering includes all layers: ocean, landmass, features (lakes/islands), biomes, states, borders, rivers, and burgs.
+
+#### `loadMapData(jsonData)`
+Loads map data from JSON (matching `getMapData()` output structure). Allows data-driven regeneration/display without re-running generation.
+
+**Parameters:**
+- `jsonData` (Object): JSON object matching `getMapData()` output structure
+
+**Throws:** `InitializationError` if not initialized, `InvalidOptionError` if JSON structure is invalid
+
+**Note:** After loading, you can call `renderPreviewSVG()` or `renderPreview()` to display the loaded data, or use the seed from loaded data to regenerate.
 
 ### Error Types
 

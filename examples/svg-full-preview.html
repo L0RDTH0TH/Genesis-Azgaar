@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Full SVG Preview</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+    #svgContainer {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      width: 100%;
+      max-width: 1200px;
+      height: auto;
+    }
+    #svgContainer svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button {
+      padding: 10px 20px;
+      background: #4a4a4a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5a5a5a;
+    }
+    button:active {
+      background: #3a3a3a;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      max-width: 1200px;
+      width: 100%;
+    }
+    .info h3 {
+      margin-top: 0;
+    }
+    .info pre {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Azgaar Genesis - Full SVG Preview</h1>
+    <p>Complete 2D visual map preview with biomes, states, borders, rivers, and burgs</p>
+    
+    <div class="controls">
+      <button id="generateBtn">Generate New Map</button>
+      <button id="regenerateBtn">Regenerate (Same Seed)</button>
+      <button id="exportJsonBtn">Export JSON</button>
+      <button id="loadJsonBtn">Load from JSON</button>
+      <input type="file" id="jsonFileInput" accept=".json" style="display: none;">
+    </div>
+
+    <div id="svgContainer"></div>
+
+    <div class="info">
+      <h3>Map Information</h3>
+      <div id="mapInfo">Generating map...</div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Full SVG preview example - demonstrates complete rendering with all layers
+     * Shows: biomes, states, borders, rivers, burgs, lakes, islands
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData, 
+      renderPreviewSVG,
+      loadMapData
+    } = await import(isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js');
+
+    const svgContainer = document.getElementById('svgContainer');
+    const generateBtn = document.getElementById('generateBtn');
+    const regenerateBtn = document.getElementById('regenerateBtn');
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const loadJsonBtn = document.getElementById('loadJsonBtn');
+    const jsonFileInput = document.getElementById('jsonFileInput');
+    const mapInfo = document.getElementById('mapInfo');
+
+    let currentSeed = String(Date.now());
+    let currentOptions = {
+      seed: currentSeed,
+      mapWidth: 1200,
+      mapHeight: 800,
+      cellsDesired: 15000,
+      statesNumber: 15,
+      culturesNumber: 10,
+      religionsNumber: 5,
+    };
+
+    // Initialize generator with container for SVG
+    initGenerator({ container: svgContainer });
+
+    function updateMapInfo(data) {
+      const { pack, seed, options } = data;
+      const info = {
+        seed,
+        dimensions: `${options.mapWidth}x${options.mapHeight}`,
+        cells: pack.cells?.i?.length || 0,
+        states: pack.states?.length || 0,
+        burgs: pack.burgs?.filter(b => b && !b.removed)?.length || 0,
+        rivers: pack.rivers?.length || 0,
+        cultures: pack.cultures?.length || 0,
+        religions: pack.religions?.length || 0,
+      };
+      
+      mapInfo.innerHTML = `
+        <pre>${JSON.stringify(info, null, 2)}</pre>
+      `;
+    }
+
+    async function generateAndRender() {
+      try {
+        mapInfo.textContent = 'Generating map...';
+        
+        // Load options
+        loadOptions(currentOptions);
+        
+        // Generate map
+        const data = generateMap(Delaunator);
+        currentSeed = data.seed;
+        
+        // Render to SVG
+        renderPreviewSVG({ 
+          width: currentOptions.mapWidth, 
+          height: currentOptions.mapHeight 
+        });
+        
+        // Update info
+        updateMapInfo(data);
+        
+        console.log('Map generated and rendered:', data);
+      } catch (error) {
+        console.error('Generation failed:', error);
+        mapInfo.textContent = `Error: ${error.message}`;
+      }
+    }
+
+    function regenerate() {
+      // Regenerate with same seed
+      currentOptions.seed = currentSeed;
+      generateAndRender();
+    }
+
+    function exportJson() {
+      try {
+        const json = getMapData();
+        const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `azgaar-map-${currentSeed}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log('JSON exported:', json);
+      } catch (error) {
+        console.error('Export failed:', error);
+        alert(`Export failed: ${error.message}`);
+      }
+    }
+
+    function loadJson() {
+      jsonFileInput.click();
+    }
+
+    jsonFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const jsonData = JSON.parse(text);
+        
+        // Load map data
+        loadMapData(jsonData);
+        
+        // Render to SVG
+        renderPreviewSVG({ 
+          width: jsonData.options?.mapWidth || 1200, 
+          height: jsonData.options?.mapHeight || 800 
+        });
+        
+        // Update info
+        const data = {
+          seed: jsonData.seed,
+          pack: jsonData.pack,
+          options: jsonData.options,
+        };
+        updateMapInfo(data);
+        
+        currentSeed = jsonData.seed;
+        currentOptions = jsonData.options || currentOptions;
+        
+        console.log('Map loaded from JSON:', jsonData);
+      } catch (error) {
+        console.error('Load failed:', error);
+        alert(`Load failed: ${error.message}`);
+      }
+      
+      // Reset file input
+      e.target.value = '';
+    });
+
+    // Event listeners
+    generateBtn.addEventListener('click', () => {
+      currentSeed = String(Date.now());
+      currentOptions.seed = currentSeed;
+      generateAndRender();
+    });
+    
+    regenerateBtn.addEventListener('click', regenerate);
+    exportJsonBtn.addEventListener('click', exportJson);
+    loadJsonBtn.addEventListener('click', loadJson);
+
+    // Initial generation
+    generateAndRender();
+  </script>
+</body>
+</html>

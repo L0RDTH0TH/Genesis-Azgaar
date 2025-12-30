@@ -38,12 +38,14 @@ import {
   generateEmblems,
 } from './core/index.js';
 import { renderMap } from './rendering/canvas.js';
+import { renderMapSVG } from './rendering/svg.js';
 
 /**
  * Singleton state for the generator
  */
 let state = {
   canvas: null,
+  container: null, // SVG container element (optional)
   options: getDefaultOptions(),
   data: null, // { grid, pack, seed }
   initialized: false,
@@ -216,12 +218,13 @@ function requireInitialized() {
 }
 
 /**
- * Initialize the generator with optional canvas for rendering
+ * Initialize the generator with optional canvas or container for rendering
  * @param {Object} params - Initialization parameters
- * @param {HTMLCanvasElement|null} params.canvas - Optional canvas element for rendering previews
- * @throws {InitializationError} If already initialized or invalid canvas provided
+ * @param {HTMLCanvasElement|null} params.canvas - Optional canvas element for canvas rendering
+ * @param {HTMLElement|null} params.container - Optional container element for SVG rendering
+ * @throws {InitializationError} If already initialized or invalid elements provided
  */
-export function initGenerator({ canvas = null } = {}) {
+export function initGenerator({ canvas = null, container = null } = {}) {
   if (state.initialized) {
     throw new InitializationError(
       'Generator already initialized. Cannot initialize multiple times.'
@@ -235,7 +238,15 @@ export function initGenerator({ canvas = null } = {}) {
     );
   }
 
+  // Validate container if provided
+  if (container !== null && !(container instanceof HTMLElement)) {
+    throw new InitializationError(
+      `Invalid container element. Expected HTMLElement, got ${typeof container}`
+    );
+  }
+
   state.canvas = canvas;
+  state.container = container;
   state.initialized = true;
 }
 
@@ -345,9 +356,20 @@ export function getMapData() {
         b: pack.cells.b ? Array.from(pack.cells.b) : [],
         g: pack.cells.g ? Array.from(pack.cells.g) : [],
         area: pack.cells.area ? Array.from(pack.cells.area) : [],
+        // Additional fields for SVG rendering
+        p: pack.cells.p ? pack.cells.p.map(p => [...p]) : [],
+        c: pack.cells.c ? pack.cells.c.map(c => Array.isArray(c) ? [...c] : c) : [],
+        v: pack.cells.v ? pack.cells.v.map(v => Array.isArray(v) ? [...v] : v) : [],
+        state: pack.cells.state ? Array.from(pack.cells.state) : [],
+        province: pack.cells.province ? Array.from(pack.cells.province) : [],
+        biome: pack.cells.biome ? Array.from(pack.cells.biome) : [],
+        culture: pack.cells.culture ? Array.from(pack.cells.culture) : [],
+        religion: pack.cells.religion ? Array.from(pack.cells.religion) : [],
       },
       vertices: pack.vertices ? {
         p: pack.vertices.p ? pack.vertices.p.map(v => [...v]) : [],
+        v: pack.vertices.v ? deepCopy(pack.vertices.v) : [],
+        c: pack.vertices.c ? deepCopy(pack.vertices.c) : [],
       } : {},
       features: pack.features ? deepCopy(pack.features) : [],
       burgs: pack.burgs ? deepCopy(pack.burgs) : [],
@@ -387,5 +409,154 @@ export function renderPreview() {
     renderMap(state.canvas, state.data);
   } catch (error) {
     throw new GenerationError(`Rendering failed: ${error.message}`);
+  }
+}
+
+/**
+ * Render stored map data to SVG (returns SVG string or appends to container)
+ * @param {Object} options - Rendering options {width, height, container}
+ * @returns {string|null} SVG string if no container provided, null if appended to container
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ */
+export function renderPreviewSVG(options = {}) {
+  requireInitialized();
+
+  if (!state.data) {
+    throw new NoDataError();
+  }
+
+  try {
+    // Determine dimensions from container, options, or data
+    let width = options.width;
+    let height = options.height;
+    const container = options.container || state.container;
+
+    if (container) {
+      // Get dimensions from container if not provided
+      if (!width || !height) {
+        const rect = container.getBoundingClientRect();
+        width = width || rect.width || state.data.options.mapWidth || 1000;
+        height = height || rect.height || state.data.options.mapHeight || 600;
+      }
+    } else {
+      // Use data dimensions if no container
+      width = width || state.data.options.mapWidth || 1000;
+      height = height || state.data.options.mapHeight || 600;
+    }
+
+    const svgString = renderMapSVG(state.data, { width, height });
+
+    if (container) {
+      // Append or replace SVG in container
+      container.innerHTML = svgString;
+      return null;
+    } else {
+      // Return SVG string
+      return svgString;
+    }
+  } catch (error) {
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('SVG rendering failed:', error);
+    }
+    throw new GenerationError(`SVG rendering failed: ${error.message}`);
+  }
+}
+
+/**
+ * Load map data from JSON (for data-driven regeneration/display)
+ * @param {Object} jsonData - JSON data matching getMapData() output structure
+ * @throws {InitializationError} If generator not initialized
+ * @throws {InvalidOptionError} If JSON structure is invalid
+ */
+export function loadMapData(jsonData) {
+  requireInitialized();
+
+  if (!jsonData || typeof jsonData !== 'object') {
+    throw new InvalidOptionError('jsonData', jsonData, 'JSON data must be an object');
+  }
+
+  try {
+    // Validate basic structure
+    if (!jsonData.pack || !jsonData.grid) {
+      throw new InvalidOptionError(
+        'jsonData',
+        jsonData,
+        'JSON data must contain pack and grid objects'
+      );
+    }
+
+    // Reconstruct typed arrays from JSON arrays
+    const reconstructTypedArray = (arr, TypedArray, maxValue) => {
+      if (!arr || !Array.isArray(arr)) return null;
+      const typed = createTypedArray({ maxValue, length: arr.length });
+      typed.set(arr);
+      return typed;
+    };
+
+    // Reconstruct grid
+    const grid = {
+      cells: {
+        i: reconstructTypedArray(jsonData.grid.cells.i, Uint16Array, 65535) || new Uint16Array(0),
+        h: reconstructTypedArray(jsonData.grid.cells.h, Uint8Array, 255) || new Uint8Array(0),
+        t: reconstructTypedArray(jsonData.grid.cells.t, Int8Array, 127) || new Int8Array(0),
+        temp: jsonData.grid.cells.temp ? new Float32Array(jsonData.grid.cells.temp) : null,
+        prec: jsonData.grid.cells.prec ? new Float32Array(jsonData.grid.cells.prec) : null,
+        f: reconstructTypedArray(jsonData.grid.cells.f, Uint16Array, 65535) || new Uint16Array(0),
+        b: reconstructTypedArray(jsonData.grid.cells.b, Uint8Array, 255) || new Uint8Array(0),
+      },
+      points: jsonData.grid.points || [],
+      vertices: jsonData.grid.vertices || {},
+      features: jsonData.grid.features || [],
+    };
+
+    // Reconstruct pack
+    const pack = {
+      cells: {
+        i: reconstructTypedArray(jsonData.pack.cells.i, Uint16Array, 65535) || new Uint16Array(0),
+        h: reconstructTypedArray(jsonData.pack.cells.h, Uint8Array, 255) || new Uint8Array(0),
+        t: reconstructTypedArray(jsonData.pack.cells.t, Int8Array, 127) || new Int8Array(0),
+        f: reconstructTypedArray(jsonData.pack.cells.f, Uint16Array, 65535) || new Uint16Array(0),
+        b: reconstructTypedArray(jsonData.pack.cells.b, Uint8Array, 255) || new Uint8Array(0),
+        g: reconstructTypedArray(jsonData.pack.cells.g, Uint16Array, 65535) || new Uint16Array(0),
+        area: jsonData.pack.cells.area ? new Float32Array(jsonData.pack.cells.area) : new Float32Array(0),
+        p: jsonData.pack.cells.p || [],
+        // Add cell arrays that may be needed for rendering
+        state: jsonData.pack.cells.state ? reconstructTypedArray(jsonData.pack.cells.state, Uint16Array, 65535) : null,
+        province: jsonData.pack.cells.province ? reconstructTypedArray(jsonData.pack.cells.province, Uint16Array, 65535) : null,
+        biome: jsonData.pack.cells.biome ? reconstructTypedArray(jsonData.pack.cells.biome, Uint8Array, 255) : null,
+        culture: jsonData.pack.cells.culture ? reconstructTypedArray(jsonData.pack.cells.culture, Uint16Array, 65535) : null,
+        religion: jsonData.pack.cells.religion ? reconstructTypedArray(jsonData.pack.cells.religion, Uint16Array, 65535) : null,
+        c: jsonData.pack.cells.c || [],
+        v: jsonData.pack.cells.v || [],
+      },
+      vertices: jsonData.pack.vertices || {},
+      features: jsonData.pack.features || [],
+      burgs: jsonData.pack.burgs || [],
+      states: jsonData.pack.states || [],
+      rivers: jsonData.pack.rivers || [],
+      cultures: jsonData.pack.cultures || [],
+      religions: jsonData.pack.religions || [],
+      provinces: jsonData.pack.provinces || [],
+    };
+
+    // Reconstruct options
+    const options = jsonData.options || getDefaultOptions();
+
+    // Store loaded data
+    state.data = {
+      grid,
+      pack,
+      options,
+      seed: jsonData.seed || String(Date.now()),
+    };
+
+    // Update options in state
+    state.options = options;
+  } catch (error) {
+    if (error instanceof InvalidOptionError || error instanceof InitializationError) {
+      throw error;
+    }
+    throw new InvalidOptionError('jsonData', jsonData, `Failed to load map data: ${error.message}`);
   }
 }
