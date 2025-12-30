@@ -7,3 +7,12 @@
  */
 
 export { renderMap } from './canvas.js';
+export {
+  renderMapSVG,
+  drawBiomesSVG,
+  drawStatesSVG,
+  drawBordersSVG,
+  drawRiversSVG,
+  drawBurgsSVG,
+  drawFeaturesSVG,
+} from './svg.js';
