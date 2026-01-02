@@ -92,24 +92,24 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
 
   // STEP 1: Collect all unique vertices from all cell polygons
   // This creates a dense vertex array indexed sequentially (0, 1, 2, ...)
-  // IMPORTANT: Use cellPolygon() which returns array of [x,y] points, NOT renderCell() which returns SVG path string
+  // IMPORTANT: Use cellPolygon() which returns array of [x,y] pairs: [[x0,y0], [x1,y1], ...]
   const uniqueVertices = new Map(); // key: "x,y" -> value: [x, y]
   
   for (let i = 0; i < newCells.p.length; i++) {
     try {
-      const cellPolygon = voronoiDiagram.cellPolygon(i); // Returns Float64Array of coordinates [x0,y0,x1,y1,...]
+      const cellPolygon = voronoiDiagram.cellPolygon(i); // Returns array of [x,y] pairs: [[x0,y0], [x1,y1], ...]
       if (cellPolygon && cellPolygon.length > 0) {
-        // cellPolygon is a flat array: [x0, y0, x1, y1, x2, y2, ...]
-        // Convert to array of [x,y] pairs and collect unique vertices
-        const polygonArray = Array.from(cellPolygon);
-        for (let j = 0; j < polygonArray.length; j += 2) {
-          const x = Math.round(polygonArray[j]);
-          const y = Math.round(polygonArray[j + 1]);
-          const key = `${x},${y}`;
-          if (!uniqueVertices.has(key)) {
-            uniqueVertices.set(key, [x, y]);
+        // cellPolygon returns array of [x,y] pairs directly - iterate over pairs
+        cellPolygon.forEach((point) => {
+          if (Array.isArray(point) && point.length >= 2) {
+            const x = Math.round(point[0]);
+            const y = Math.round(point[1]);
+            const key = `${x},${y}`;
+            if (!uniqueVertices.has(key)) {
+              uniqueVertices.set(key, [x, y]);
+            }
           }
-        }
+        });
       }
     } catch (error) {
       // Skip cells that fail to render
