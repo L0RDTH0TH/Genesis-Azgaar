@@ -528,6 +528,9 @@ export function drawStatesSVG(pack) {
  */
 export function drawBordersSVG(pack) {
   if (!pack.cells || !pack.cells.state) {
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[drawBordersSVG] No cells.state, returning empty');
+    }
     return { stateBorders: '', provinceBorders: '' };
   }
 
@@ -543,12 +546,34 @@ export function drawBordersSVG(pack) {
   
   // If no vertex graph, use simplified border rendering
   if (!hasVertexGraph) {
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[drawBordersSVG] No vertex graph, using simplified rendering');
+    }
     return drawBordersSVGSimplified(pack);
   }
   
   const statePath = [];
   const provincePath = [];
   const checked = {};
+  
+  // Debug: Log state/province data availability
+  if (typeof console !== 'undefined' && console.log) {
+    const statesCount = pack.states ? pack.states.length : 0;
+    const provincesCount = pack.provinces ? pack.provinces.length : 0;
+    const uniqueStates = new Set();
+    const uniqueProvinces = new Set();
+    for (let i = 0; i < Math.min(cells.i.length, 1000); i++) {
+      if (cells.state[i] !== undefined) uniqueStates.add(cells.state[i]);
+      if (cells.province && cells.province[i] !== undefined) uniqueProvinces.add(cells.province[i]);
+    }
+    console.log('[drawBordersSVG] Border data:', {
+      statesCount,
+      provincesCount,
+      uniqueStatesInSample: uniqueStates.size,
+      uniqueProvincesInSample: uniqueProvinces.size,
+      hasVertexGraph,
+    });
+  }
 
   const isLand = (cellId) => cells.h[cellId] >= MIN_LAND_HEIGHT;
 
@@ -607,13 +632,26 @@ export function drawBordersSVG(pack) {
     const isTypeTo = (cellId) => cellId < cells.i.length && getType(cellId) === getType(toCell);
 
     addToChecked(fromCell);
-    const startingVertex = cells.v[fromCell]?.find((v) => {
+    const cellVertices = cells.v[fromCell];
+    if (!cellVertices || cellVertices.length === 0) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`[getBorder] Cell ${fromCell} has no vertices`);
+      }
+      return null;
+    }
+    
+    const startingVertex = cellVertices.find((v) => {
       if (typeof v !== 'number' || v < 0 || v >= vertices.c.length || !vertices.c[v] || !Array.isArray(vertices.c[v])) {
         return false;
       }
       return vertices.c[v].some((i) => isLand(i) && isTypeTo(i));
     });
-    if (startingVertex === undefined) return null;
+    if (startingVertex === undefined) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`[getBorder] No starting vertex found for ${type} border from cell ${fromCell} to ${toCell}`);
+      }
+      return null;
+    }
 
     const checkVertex = (vertex) =>
       vertices.c[vertex]?.some(isTypeFrom) &&
@@ -700,6 +738,11 @@ function drawBordersSVGSimplified(pack) {
   const statePath = [];
   const provincePath = [];
   const checked = {};
+  
+  // Debug: Log simplified border rendering
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[drawBordersSVGSimplified] Starting simplified border rendering');
+  }
 
   const isLand = (cellId) => cells.h[cellId] >= MIN_LAND_HEIGHT;
 
