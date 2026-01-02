@@ -16,6 +16,22 @@ const STYLE_CONSTANTS = {
   lakeFreshwater: '#a8c8e0',
   lakeSaltwater: '#9bb5d1',
   oceanLayerOpacity: 0.4,
+  // Borders
+  stateBorderStroke: '#56566d',
+  stateBorderWidth: 1,
+  stateBorderDashArray: [2, 2], // Canvas uses array format
+  provinceBorderStroke: '#56566d',
+  provinceBorderWidth: 0.5,
+  provinceBorderDashArray: [0, 2], // Canvas uses array format
+  // Rivers
+  riverStroke: '#6b93d6',
+  riverFill: '#a8c8e0',
+  riverOpacity: 0.8,
+  // Burgs
+  burgCapitalSize: 3,
+  burgTownSize: 2,
+  burgCapitalColor: '#333',
+  burgTownColor: '#666',
 };
 
 const MIN_LAND_HEIGHT = 20;
@@ -78,14 +94,14 @@ export function renderMap(canvas, data) {
   // 4. Lakes (on top of land)
   drawLakes(ctx, { grid, pack, options });
 
-  // 5. Rivers (Phase 5.4 - placeholder)
-  // drawRivers(ctx, { grid, pack, options });
+  // 5. Rivers (Phase 5.4 - implemented)
+  drawRivers(ctx, { grid, pack, options });
 
-  // 6. Borders (Phase 5.4 - placeholder)
-  // drawBorders(ctx, { grid, pack, options });
+  // 6. Borders (Phase 5.4 - implemented)
+  drawBorders(ctx, { grid, pack, options });
 
-  // 7. Burgs (Phase 5.4 - placeholder)
-  // drawBurgs(ctx, { grid, pack, options });
+  // 7. Burgs (Phase 5.4 - implemented)
+  drawBurgs(ctx, { grid, pack, options });
 
   // 8. Texture (optional - can be skipped initially)
   // drawTexture(ctx, { grid, pack, options });
@@ -407,6 +423,287 @@ function drawLandmass(ctx, { grid, pack, options }) {
       }
     }
   }
+}
+
+/**
+ * Draw rivers as flowing paths (Phase 5.4)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} params - Rendering parameters
+ */
+function drawRivers(ctx, { grid, pack, options }) {
+  if (!pack.rivers || !Array.isArray(pack.rivers) || pack.rivers.length === 0) {
+    return;
+  }
+
+  ctx.save();
+  ctx.globalAlpha = STYLE_CONSTANTS.riverOpacity;
+
+  for (const river of pack.rivers) {
+    if (!river.cells || river.cells.length < 2) continue;
+
+    // Get points from cell centers
+    const points = river.cells
+      .map((cellId) => {
+        if (cellId < 0 || cellId >= pack.cells.p.length) return null;
+        return pack.cells.p[cellId];
+      })
+      .filter((p) => p !== null);
+
+    if (points.length < 2) continue;
+
+    // Add meandering for natural river curves
+    const meanderedPoints = addMeandering(points);
+
+    // Draw river path with width based on flow
+    const widthFactor = river.widthFactor || 1;
+    const baseWidth = (river.sourceWidth || 1) * 2;
+    const strokeWidth = baseWidth * widthFactor;
+
+    ctx.strokeStyle = STYLE_CONSTANTS.riverStroke;
+    ctx.fillStyle = STYLE_CONSTANTS.riverFill;
+    ctx.lineWidth = strokeWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Draw river path using quadratic curves for smoothness
+    ctx.beginPath();
+    ctx.moveTo(meanderedPoints[0][0], meanderedPoints[0][1]);
+
+    for (let i = 1; i < meanderedPoints.length; i++) {
+      if (i === 1) {
+        ctx.lineTo(meanderedPoints[i][0], meanderedPoints[i][1]);
+      } else {
+        // Use quadratic curves for smoother rivers
+        const [x1, y1] = meanderedPoints[i - 1];
+        const [x2, y2] = meanderedPoints[i];
+        const [x0, y0] = meanderedPoints[i - 2] || meanderedPoints[i - 1];
+        const cpX = (x1 + x2) / 2;
+        const cpY = (y1 + y2) / 2;
+        ctx.quadraticCurveTo(cpX, cpY, x2, y2);
+      }
+    }
+
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Simplified meandering for rivers
+ * @param {Array<Array<number>>} points - Array of [x, y] points
+ * @returns {Array<Array<number>>} Meandered points
+ */
+function addMeandering(points) {
+  if (points.length < 2) return points;
+
+  const meandered = [];
+  const meanderingAmount = 0.3;
+
+  for (let i = 0; i < points.length; i++) {
+    const [x, y] = points[i];
+    meandered.push([x, y]);
+
+    if (i < points.length - 1) {
+      const [x1, y1] = points[i];
+      const [x2, y2] = points[i + 1];
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const midX = (x1 + x2) / 2;
+      const midY = (y1 + y2) / 2;
+      const perpX = -dy * meanderingAmount;
+      const perpY = dx * meanderingAmount;
+
+      meandered.push([midX + perpX, midY + perpY]);
+    }
+  }
+
+  return meandered;
+}
+
+/**
+ * Draw borders (state and province) (Phase 5.4)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} params - Rendering parameters
+ */
+function drawBorders(ctx, { grid, pack, options }) {
+  if (!pack.cells || !pack.cells.state) {
+    return;
+  }
+
+  const { cells } = pack;
+
+  // Check if we have polygon data for border rendering
+  const hasPolygons = pack.cells.vCoords && pack.cells.vCoords.length > 0 && pack.cells.vCoords[0]?.length > 0;
+
+  if (!hasPolygons) {
+    // Fallback: can't draw borders without polygon data
+    return;
+  }
+
+  const checked = {};
+  const isLand = (cellId) => cells.h[cellId] >= MIN_LAND_HEIGHT;
+
+  ctx.save();
+
+  // Draw province borders first (thinner, underneath)
+  ctx.strokeStyle = STYLE_CONSTANTS.provinceBorderStroke;
+  ctx.lineWidth = STYLE_CONSTANTS.provinceBorderWidth;
+  ctx.setLineDash(STYLE_CONSTANTS.provinceBorderDashArray);
+  ctx.lineCap = 'round';
+
+  for (let cellId = 0; cellId < cells.i.length; cellId++) {
+    if (!isLand(cellId) || !cells.state[cellId]) continue;
+
+    const provinceId = cells.province?.[cellId];
+    const stateId = cells.state[cellId];
+    if (!provinceId) continue;
+
+    const neighbors = cells.c[cellId] || [];
+    for (const neibId of neighbors) {
+      if (neibId >= cells.i.length || !isLand(neibId)) continue;
+
+      const neibProvinceId = cells.province?.[neibId];
+      const neibStateId = cells.state[neibId];
+
+      // Province border (within same state)
+      if (
+        neibProvinceId &&
+        provinceId !== neibProvinceId &&
+        stateId === neibStateId
+      ) {
+        const key = `prov-${Math.min(provinceId, neibProvinceId)}-${Math.max(provinceId, neibProvinceId)}-${cellId}`;
+        if (!checked[key]) {
+          checked[key] = true;
+          const sharedEdge = findSharedEdge(cells.vCoords[cellId], neibId, pack);
+          if (sharedEdge) {
+            ctx.beginPath();
+            ctx.moveTo(sharedEdge[0][0], sharedEdge[0][1]);
+            ctx.lineTo(sharedEdge[1][0], sharedEdge[1][1]);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+  }
+
+  // Draw state borders (thicker, on top)
+  ctx.strokeStyle = STYLE_CONSTANTS.stateBorderStroke;
+  ctx.lineWidth = STYLE_CONSTANTS.stateBorderWidth;
+  ctx.setLineDash(STYLE_CONSTANTS.stateBorderDashArray);
+
+  for (let cellId = 0; cellId < cells.i.length; cellId++) {
+    if (!isLand(cellId) || !cells.state[cellId]) continue;
+
+    const stateId = cells.state[cellId];
+    const neighbors = cells.c[cellId] || [];
+
+    for (const neibId of neighbors) {
+      if (neibId >= cells.i.length || !isLand(neibId)) continue;
+
+      const neibStateId = cells.state[neibId];
+
+      // State border
+      if (stateId !== neibStateId && stateId > neibStateId) {
+        const key = `state-${neibStateId}-${stateId}-${cellId}`;
+        if (!checked[key]) {
+          checked[key] = true;
+          const sharedEdge = findSharedEdge(cells.vCoords[cellId], neibId, pack);
+          if (sharedEdge) {
+            ctx.beginPath();
+            ctx.moveTo(sharedEdge[0][0], sharedEdge[0][1]);
+            ctx.lineTo(sharedEdge[1][0], sharedEdge[1][1]);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+  }
+
+  ctx.setLineDash([]); // Reset line dash
+  ctx.restore();
+}
+
+/**
+ * Find shared edge between two cells
+ * @param {Array<Array<number>>} polygon1 - First cell polygon coordinates
+ * @param {number} cellId2 - Second cell ID
+ * @param {Object} pack - Pack object
+ * @returns {Array<Array<number>>|null} Shared edge as [[x1,y1], [x2,y2]] or null
+ */
+function findSharedEdge(polygon1, cellId2, pack) {
+  if (!polygon1 || !Array.isArray(polygon1) || polygon1.length === 0) {
+    return null;
+  }
+
+  const polygon2 = pack.cells.vCoords?.[cellId2];
+  if (!polygon2 || !Array.isArray(polygon2) || polygon2.length === 0) {
+    return null;
+  }
+
+  // Find the closest edge between the two polygons
+  let minDist = Infinity;
+  let closestEdge = null;
+
+  for (let i = 0; i < polygon1.length; i++) {
+    const p1 = polygon1[i];
+    const p2 = polygon1[(i + 1) % polygon1.length];
+
+    // Find closest point in polygon2 to the midpoint of this edge
+    const midX = (p1[0] + p2[0]) / 2;
+    const midY = (p1[1] + p2[1]) / 2;
+
+    for (let j = 0; j < polygon2.length; j++) {
+      const q = polygon2[j];
+      const dist = Math.sqrt((midX - q[0]) ** 2 + (midY - q[1]) ** 2);
+
+      if (dist < minDist && dist < 5) {
+        minDist = dist;
+        closestEdge = [p1, p2];
+      }
+    }
+  }
+
+  return minDist < 5 ? closestEdge : null;
+}
+
+/**
+ * Draw burgs (cities/towns) (Phase 5.4)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} params - Rendering parameters
+ */
+function drawBurgs(ctx, { grid, pack, options }) {
+  if (!pack.burgs || !Array.isArray(pack.burgs) || pack.burgs.length === 0) {
+    return;
+  }
+
+  ctx.save();
+
+  for (const burg of pack.burgs) {
+    if (!burg || burg.removed || burg.x === undefined || burg.y === undefined) continue;
+
+    const isCapital = burg.capital;
+    const size = isCapital ? STYLE_CONSTANTS.burgCapitalSize : STYLE_CONSTANTS.burgTownSize;
+    const color = isCapital ? STYLE_CONSTANTS.burgCapitalColor : STYLE_CONSTANTS.burgTownColor;
+
+    // Draw burg circle
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(burg.x, burg.y, size, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw label if name exists (optional, for major burgs)
+    if (burg.name && (isCapital || size >= STYLE_CONSTANTS.burgTownSize * 1.5)) {
+      ctx.fillStyle = color;
+      ctx.font = `${size * 3}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      const labelY = burg.y - size * 1.5;
+      ctx.fillText(burg.name, burg.x, labelY);
+    }
+  }
+
+  ctx.restore();
 }
 
 /**
