@@ -40,16 +40,8 @@ const MIN_LAND_HEIGHT = 20;
  * @returns {Object} Isolines object keyed by type
  */
 function getIsolines(pack, getType, options = { fill: false, waterGap: false, halo: false }) {
-  // PERMANENTLY DISABLED: Isoline rendering has been replaced with polygon fallback
-  // This function exists only for backward compatibility with cached builds
-  // It always returns empty to trigger polygon fallback
-  console.warn('getIsolines called but disabled - using polygon fallback');
-  return {};
-  
-  // All code below is unreachable but kept for reference
-  // It will never execute due to the return statement above
   try {
-  const { cells, vertices } = pack;
+    const { cells, vertices } = pack;
     
     // Check if vertex graph is available (required for isoline rendering)
     if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
@@ -313,11 +305,46 @@ export function drawBiomesSVG(pack, biomesData) {
     const cells = pack.cells;
     const bodyPaths = [];
     
-    // ISOLINE RENDERING PERMANENTLY DISABLED - Always use polygon fallback
-    // The isoline rendering code has been removed to prevent errors from cached builds
-    // Polygon fallback works correctly and provides the same visual result
+    // Check if we have vertex graph and vertex indices for isoline rendering
+    const hasVertexGraph = pack.vertices && 
+                           pack.vertices.c && 
+                           Array.isArray(pack.vertices.c) && 
+                           pack.vertices.c.length > 0;
     
-    // Render polygons directly (polygon fallback)
+    const hasVertexIndices = cells.v && cells.v.length > 0 && 
+                             cells.v[0] && Array.isArray(cells.v[0]) && 
+                             cells.v[0].length > 0 && 
+                             typeof cells.v[0][0] === 'number';
+    
+    // Try isoline rendering first if available
+    if (hasVertexGraph && hasVertexIndices) {
+      try {
+        const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
+          fill: true,
+          waterGap: true,
+        });
+        
+        const hasIsolines = Object.keys(isolines).length > 0;
+        if (hasIsolines) {
+          Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+            const biomeIndex = parseInt(index);
+            if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
+              const color = biomesData.color[biomeIndex];
+              bodyPaths.push(getGappedFillPaths('biome', fill, waterGap, color, biomeIndex));
+            }
+          });
+          
+          // If we got isolines, return them
+          if (bodyPaths.length > 0) {
+            return bodyPaths.join('');
+          }
+        }
+      } catch (error) {
+        console.warn('Biome isoline rendering failed, using polygon fallback:', error.message);
+      }
+    }
+    
+    // Fallback: Render polygons directly (polygon fallback)
     // Group cells by biome and render as polygons
     const biomeGroups = {};
     for (let i = 0; i < cells.i.length; i++) {
@@ -400,11 +427,46 @@ export function drawStatesSVG(pack) {
     const { cells, states } = pack;
     const bodyPaths = [];
     
-    // ISOLINE RENDERING PERMANENTLY DISABLED - Always use polygon fallback
-    // The isoline rendering code has been removed to prevent errors from cached builds
-    // Polygon fallback works correctly and provides the same visual result
+    // Check if we have vertex graph and vertex indices for isoline rendering
+    const hasVertexGraph = pack.vertices && 
+                           pack.vertices.c && 
+                           Array.isArray(pack.vertices.c) && 
+                           pack.vertices.c.length > 0;
     
-    // Render polygons directly (polygon fallback)
+    const hasVertexIndices = cells.v && cells.v.length > 0 && 
+                             cells.v[0] && Array.isArray(cells.v[0]) && 
+                             cells.v[0].length > 0 && 
+                             typeof cells.v[0][0] === 'number';
+    
+    // Try isoline rendering first if available
+    if (hasVertexGraph && hasVertexIndices) {
+      try {
+        const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
+          fill: true,
+          waterGap: true,
+        });
+        
+        const hasIsolines = Object.keys(isolines).length > 0;
+        if (hasIsolines) {
+          Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+            const stateIndex = parseInt(index);
+            if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
+              const color = states[stateIndex].color || '#cccccc';
+              bodyPaths.push(getGappedFillPaths('state', fill, waterGap, color, stateIndex));
+            }
+          });
+          
+          // If we got isolines, return them
+          if (bodyPaths.length > 0) {
+            return bodyPaths.join('');
+          }
+        }
+      } catch (error) {
+        console.warn('State isoline rendering failed, using polygon fallback:', error.message);
+      }
+    }
+    
+    // Fallback: Render polygons directly (polygon fallback)
   // Group cells by state and render as polygons
   const stateGroups = {};
   for (let i = 0; i < cells.i.length; i++) {
@@ -471,16 +533,13 @@ export function drawBordersSVG(pack) {
 
   const { cells, vertices } = pack;
   
-  // TEMPORARY: Disable vertex graph border rendering due to sparse array issues
-  // TODO: Fix Voronoi class to ensure all vertex entries are populated
-  // For now, use simplified border rendering which works correctly
-  return drawBordersSVGSimplified(pack);
-  
   // Check if vertex graph is available for isoline border rendering
   const hasVertexGraph = vertices && 
                          vertices.c && 
                          Array.isArray(vertices.c) && 
-                         vertices.c.length > 0;
+                         vertices.c.length > 0 &&
+                         cells.v &&
+                         cells.v.length > 0;
   
   // If no vertex graph, use simplified border rendering
   if (!hasVertexGraph) {
