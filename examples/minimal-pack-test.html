@@ -105,7 +105,17 @@
             log(`pack.cells.vCoords isArray: ${Array.isArray(pack.cells.vCoords)}`, 'info');
             log(`pack.cells.vCoords length: ${pack.cells.vCoords.length}`, pack.cells.vCoords.length > 0 ? 'success' : 'error');
             if (pack.cells.vCoords.length > 0 && pack.cells.vCoords[0]) {
-              log(`pack.cells.vCoords[0] sample: ${JSON.stringify(pack.cells.vCoords[0].slice(0, 2))}`, 'info');
+              const firstCoords = pack.cells.vCoords[0];
+              log(`pack.cells.vCoords[0] length: ${firstCoords.length}`, firstCoords.length > 0 ? 'success' : 'error');
+              log(`pack.cells.vCoords[0] first element type: ${typeof firstCoords[0]}`, 'info');
+              log(`pack.cells.vCoords[0] first element isArray: ${Array.isArray(firstCoords[0])}`, 'info');
+              if (Array.isArray(firstCoords[0]) && firstCoords[0].length === 2) {
+                log(`pack.cells.vCoords[0][0]: [${firstCoords[0][0]}, ${firstCoords[0][1]}]`, 'success');
+                log(`pack.cells.vCoords[0] sample (first 3): ${JSON.stringify(firstCoords.slice(0, 3))}`, 'info');
+              } else {
+                log(`pack.cells.vCoords[0] first element: ${JSON.stringify(firstCoords[0])}`, 'error');
+                log(`pack.cells.vCoords[0] sample (first 3): ${JSON.stringify(firstCoords.slice(0, 3))}`, 'error');
+              }
             }
           }
         }

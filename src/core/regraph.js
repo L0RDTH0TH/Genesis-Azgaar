@@ -92,21 +92,24 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
 
   // STEP 1: Collect all unique vertices from all cell polygons
   // This creates a dense vertex array indexed sequentially (0, 1, 2, ...)
+  // IMPORTANT: Use cellPolygon() which returns array of [x,y] points, NOT renderCell() which returns SVG path string
   const uniqueVertices = new Map(); // key: "x,y" -> value: [x, y]
   
   for (let i = 0; i < newCells.p.length; i++) {
     try {
-      const cellPolygon = voronoiDiagram.renderCell(i);
+      const cellPolygon = voronoiDiagram.cellPolygon(i); // Returns Float64Array of coordinates [x0,y0,x1,y1,...]
       if (cellPolygon && cellPolygon.length > 0) {
-        // Round coordinates and collect unique vertices
-        cellPolygon.forEach(([x, y]) => {
-          const rx = Math.round(x);
-          const ry = Math.round(y);
-          const key = `${rx},${ry}`;
+        // cellPolygon is a flat array: [x0, y0, x1, y1, x2, y2, ...]
+        // Convert to array of [x,y] pairs and collect unique vertices
+        const polygonArray = Array.from(cellPolygon);
+        for (let j = 0; j < polygonArray.length; j += 2) {
+          const x = Math.round(polygonArray[j]);
+          const y = Math.round(polygonArray[j + 1]);
+          const key = `${x},${y}`;
           if (!uniqueVertices.has(key)) {
-            uniqueVertices.set(key, [rx, ry]);
+            uniqueVertices.set(key, [x, y]);
           }
-        });
+        }
       }
     } catch (error) {
       // Skip cells that fail to render
@@ -122,32 +125,56 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   });
   
   // STEP 3: Populate cell data (vCoords and v) from polygons
+  // IMPORTANT: Use cellPolygon() which returns array of [x,y] points, NOT renderCell() which returns SVG path string
   let vCoordsPopulated = 0;
   let vPopulated = 0;
   
   for (let i = 0; i < newCells.p.length; i++) {
     try {
-      const cellPolygon = voronoiDiagram.renderCell(i);
+      const cellPolygon = voronoiDiagram.cellPolygon(i); // Returns array of [x,y] pairs: [[x0,y0], [x1,y1], ...]
+      
+      // Debug: Log first cell to verify cellPolygon return type
+      if (i === 0 && typeof console !== 'undefined' && console.log) {
+        console.log('[regraph:debug] cellPolygon(0) type:', typeof cellPolygon);
+        console.log('[regraph:debug] cellPolygon(0) isArray:', Array.isArray(cellPolygon));
+        console.log('[regraph:debug] cellPolygon(0) constructor:', cellPolygon?.constructor?.name);
+        console.log('[regraph:debug] cellPolygon(0) length:', cellPolygon?.length);
+        console.log('[regraph:debug] cellPolygon(0)[0]:', cellPolygon?.[0]);
+        console.log('[regraph:debug] cellPolygon(0) sample:', JSON.stringify(Array.isArray(cellPolygon) ? cellPolygon.slice(0, 3) : cellPolygon?.substring?.(0, 30)));
+      }
+      
       if (cellPolygon && cellPolygon.length > 0) {
-        // Round polygon coordinates
-        const roundedPoly = Array.from(cellPolygon).map(([x, y]) => [Math.round(x), Math.round(y)]);
+        // cellPolygon returns array of [x,y] pairs directly - round coordinates
+        const roundedPoly = cellPolygon.map((point) => {
+          if (Array.isArray(point) && point.length >= 2) {
+            return [Math.round(point[0]), Math.round(point[1])];
+          }
+          return null;
+        }).filter(p => p !== null);
         
-        // Store polygon coordinates for canvas rendering
-        packCells.vCoords[i] = roundedPoly;
-        vCoordsPopulated++;
-        
-        // Map polygon coordinates to vertex indices for isoline rendering
-        packCells.v[i] = roundedPoly.map(p => {
-          const key = `${p[0]},${p[1]}`;
-          return verticesIndexMap.get(key);
-        }).filter(idx => idx !== undefined);
-        
-        if (packCells.v[i].length > 0) {
-          vPopulated++;
+        if (roundedPoly.length > 0) {
+          // Store polygon coordinates for canvas rendering
+          packCells.vCoords[i] = roundedPoly;
+          vCoordsPopulated++;
+          
+          // Map polygon coordinates to vertex indices for isoline rendering
+          packCells.v[i] = roundedPoly.map(p => {
+            const key = `${p[0]},${p[1]}`;
+            return verticesIndexMap.get(key);
+          }).filter(idx => idx !== undefined);
+          
+          if (packCells.v[i].length > 0) {
+            vPopulated++;
+          }
+          
+          // Calculate area from polygon
+          packCells.area[i] = Math.abs(d3.polygonArea(roundedPoly));
+        } else {
+          // Invalid polygon data
+          packCells.vCoords[i] = [];
+          packCells.v[i] = [];
+          packCells.area[i] = 1.0;
         }
-        
-        // Calculate area from polygon
-        packCells.area[i] = Math.abs(d3.polygonArea(roundedPoly));
       } else {
         // Degenerate cell - no polygon
         packCells.vCoords[i] = [];
