@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Random Map Generator Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .info {
+      margin-bottom: 20px;
+      color: #aaa;
+      font-size: 14px;
+      text-align: center;
+    }
+    #canvas {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      margin: 10px;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 10px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 4px;
+      min-height: 20px;
+    }
+    .status.info {
+      background: #2a2a2a;
+      color: #aaa;
+    }
+    .status.success {
+      background: #1a3a1a;
+      color: #4f4;
+    }
+    .status.error {
+      background: #3a1a1a;
+      color: #f44;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎲 Random Map Generator</h1>
+  <div class="info">Generate and render a random fantasy map using Azgaar Genesis</div>
+  
+  <canvas id="canvas" width="960" height="540"></canvas>
+  
+  <div>
+    <button id="generateBtn">Generate New Random Map</button>
+  </div>
+  
+  <div id="status" class="status info">Ready to generate...</div>
+
+  <script type="module">
+    // Import Delaunator (required peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library (use built bundle)
+    const { initGenerator, loadOptions, generateMap, getMapData, renderPreview } = 
+      await import('./dist/azgaar-genesis.esm.js');
+
+    const canvas = document.getElementById('canvas');
+    const generateBtn = document.getElementById('generateBtn');
+    const statusDiv = document.getElementById('status');
+
+    function updateStatus(message, type = 'info') {
+      statusDiv.textContent = message;
+      statusDiv.className = `status ${type}`;
+    }
+
+    let initialized = false;
+
+    function generateRandomMap() {
+      try {
+        generateBtn.disabled = true;
+        
+        // Initialize generator with canvas (only once)
+        if (!initialized) {
+          updateStatus('Initializing generator...', 'info');
+          initGenerator({ canvas });
+          initialized = true;
+        }
+        
+        // Generate random seed
+        const randomSeed = String(Math.floor(Math.random() * 1000000));
+        updateStatus(`Generating map with seed: ${randomSeed}...`, 'info');
+        
+        // Load options with random seed
+        loadOptions({
+          seed: randomSeed,
+          mapWidth: 960,
+          mapHeight: 540,
+          points: 4, // 10,000 cells
+          statesNumber: 20,
+          cultures: 15,
+        });
+        
+        updateStatus('Creating Voronoi diagram and generating heightmap...', 'info');
+        
+        // Generate map
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const generationTime = ((performance.now() - startTime) / 1000).toFixed(2);
+        
+        updateStatus('Rendering map to canvas...', 'info');
+        
+        // Render to canvas
+        renderPreview();
+        
+        const renderTime = ((performance.now() - startTime) / 1000).toFixed(2);
+        
+        // Get map data
+        const mapData = getMapData();
+        const cellCount = mapData.grid.cells.i.length;
+        
+        updateStatus(
+          `✅ Map generated successfully! Seed: ${data.seed} | Cells: ${cellCount} | Time: ${renderTime}s`,
+          'success'
+        );
+        
+        console.log('Map generated:', {
+          seed: data.seed,
+          cells: cellCount,
+          generationTime: `${generationTime}s`,
+          totalTime: `${renderTime}s`,
+          data: mapData
+        });
+        
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`, 'error');
+        console.error('Generation error:', error);
+      } finally {
+        generateBtn.disabled = false;
+      }
+    }
+
+    // Generate initial map on load
+    generateRandomMap();
+    
+    // Button click handler
+    generateBtn.addEventListener('click', generateRandomMap);
+  </script>
+</body>
+</html>

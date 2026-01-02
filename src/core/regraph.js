@@ -87,23 +87,23 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   }
 
   // Calculate cell neighbors and vertices from Voronoi
-  // Simplified: use Delaunay neighbors
   const delaunayObj = d3.Delaunay.from(allPoints);
   for (let i = 0; i < newCells.p.length; i++) {
     const neighbors = delaunayObj.neighbors(i).filter((n) => n < newCells.p.length);
     packCells.c[i] = neighbors;
     
-    // Get vertices for this cell (simplified)
+    // Get polygon vertices for this cell from Voronoi diagram
     const cellPolygon = Voronoi.renderCell(i);
-    if (cellPolygon) {
-      // Store vertex indices (simplified - would need proper mapping)
-      packCells.v[i] = [];
-    }
-    
-    // Calculate area
-    if (cellPolygon) {
+    if (cellPolygon && cellPolygon.length > 0) {
+      // Store polygon coordinates directly (array of [x, y] pairs)
+      // This can be used directly for Canvas rendering
+      packCells.v[i] = Array.from(cellPolygon).map(([x, y]) => [x, y]);
+      
+      // Calculate area from polygon
       packCells.area[i] = Math.abs(d3.polygonArea(cellPolygon));
     } else {
+      // Fallback: no polygon (shouldn't happen, but handle gracefully)
+      packCells.v[i] = [];
       packCells.area[i] = 1.0;
     }
   }
@@ -116,10 +116,13 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
     }
   }
 
-  // Create vertices structure (simplified)
+  // Create vertices structure
+  // For full rendering, polygon coordinates are stored directly in pack.cells.v[i]
+  // This vertices structure is kept for compatibility with existing code
+  // Note: For rendering, use pack.cells.v[i] directly instead of vertices
   const vertices = {
-    p: allPoints.slice(0, newCells.p.length), // Vertex positions
-    c: [], // Cells for each vertex (would need proper calculation)
+    p: allPoints.slice(0, newCells.p.length), // Keep for compatibility
+    c: [], // Cells for each vertex (not fully populated, kept for compatibility)
   };
 
   const pack = {

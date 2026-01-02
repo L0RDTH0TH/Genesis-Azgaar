@@ -59,6 +59,9 @@ const DEFAULT_OPTIONS = {
   showBurgPreview: true,
   villageMaxPopulation: 2000,
   pinNotes: false,
+  
+  // Rendering options (Phase 5)
+  fullRendering: false, // Use full Voronoi pack for polygon rendering (slower but better quality)
 
   // Units (for display/export)
   distanceScale: 3, // Scale factor for distance calculations
@@ -189,6 +192,8 @@ function validateOption(key, value) {
       return value === 'm' || value === 'ft' ? value : DEFAULT_OPTIONS.heightUnit;
     case 'temperatureScale':
       return value === '°C' || value === '°F' ? value : DEFAULT_OPTIONS.temperatureScale;
+    case 'fullRendering':
+      return value === true || value === false ? value : DEFAULT_OPTIONS.fullRendering;
     default:
       return value;
   }

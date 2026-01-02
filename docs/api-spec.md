@@ -2,12 +2,13 @@
 
 ## Public API Functions
 
-### `initGenerator({ canvas })`
+### `initGenerator({ canvas, container })`
 
-Initializes the generator state. Stores optional canvas reference for rendering. Throws `InitializationError` if already initialized.
+Initializes the generator state. Stores optional canvas reference for canvas rendering or container for SVG rendering. Throws `InitializationError` if already initialized.
 
 **Parameters:**
-- `canvas` (HTMLCanvasElement | null): Optional canvas element for rendering previews
+- `canvas` (HTMLCanvasElement | null): Optional canvas element for canvas rendering previews
+- `container` (HTMLElement | null): Optional container element for SVG rendering
 
 **Returns:** `void`
 
@@ -17,7 +18,17 @@ Initializes the generator state. Stores optional canvas reference for rendering.
 ```javascript
 import { initGenerator } from 'azgaar-genesis';
 
+// For canvas rendering
 initGenerator({ canvas: document.getElementById('map') });
+
+// For SVG rendering
+initGenerator({ container: document.getElementById('svgContainer') });
+
+// Both can be provided
+initGenerator({ 
+  canvas: document.getElementById('map'),
+  container: document.getElementById('svgContainer')
+});
 ```
 
 ---
@@ -92,6 +103,38 @@ console.log(JSON.stringify(json, null, 2));
 
 ---
 
+### `loadMapData(jsonData)`
+
+Loads map data from JSON (matching `getMapData()` output structure). Allows data-driven regeneration/display without re-running generation. After loading, you can call `renderPreviewSVG()` or `renderPreview()` to display the loaded data, or use the seed from loaded data to regenerate.
+
+**Parameters:**
+- `jsonData` (Object): JSON object matching `getMapData()` output structure (must contain `pack` and `grid` objects)
+
+**Returns:** `void`
+
+**Throws:** 
+- `InitializationError` if `initGenerator()` not called
+- `InvalidOptionError` if JSON structure is invalid (missing required fields)
+
+**Example:**
+```javascript
+import { loadMapData, renderPreviewSVG } from 'azgaar-genesis';
+
+// Load previously exported JSON
+const savedJson = JSON.parse(fs.readFileSync('map.json', 'utf8'));
+loadMapData(savedJson);
+
+// Render without regeneration
+renderPreviewSVG();
+
+// Or regenerate with same seed
+loadOptions({ seed: savedJson.seed });
+generateMap();
+renderPreviewSVG();
+```
+
+---
+
 ### `renderPreview()`
 
 Renders stored data to the initialized canvas. No-op if no canvas was provided during initialization.
@@ -111,6 +154,49 @@ import { renderPreview } from 'azgaar-genesis';
 
 renderPreview();
 // Map is now rendered to the canvas element
+```
+
+---
+
+### `renderPreviewSVG(options)`
+
+Renders stored map data to SVG. Returns SVG string if no container provided, or appends to container if provided. SVG rendering includes all layers: ocean, landmass, features (lakes/islands), biomes, states, borders, rivers, and burgs.
+
+**Parameters:**
+- `options` (Object, optional): Rendering options
+  - `width` (number, optional): SVG width (defaults to map width or container width)
+  - `height` (number, optional): SVG height (defaults to map height or container height)
+  - `container` (HTMLElement, optional): Container element to append SVG to (overrides initGenerator container)
+
+**Returns:** `string | null` - SVG string if no container provided, null if appended to container
+
+**Throws:** 
+- `InitializationError` if `initGenerator()` not called
+- `NoDataError` if `generateMap()` not called yet
+- `GenerationError` if SVG rendering fails
+
+**Example:**
+```javascript
+import { renderPreviewSVG } from 'azgaar-genesis';
+
+// Initialize with container for SVG
+const container = document.getElementById('svgContainer');
+initGenerator({ container });
+
+// Generate and render
+generateMap();
+renderPreviewSVG(); // Automatically appends to container
+
+// Or get SVG string directly
+const svgString = renderPreviewSVG({ width: 1200, height: 800 });
+document.body.insertAdjacentHTML('beforeend', svgString);
+
+// Override container at render time
+renderPreviewSVG({ 
+  container: document.getElementById('otherContainer'),
+  width: 1920,
+  height: 1080
+});
 ```
 
 ---
@@ -245,7 +331,7 @@ Thrown when `loadOptions()` receives invalid parameter values (e.g., negative di
 Thrown when map generation fails (e.g., invalid internal state, generation algorithm error).
 
 ### `NoDataError`
-Thrown when `getMapData()` or `renderPreview()` is called before `generateMap()`.
+Thrown when `getMapData()`, `renderPreview()`, or `renderPreviewSVG()` is called before `generateMap()`.
 
 ### `NoCanvasError`
 Thrown when `renderPreview()` is called but no canvas was provided during initialization (only if rendering is explicitly required).
@@ -260,11 +346,13 @@ import {
   loadOptions, 
   generateMap, 
   getMapData, 
-  renderPreview 
+  renderPreview,
+  renderPreviewSVG
 } from 'azgaar-genesis';
 
-// 1. Initialize (optional canvas for previews)
+// 1. Initialize (optional canvas for canvas previews or container for SVG)
 initGenerator({ canvas: document.getElementById('map') });
+// Or for SVG: initGenerator({ container: document.getElementById('svgContainer') });
 
 // 2. Load options (from Genesis Mythos JSON + clamping)
 loadOptions({
@@ -284,6 +372,9 @@ const json = getMapData();
 
 // 5. Render preview (if canvas provided)
 renderPreview();
+
+// Or render to SVG (returns string or appends to container)
+const svgString = renderPreviewSVG({ width: 1920, height: 1080 });
 ```
 
 ---
@@ -296,6 +387,7 @@ The generator uses a singleton pattern for internal state:
 {
   initialized: boolean,
   canvas: HTMLCanvasElement | null,
+  container: HTMLElement | null,
   options: Options,
   data: {
     grid: Grid,

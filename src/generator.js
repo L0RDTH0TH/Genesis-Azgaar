@@ -37,6 +37,7 @@ import {
   generateReligions,
   generateEmblems,
 } from './core/index.js';
+import { createPackFromGrid } from './core/regraph.js';
 import { renderMap } from './rendering/canvas.js';
 import { renderMapSVG } from './rendering/svg.js';
 
@@ -52,14 +53,13 @@ let state = {
 };
 
 /**
- * Create basic pack structure from grid (simplified reGraph)
- * For Phase 2.10, this creates a basic pack that mirrors grid structure
- * Full reGraph with refined Voronoi will be implemented in later phases
+ * Create simplified pack structure from grid (mirrors grid structure)
+ * This is a fast pack creation for headless/data-only use cases
  * @param {Object} grid - Grid object
  * @param {Object} options - Generation options
  * @returns {Object} Pack object
  */
-function createBasicPack(grid, options) {
+function createSimplifiedPack(grid, options) {
   const { cells: gridCells, points, vertices } = grid;
   
   // Create pack cells structure (simplified - mirrors grid for now)
@@ -144,15 +144,25 @@ function generateMapInternal(options, DelaunatorClass) {
   const precipitation = generatePrecipitation({ grid, options, rng, mapCoordinates });
   grid.cells.prec = precipitation;
 
-  // Phase 7: Create pack from grid (simplified reGraph)
-  // Note: Full reGraph with refined Voronoi will be implemented in later phases
-  let pack = createBasicPack(grid, options);
+  // Phase 7: Create pack from grid
+  // Use full Voronoi pack if fullRendering is enabled or if canvas is provided
+  const useFullPack = options.fullRendering === true || state.canvas !== null;
+  let pack;
   
-  // Ensure pack has data from grid
-  pack.cells.h = grid.cells.h;
-  // Ensure pack.cells.g maps pack cells to grid cells (for simplified version, 1:1 mapping)
-  for (let i = 0; i < pack.cells.i.length; i++) {
-    pack.cells.g[i] = i;
+  if (useFullPack) {
+    // Full Voronoi pack with polygon vertices (for rendering)
+    pack = createPackFromGrid({ grid, options, DelaunatorClass });
+    // Ensure pack has height data from grid (pack may have fewer cells than grid)
+    // Height data will be mapped via pack.cells.g (grid cell index)
+  } else {
+    // Simplified pack (faster, for headless/data-only use)
+    pack = createSimplifiedPack(grid, options);
+    // Ensure pack has data from grid
+    pack.cells.h = grid.cells.h;
+    // Ensure pack.cells.g maps pack cells to grid cells (for simplified version, 1:1 mapping)
+    for (let i = 0; i < pack.cells.i.length; i++) {
+      pack.cells.g[i] = i;
+    }
   }
 
   // Phase 8: River generation

@@ -735,6 +735,41 @@ Ensure your Godot WebView (godot_wry) is configured to:
 
 See [`examples/godot-demo.html`](examples/godot-demo.html) for a minimal working example.
 
+## Godot Integration
+
+The library is ready for integration into Genesis Mythos Godot project's WebView.
+
+### Quick Integration
+
+1. **Copy bundle files** to `res://assets/ui_web/js/azgaar/`
+2. **Add canvas and status elements** to your HTML
+3. **Include Alpine.js integration script**
+4. **Connect GDScript message handler**
+
+### Complete Guide
+
+See **[`docs/godot-integration-guide.md`](docs/godot-integration-guide.md)** for:
+- Step-by-step integration instructions
+- Complete code examples
+- PostMessage protocol documentation
+- Troubleshooting guide
+
+### Integration Examples
+
+Ready-to-use integration examples are available in:
+- **[`integration-examples/godot-webview/`](integration-examples/godot-webview/)**
+  - `godot-webview-demo.html` - Complete working demo
+  - `alpine-integration.js` - Alpine.js component (copy to project)
+  - `postmessage-protocol.md` - Message format documentation
+  - `gdscript-example.gd` - GDScript reference implementation
+
+### Status
+
+✅ **Phase 4 Preparation Complete** - All integration assets ready in fork repository  
+⏳ **Awaiting Deployment** - Ready for manual deployment to Godot project
+
+---
+
 ## Troubleshooting
 
 ### Common Errors

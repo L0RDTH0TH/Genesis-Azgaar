@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Godot WebView Integration Demo</title>
+  
+  <!-- Alpine.js (include in your actual Godot project) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin-bottom: 10px;
+      font-size: 20px;
+    }
+    .controls {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 4px;
+    }
+    .control-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+      color: #ccc;
+    }
+    input[type="number"], input[type="text"] {
+      width: 150px;
+      padding: 6px 10px;
+      background: #333;
+      border: 1px solid #555;
+      border-radius: 3px;
+      color: #fff;
+      font-size: 14px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 14px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: #2196F3;
+    }
+    button.secondary:hover {
+      background: #0b7dda;
+    }
+    #azgaar-preview {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      margin: 20px 0;
+    }
+    #azgaar-status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .status-info {
+      background: #2a2a2a;
+      color: #aaa;
+    }
+    .status-success {
+      background: #1a3a1a;
+      color: #4f4;
+    }
+    .status-error {
+      background: #3a1a1a;
+      color: #f44;
+    }
+    .info-box {
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 4px;
+      margin-top: 20px;
+      font-size: 12px;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <div class="container" x-data="azgaarGenerator()" x-init="init()">
+    <h1>Azgaar Genesis - Godot WebView Integration Demo</h1>
+    
+    <div class="controls">
+      <div class="control-group">
+        <label>Seed (leave empty for random):</label>
+        <input type="text" x-model="wizardSeed" placeholder="Random">
+      </div>
+      
+      <div class="control-group">
+        <label>Map Width:</label>
+        <input type="number" x-model="wizardWidth" min="400" max="4000" step="100">
+      </div>
+      
+      <div class="control-group">
+        <label>Map Height:</label>
+        <input type="number" x-model="wizardHeight" min="300" max="3000" step="100">
+      </div>
+      
+      <div class="control-group">
+        <label>Cell Density (1=1K, 2=2K, 3=5K, 4=10K, 5=20K):</label>
+        <input type="number" x-model="wizardPoints" min="1" max="5">
+      </div>
+      
+      <div class="control-group">
+        <button @click="generateMap()" :disabled="generating || !azgaarReady">
+          Generate Map
+        </button>
+        <button class="secondary" @click="resetGenerator()" :disabled="generating">
+          Reset
+        </button>
+      </div>
+    </div>
+    
+    <canvas id="azgaar-preview" :width="wizardWidth" :height="wizardHeight"></canvas>
+    
+    <div id="azgaar-status" :class="statusClass" x-text="status" x-show="status"></div>
+    <div x-show="error" x-text="'Error: ' + error" class="status-error" style="padding: 10px; margin: 10px 0; border-radius: 4px;"></div>
+    
+    <div class="info-box">
+      <strong>Integration Notes:</strong><br>
+      This is a complete, self-contained demo ready for integration into Godot WebView.<br>
+      See <code>alpine-integration.js</code> for the Alpine.js component code.<br>
+      See <code>postmessage-protocol.md</code> for the message format documentation.<br>
+      See <code>docs/godot-integration-guide.md</code> for full integration instructions.
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * =============================================================================
+     * Godot WebView Integration Demo
+     * =============================================================================
+     * 
+     * This is a complete, self-contained example ready for integration into
+     * Genesis Mythos Godot project's world_builder.html WebView.
+     * 
+     * INTEGRATION STEPS:
+     * 1. Copy azgaar-genesis.esm.js from dist/ to res://assets/ui_web/js/azgaar/
+     * 2. Add this HTML structure to your world_builder.html:
+     *    - Canvas element: <canvas id="azgaar-preview">
+     *    - Status div: <div id="azgaar-status">
+     *    - Include Alpine.js (if not already included)
+     * 3. Include this script tag (with proper path):
+     *    <script type="module" src="./js/azgaar/alpine-integration.js"></script>
+     * 4. Adapt wizard form inputs to match your existing UI
+     * 
+     * LIBRARY LOADING OPTIONS:
+     * - Option A (Recommended): Local file from res://assets/ui_web/js/azgaar/
+     *   import { ... } from './js/azgaar/azgaar-genesis.esm.js';
+     * 
+     * - Option B: CDN (for testing only, not recommended for production)
+     *   Not available - use local file
+     * 
+     * DELAUNATOR DEPENDENCY:
+     * - Uses CDN in this demo: https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm
+     * - For production: Download and place in res://assets/ui_web/js/azgaar/delaunator.esm.js
+     *   OR continue using CDN if network access is available in WebView
+     */
+
+    // Import Delaunator (required peer dependency)
+    // In production, use local file or CDN based on your setup
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library
+    // IMPORTANT: In your actual Godot project, change this path to:
+    // './js/azgaar/azgaar-genesis.esm.js' (relative to world_builder.html location)
+    // For this demo, we use a dev server path - you'll need to adapt this
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js'  // Dev server (for testing this demo)
+      : './js/azgaar/azgaar-genesis.esm.js';  // Production path in Godot project
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData, 
+      renderPreview 
+    } from libraryPath;
+
+    /**
+     * Alpine.js component for Azgaar map generation
+     * This function defines the Alpine.js component state and methods
+     * Copy this to your actual project's JavaScript file or inline in HTML
+     */
+    window.azgaarGenerator = function() {
+      return {
+        // State
+        azgaarReady: false,
+        generating: false,
+        previewCanvas: null,
+        mapData: null,
+        status: '',
+        error: null,
+        
+        // Wizard form data (adapt these to match your existing form fields)
+        wizardSeed: '',
+        wizardWidth: 800,
+        wizardHeight: 600,
+        wizardPoints: 4,  // Maps to ~10,000 cells
+        wizardStates: 18,
+        wizardCultures: 12,
+        
+        // Computed status class for styling
+        get statusClass() {
+          if (this.error) return 'status-error';
+          if (this.status.includes('Complete') || this.status.includes('Ready')) return 'status-success';
+          return 'status-info';
+        },
+        
+        /**
+         * Initialize - called when component mounts
+         */
+        init() {
+          try {
+            this.previewCanvas = document.getElementById('azgaar-preview');
+            if (!this.previewCanvas) {
+              this.error = 'Canvas element not found (id="azgaar-preview")';
+              return;
+            }
+            
+            // Initialize the Azgaar generator
+            initGenerator({ canvas: this.previewCanvas });
+            this.azgaarReady = true;
+            this.status = 'Ready to generate';
+            
+            console.log('Azgaar generator initialized successfully');
+          } catch (err) {
+            this.error = 'Failed to initialize: ' + err.message;
+            console.error('Initialization error:', err);
+          }
+        },
+        
+        /**
+         * Generate map - main generation function
+         */
+        async generateMap() {
+          if (!this.azgaarReady) {
+            this.error = 'Generator not ready';
+            return;
+          }
+          
+          this.generating = true;
+          this.status = 'Initializing...';
+          this.error = null;
+          
+          try {
+            // Collect options from wizard form
+            // Generate random seed if not provided
+            const seed = this.wizardSeed.trim() || String(Math.floor(Math.random() * 1000000));
+            
+            const options = {
+              seed: seed,
+              mapWidth: this.wizardWidth,
+              mapHeight: this.wizardHeight,
+              points: this.wizardPoints,  // Maps to cellsDesired via options.js
+              statesNumber: this.wizardStates,
+              cultures: this.wizardCultures,
+              fullRendering: true, // Phase 5: Enable full Voronoi pack for polygon rendering
+            };
+            
+            // Load and validate options
+            this.status = 'Loading options...';
+            loadOptions(options);
+            
+            // Generate map
+            this.status = 'Generating map (this may take a few seconds)...';
+            const startTime = performance.now();
+            const data = generateMap(Delaunator);
+            const generateTime = performance.now() - startTime;
+            
+            // Render preview
+            this.status = 'Rendering preview...';
+            renderPreview();
+            
+            // Export JSON data
+            this.status = 'Exporting data...';
+            this.mapData = getMapData();
+            
+            // Send to Godot via postMessage
+            // This is the standard postMessage API - works with most WebView implementations
+            this.status = 'Sending to Godot...';
+            
+            // Try multiple postMessage methods for compatibility
+            const message = {
+              type: 'azgaar_data',
+              payload: this.mapData
+            };
+            
+            // Method 1: Standard window.parent.postMessage (most common)
+            if (window.parent && window.parent !== window) {
+              window.parent.postMessage(message, '*');
+              console.log('Sent message via window.parent.postMessage');
+            }
+            
+            // Method 2: window.webkit.messageHandlers (some WebView implementations)
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.godot) {
+              window.webkit.messageHandlers.godot.postMessage(JSON.stringify(message));
+              console.log('Sent message via window.webkit.messageHandlers');
+            }
+            
+            // Method 3: window.godot (if exposed by WebView)
+            if (window.godot && typeof window.godot.postMessage === 'function') {
+              window.godot.postMessage(message);
+              console.log('Sent message via window.godot.postMessage');
+            }
+            
+            // Log for debugging (remove in production)
+            console.log('Map generated successfully:', {
+              seed: data.seed,
+              cells: data.grid.cells.i.length,
+              generationTime: `${generateTime.toFixed(0)}ms`,
+              jsonSize: JSON.stringify(this.mapData).length
+            });
+            
+            this.status = `Complete! Generated in ${generateTime.toFixed(0)}ms (seed: ${data.seed})`;
+            this.generating = false;
+            
+          } catch (err) {
+            this.error = err.message || 'Generation failed';
+            this.status = 'Error occurred';
+            this.generating = false;
+            console.error('Azgaar generation error:', err);
+            
+            // Send error to Godot
+            const errorMessage = {
+              type: 'azgaar_error',
+              error: this.error
+            };
+            
+            if (window.parent && window.parent !== window) {
+              window.parent.postMessage(errorMessage, '*');
+            }
+          }
+        },
+        
+        /**
+         * Reset generator state
+         */
+        resetGenerator() {
+          this.mapData = null;
+          this.status = 'Ready to generate';
+          this.error = null;
+          
+          // Clear canvas
+          if (this.previewCanvas) {
+            const ctx = this.previewCanvas.getContext('2d');
+            ctx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+          }
+        }
+      };
+    };
+    
+    // Make azgaarGenerator available globally for Alpine.js
+    // In your actual project, ensure Alpine.js is loaded before this script
+    console.log('Azgaar Alpine.js component loaded');
+  </script>
+</body>
+</html>
