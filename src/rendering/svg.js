@@ -43,6 +43,11 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
   try {
     const { cells, vertices } = pack;
     
+    // TEMPORARY: Disable isoline rendering due to sparse array issues
+    // TODO: Fix Voronoi class to ensure all vertex entries are populated
+    // For now, return empty to trigger polygon fallback which works correctly
+    return {};
+    
     // Check if vertex graph is available (required for isoline rendering)
     if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
       // Return empty isolines to trigger polygon fallback
@@ -312,8 +317,13 @@ export function drawBiomesSVG(pack, biomesData) {
                        !Array.isArray(firstCellV[0]);
   }
   
+  // TEMPORARY: Disable isoline rendering due to sparse array issues
+  // TODO: Fix Voronoi class to ensure all vertex entries are populated
+  // For now, skip isolines and use polygon fallback which works correctly
+  const useIsolines = false; // Set to false to force polygon fallback
+  
   // Try isolines first (requires full vertex graph and vertex indices)
-  if (hasVertexGraph && hasVertexIndices) {
+  if (useIsolines && hasVertexGraph && hasVertexIndices) {
     try {
       const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
         fill: true,
@@ -421,8 +431,11 @@ export function drawStatesSVG(pack) {
                        !Array.isArray(firstCellV[0]);
   }
   
+  // TEMPORARY: Disable isoline rendering due to sparse array issues
+  const useIsolines = false; // Set to false to force polygon fallback
+  
   // Try isolines first (requires full vertex graph and vertex indices)
-  if (hasVertexGraph && hasVertexIndices) {
+  if (useIsolines && hasVertexGraph && hasVertexIndices) {
     try {
       const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
         fill: true,
@@ -509,6 +522,11 @@ export function drawBordersSVG(pack) {
   }
 
   const { cells, vertices } = pack;
+  
+  // TEMPORARY: Disable vertex graph border rendering due to sparse array issues
+  // TODO: Fix Voronoi class to ensure all vertex entries are populated
+  // For now, use simplified border rendering which works correctly
+  return drawBordersSVGSimplified(pack);
   
   // Check if vertex graph is available for isoline border rendering
   const hasVertexGraph = vertices && 

@@ -125,11 +125,29 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
 
   // Create vertices structure from voronoiGraph
   // Round coordinates for optimization
+  // Ensure all arrays are dense (no undefined entries)
+  // Find the maximum vertex index that exists
+  let maxVertexIndex = -1;
+  for (let i = 0; i < voronoiGraph.vertices.p.length; i++) {
+    if (voronoiGraph.vertices.p[i] !== undefined) {
+      maxVertexIndex = Math.max(maxVertexIndex, i);
+    }
+  }
+  
   const vertices = {
-    p: voronoiGraph.vertices.p.map(([x, y]) => [Math.round(x), Math.round(y)]), // Vertex coordinates (rounded)
-    v: voronoiGraph.vertices.v, // Adjacent vertices
-    c: voronoiGraph.vertices.c, // Adjacent cells
+    p: [], // Vertex coordinates (rounded)
+    v: [], // Adjacent vertices
+    c: [], // Adjacent cells
   };
+  
+  // Populate vertices arrays, ensuring all indices are defined
+  for (let i = 0; i <= maxVertexIndex; i++) {
+    vertices.p[i] = voronoiGraph.vertices.p[i] 
+      ? [Math.round(voronoiGraph.vertices.p[i][0]), Math.round(voronoiGraph.vertices.p[i][1])]
+      : [0, 0]; // Fallback for missing entries
+    vertices.v[i] = voronoiGraph.vertices.v[i] || []; // Adjacent vertices
+    vertices.c[i] = voronoiGraph.vertices.c[i] || []; // Adjacent cells
+  }
 
   const pack = {
     cells: packCells,
