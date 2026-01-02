@@ -24,11 +24,18 @@
       font-size: 14px;
       text-align: center;
     }
-    #canvas {
+    #svgContainer {
       border: 2px solid #444;
       background: #000;
       display: block;
       margin: 10px;
+      width: 960px;
+      height: 540px;
+    }
+    #svgContainer svg {
+      display: block;
+      width: 100%;
+      height: 100%;
     }
     button {
       padding: 12px 24px;
@@ -68,10 +75,10 @@
   </style>
 </head>
 <body>
-  <h1>🎲 Random Map Generator</h1>
-  <div class="info">Generate and render a random fantasy map using Azgaar Genesis</div>
+  <h1>🎲 Random Map Generator (SVG)</h1>
+  <div class="info">Generate and render a random fantasy map using Azgaar Genesis (SVG rendering)</div>
   
-  <canvas id="canvas" width="960" height="540"></canvas>
+  <div id="svgContainer"></div>
   
   <div>
     <button id="generateBtn">Generate New Random Map</button>
@@ -79,15 +86,24 @@
   
   <div id="status" class="status info">Ready to generate...</div>
 
+  <!-- Import map to resolve bare module specifiers -->
+  <script type="importmap">
+    {
+      "imports": {
+        "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm"
+      }
+    }
+  </script>
+
   <script type="module">
     // Import Delaunator (required peer dependency)
-    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    import Delaunator from 'delaunator';
     
     // Import the library (use built bundle)
-    const { initGenerator, loadOptions, generateMap, getMapData, renderPreview } = 
+    const { initGenerator, loadOptions, generateMap, getMapData, renderPreviewSVG } = 
       await import('./dist/azgaar-genesis.esm.js');
 
-    const canvas = document.getElementById('canvas');
+    const svgContainer = document.getElementById('svgContainer');
     const generateBtn = document.getElementById('generateBtn');
     const statusDiv = document.getElementById('status');
 
@@ -102,10 +118,10 @@
       try {
         generateBtn.disabled = true;
         
-        // Initialize generator with canvas (only once)
+        // Initialize generator with SVG container (only once)
         if (!initialized) {
           updateStatus('Initializing generator...', 'info');
-          initGenerator({ canvas });
+          initGenerator({ container: svgContainer });
           initialized = true;
         }
         
@@ -118,7 +134,7 @@
           seed: randomSeed,
           mapWidth: 960,
           mapHeight: 540,
-          points: 4, // 10,000 cells
+          points: 4, // Maps to 10000 cells (1=1K, 2=2K, 3=5K, 4=10K, etc.)
           statesNumber: 20,
           cultures: 15,
         });
@@ -130,10 +146,14 @@
         const data = generateMap(Delaunator);
         const generationTime = ((performance.now() - startTime) / 1000).toFixed(2);
         
-        updateStatus('Rendering map to canvas...', 'info');
+        updateStatus('Rendering map to SVG...', 'info');
         
-        // Render to canvas
-        renderPreview();
+        // Render to SVG
+        renderPreviewSVG({
+          width: 960,
+          height: 540,
+          container: svgContainer
+        });
         
         const renderTime = ((performance.now() - startTime) / 1000).toFixed(2);
         

@@ -54,14 +54,10 @@ class Voronoi {
   }
 
   trianglesAdjacentToTriangle(t) {
-    let triangles = [];
-    for (let edge of this.edgesOfTriangle(t)) {
-      let opposite = this.delaunay.halfedges[edge];
-      if (opposite !== -1) {
-        triangles.push(this.triangleOfEdge(opposite));
-      }
-    }
-    return triangles;
+    return this.edgesOfTriangle(t).map(edge => {
+      const opposite = this.delaunay.halfedges[edge];
+      return opposite === -1 ? undefined : this.triangleOfEdge(opposite);
+    }).filter(t => t !== undefined);
   }
 
   edgesAroundPoint(start) {

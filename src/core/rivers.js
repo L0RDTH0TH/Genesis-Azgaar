@@ -50,7 +50,8 @@ function resolveDepressions(h, pack, maxIterations = 250) {
 
     for (const i of land) {
       if (!cells.c[i] || cells.c[i].length === 0) continue;
-      const minHeight = Math.min(...cells.c[i].map((c) => h[c]));
+      const neighbors = Array.isArray(cells.c[i]) ? cells.c[i] : Array.from(cells.c[i]);
+      const minHeight = Math.min(...neighbors.map((c) => h[c]));
       if (minHeight >= 100 || h[i] > minHeight) continue;
 
       depressions++;
@@ -158,8 +159,18 @@ export function generateRivers({
       }
 
       // Find downhill cell
-      if (!cells.c[i] || cells.c[i].length === 0) return;
-      const min = cells.c[i].sort((a, b) => h[a] - h[b])[0];
+      if (!cells.c || !cells.c[i]) return;
+      // Ensure cells.c[i] is an array (convert TypedArray if needed)
+      let neighbors = cells.c[i];
+      if (!Array.isArray(neighbors)) {
+        if (neighbors && typeof neighbors.length === 'number') {
+          neighbors = Array.from(neighbors);
+        } else {
+          return; // Invalid neighbors data
+        }
+      }
+      if (neighbors.length === 0) return;
+      const min = neighbors.sort((a, b) => h[a] - h[b])[0];
 
       // Cell is depressed (no downhill)
       if (h[i] <= h[min]) return;
@@ -273,7 +284,8 @@ export function generateRivers({
       if (!cells.conf[i]) continue;
       if (!cells.c[i] || cells.c[i].length === 0) continue;
 
-      const sortedInflux = cells.c[i]
+      const neighbors = Array.isArray(cells.c[i]) ? cells.c[i] : Array.from(cells.c[i]);
+      const sortedInflux = neighbors
         .filter((c) => cells.r[c] && h[c] > h[i])
         .map((c) => cells.fl[c])
         .sort((a, b) => b - a);
@@ -289,7 +301,8 @@ export function generateRivers({
       if (!cells.fl[i]) continue;
       if (!cells.c[i] || cells.c[i].length === 0) continue;
 
-      const higherCells = cells.c[i].filter((c) => cells.h[c] > cells.h[i]);
+      const neighbors = Array.isArray(cells.c[i]) ? cells.c[i] : Array.from(cells.c[i]);
+      const higherCells = neighbors.filter((c) => cells.h[c] > cells.h[i]);
       if (higherCells.length === 0) continue;
 
       const higherFlux = higherCells.reduce((acc, c) => acc + cells.fl[c], 0) / higherCells.length;

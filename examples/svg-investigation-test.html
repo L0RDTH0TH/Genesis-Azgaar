@@ -103,7 +103,7 @@
 
     testBtn.addEventListener('click', async () => {
       clearResults();
-      log('Starting SVG rendering test...', 'info');
+      log('Starting SVG rendering test with full vertex graph...', 'info');
       
       try {
         // Initialize
@@ -111,15 +111,16 @@
         log('✓ Generator initialized', 'success');
         
         // Load options
+        const seed = String(Math.floor(Math.random() * 1000000));
         loadOptions({
-          seed: String(Math.floor(Math.random() * 1000000)),
+          seed: seed,
           mapWidth: 960,
           mapHeight: 540,
           points: 4, // 10,000 cells
           statesNumber: 20,
           cultures: 15,
         });
-        log('✓ Options loaded', 'success');
+        log(`✓ Options loaded (seed: ${seed})`, 'success');
         
         // Generate map
         log('Generating map...', 'info');
@@ -134,15 +135,31 @@
         log(`vertices.c length: ${pack.vertices?.c?.length || 0}`, 
             pack.vertices?.c?.length > 0 ? 'success' : 'error');
         log(`vertices.p length: ${pack.vertices?.p?.length || 0}`, 'info');
-        log(`vertices.v length: ${pack.vertices?.v?.length || 0}`, 'info');
+        log(`vertices.v length: ${pack.vertices?.v?.length || 0}`, 
+            pack.vertices?.v?.length > 0 ? 'success' : 'error');
         
-        // Check cells.v structure
+        // Check cells.v structure (should be vertex indices now)
         const firstCellV = pack.cells?.v?.[0];
         if (firstCellV) {
           const isCoordinates = Array.isArray(firstCellV[0]) && firstCellV[0].length === 2;
-          log(`cells.v[0] type: ${isCoordinates ? 'POLYGON COORDINATES' : 'VERTEX INDICES'}`, 
+          log(`cells.v[0] type: ${isCoordinates ? 'POLYGON COORDINATES (ERROR!)' : 'VERTEX INDICES (CORRECT)'}`, 
               isCoordinates ? 'error' : 'success');
           log(`cells.v[0] sample: ${JSON.stringify(firstCellV.slice(0, 3))}`, 'info');
+        }
+        
+        // Check cells.vCoords (should be polygon coordinates)
+        const firstCellVCoords = pack.cells?.vCoords?.[0];
+        if (firstCellVCoords) {
+          log(`cells.vCoords[0] type: POLYGON COORDINATES (CORRECT)`, 'success');
+          log(`cells.vCoords[0] sample: ${JSON.stringify(firstCellVCoords.slice(0, 2))}`, 'info');
+        } else {
+          log('⚠ cells.vCoords not found (may cause canvas rendering issues)', 'error');
+        }
+        
+        // Check vertex graph connectivity
+        if (pack.vertices?.c && pack.vertices.c.length > 0) {
+          const nonEmpty = pack.vertices.c.filter(v => v && v.length > 0).length;
+          log(`vertices.c non-empty: ${nonEmpty}/${pack.vertices.c.length}`, 'info');
         }
         
         // Attempt SVG rendering
@@ -160,6 +177,13 @@
         const svg = svgContainer.querySelector('svg');
         if (svg) {
           log(`✓ SVG element created with ${svg.children.length} children`, 'success');
+          // Check for key layers
+          const hasBiomes = svg.querySelector('#biomes');
+          const hasStates = svg.querySelector('#states');
+          const hasBorders = svg.querySelector('#borders');
+          log(`  - Biomes layer: ${hasBiomes ? '✓' : '✗'}`, hasBiomes ? 'success' : 'error');
+          log(`  - States layer: ${hasStates ? '✓' : '✗'}`, hasStates ? 'success' : 'error');
+          log(`  - Borders layer: ${hasBorders ? '✓' : '✗'}`, hasBorders ? 'success' : 'error');
         } else {
           log('✗ No SVG element found in container', 'error');
         }

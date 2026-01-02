@@ -4,6 +4,10 @@ export default defineConfig(({ mode }) => {
   const isMinified = mode === 'minified';
   
   return {
+    optimizeDeps: {
+      // Don't pre-bundle delaunator - let import map handle it
+      exclude: ['delaunator'],
+    },
     build: {
       lib: {
         entry: 'src/index.js',

@@ -40,8 +40,29 @@ const MIN_LAND_HEIGHT = 20;
  * @returns {Object} Isolines object keyed by type
  */
 function getIsolines(pack, getType, options = { fill: false, waterGap: false, halo: false }) {
-  const { cells, vertices } = pack;
-  const isolines = {};
+  try {
+    const { cells, vertices } = pack;
+    
+    // Check if vertex graph is available (required for isoline rendering)
+    if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
+      // Return empty isolines to trigger polygon fallback
+      return {};
+    }
+    
+    // Additional safety check: verify cells.v contains vertex indices (numbers), not polygon coordinates
+    if (cells.v && cells.v.length > 0) {
+      const firstCellV = cells.v[0];
+      if (firstCellV && Array.isArray(firstCellV) && firstCellV.length > 0) {
+        // Check if first element is a coordinate array (polygon) or a number (vertex index)
+        if (Array.isArray(firstCellV[0])) {
+          // This is polygon coordinates, not vertex indices - can't do isoline rendering
+          // This should not happen with full vertex graph, but keep for backward compatibility
+          return {};
+        }
+      }
+    }
+    
+    const isolines = {};
 
   const checkedCells = new Uint8Array(cells.i.length);
   const addToChecked = (cellId) => (checkedCells[cellId] = 1);
@@ -62,24 +83,51 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     const feature = pack.features?.[cells.f?.[onborderCell]];
     if (feature?.type === 'lake' && feature.shoreline?.every(ofSameType)) continue;
 
-    const startingVertex = cells.v[cellId]?.find((v) =>
-      vertices.c[v]?.some(ofDifferentType)
-    );
+    // cells.v[cellId] should contain vertex indices for isoline rendering
+    const cellVertices = cells.v[cellId];
+    if (!cellVertices || !Array.isArray(cellVertices) || cellVertices.length === 0) continue;
+    
+    // Safety check: filter out invalid vertex indices first
+    const validVertices = cellVertices.filter((v) => {
+      if (typeof v !== 'number' || v < 0 || v >= vertices.c.length) return false;
+      const vertexCells = vertices.c[v];
+      return vertexCells && Array.isArray(vertexCells) && vertexCells.length > 0;
+    });
+    
+    if (validVertices.length === 0) continue;
+    
+    // Find starting vertex with different type neighbor
+    const startingVertex = validVertices.find((v) => {
+      const vertexCells = vertices.c[v];
+      return vertexCells.some(ofDifferentType);
+    });
+    
     if (startingVertex === undefined) continue;
 
-    const vertexChain = connectVertices({
-      vertices,
-      startingVertex,
-      ofSameType,
-      addToChecked,
-      closeRing: true,
-    });
-    if (vertexChain.length < 3) continue;
+    try {
+      const vertexChain = connectVertices({
+        vertices,
+        startingVertex,
+        ofSameType,
+        addToChecked,
+        closeRing: true,
+      });
+      if (vertexChain.length < 3) continue;
 
-    addIsoline(type, vertices, vertexChain);
+      addIsoline(type, vertices, vertexChain);
+    } catch (error) {
+      // Skip this isoline if connection fails
+      console.warn(`Failed to connect vertices for cell ${cellId}:`, error.message);
+      continue;
+    }
   }
 
-  return isolines;
+    return isolines;
+  } catch (error) {
+    // If anything goes wrong with isoline rendering, return empty to trigger fallback
+    console.warn('getIsolines error:', error.message);
+    return {};
+  }
 
   function addIsoline(type, vertices, vertexChain) {
     if (!isolines[type]) isolines[type] = {};
@@ -116,6 +164,12 @@ function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, c
   for (let i = 0; i === 0 || next !== startingVertex; i++) {
     const previous = chain[chain.length - 1];
     const current = next;
+    
+    // Safety check: ensure vertices.c[current] exists
+    if (!vertices.c[current] || !Array.isArray(vertices.c[current])) {
+      break; // Invalid vertex, stop chain
+    }
+    
     chain.push(current);
 
     const neibCells = vertices.c[current];
@@ -129,8 +183,9 @@ function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, c
     if (v1 !== undefined && v1 !== previous && c1 !== c2) next = v1;
     else if (v2 !== undefined && v2 !== previous && c2 !== c3) next = v2;
     else if (v3 !== undefined && v3 !== previous && c1 !== c3) next = v3;
+    else break; // No valid next vertex
 
-    if (next >= vertices.c.length || next === current) break;
+    if (next >= vertices.c.length || next === current || !vertices.c[next]) break;
     if (i >= MAX_ITERATIONS) break;
   }
 
@@ -209,17 +264,100 @@ export function drawBiomesSVG(pack, biomesData) {
 
   const cells = pack.cells;
   const bodyPaths = [];
-  const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
-    fill: true,
-    waterGap: true,
-  });
+  
+  // Check if we have vertex graph for isoline rendering
+  const hasVertexGraph = pack.vertices && 
+                         pack.vertices.c && 
+                         Array.isArray(pack.vertices.c) && 
+                         pack.vertices.c.length > 0;
+  
+  // Check if cells.v contains vertex indices (not polygon coordinates)
+  let hasVertexIndices = false;
+  if (hasVertexGraph && cells.v && cells.v.length > 0) {
+    const firstCellV = cells.v[0];
+    hasVertexIndices = Array.isArray(firstCellV) && 
+                       firstCellV.length > 0 && 
+                       typeof firstCellV[0] === 'number' &&
+                       !Array.isArray(firstCellV[0]);
+  }
+  
+  // Try isolines first (requires full vertex graph and vertex indices)
+  if (hasVertexGraph && hasVertexIndices) {
+    try {
+      const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
+        fill: true,
+        waterGap: true,
+      });
 
-  Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-    const biomeIndex = parseInt(index);
-    if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
-      const color = biomesData.color[biomeIndex];
-      bodyPaths.push(getGappedFillPaths('biome', fill, waterGap, color, biomeIndex));
+      const hasIsolines = Object.keys(isolines).length > 0;
+      if (hasIsolines) {
+        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+          const biomeIndex = parseInt(index);
+          if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
+            const color = biomesData.color[biomeIndex];
+            bodyPaths.push(getGappedFillPaths('biome', fill, waterGap, color, biomeIndex));
+          }
+        });
+        
+        // If we got isolines, return them
+        if (bodyPaths.length > 0) {
+          return bodyPaths.join('');
+        }
+      }
+    } catch (error) {
+      console.warn('Isoline rendering failed, using polygon fallback:', error.message);
     }
+  }
+  
+  // Fallback: render polygons directly if isolines not available
+  // Group cells by biome and render as polygons
+  const biomeGroups = {};
+  for (let i = 0; i < cells.i.length; i++) {
+    const biomeId = cells.biome[i];
+    if (biomeId === undefined || biomeId < 0) continue;
+    
+    if (!biomeGroups[biomeId]) {
+      biomeGroups[biomeId] = [];
+    }
+    
+    // Get polygon from cells.vCoords[i] (polygon coordinates) or convert from vertex indices
+    let polygon = null;
+    
+    // Prefer vCoords if available (direct polygon coordinates)
+    if (cells.vCoords && cells.vCoords[i] && Array.isArray(cells.vCoords[i]) && cells.vCoords[i].length > 0) {
+      polygon = cells.vCoords[i];
+    } 
+    // Fallback: convert vertex indices to coordinates
+    else if (cells.v && cells.v[i] && pack.vertices && pack.vertices.p) {
+      const vertexIndices = cells.v[i];
+      if (Array.isArray(vertexIndices) && vertexIndices.length > 0) {
+        // Check if it's already coordinates (backward compatibility)
+        if (Array.isArray(vertexIndices[0]) && vertexIndices[0].length === 2) {
+          polygon = vertexIndices;
+        } else {
+          // Convert vertex indices to coordinates
+          polygon = vertexIndices.map(vId => pack.vertices.p[vId]).filter(p => p !== undefined);
+        }
+      }
+    }
+    
+    if (polygon && polygon.length > 0) {
+      // Convert polygon coordinates to SVG path
+      const path = polygon.map(([x, y], idx) => 
+        idx === 0 ? `M${x},${y}` : `L${x},${y}`
+      ).join(' ') + ' Z';
+      
+      const color = biomeId < biomesData.color.length 
+        ? biomesData.color[biomeId] 
+        : biomesData.color[0];
+      
+      biomeGroups[biomeId].push(`<path d="${path}" fill="${color}" stroke="${color}" stroke-width="0.5" opacity="0.7" />`);
+    }
+  }
+  
+  // Combine all paths for each biome
+  Object.entries(biomeGroups).forEach(([biomeId, paths]) => {
+    bodyPaths.push(`<g id="biome-${biomeId}">${paths.join('')}</g>`);
   });
 
   return bodyPaths.join('');
@@ -236,17 +374,94 @@ export function drawStatesSVG(pack) {
   const { cells, states } = pack;
   const bodyPaths = [];
 
-  const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
-    fill: true,
-    waterGap: true,
-  });
+  // Check if we have vertex graph for isoline rendering
+  const hasVertexGraph = pack.vertices && 
+                         pack.vertices.c && 
+                         Array.isArray(pack.vertices.c) && 
+                         pack.vertices.c.length > 0;
+  
+  // Check if cells.v contains vertex indices (not polygon coordinates)
+  let hasVertexIndices = false;
+  if (hasVertexGraph && cells.v && cells.v.length > 0) {
+    const firstCellV = cells.v[0];
+    hasVertexIndices = Array.isArray(firstCellV) && 
+                       firstCellV.length > 0 && 
+                       typeof firstCellV[0] === 'number' &&
+                       !Array.isArray(firstCellV[0]);
+  }
+  
+  // Try isolines first (requires full vertex graph and vertex indices)
+  if (hasVertexGraph && hasVertexIndices) {
+    try {
+      const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
+        fill: true,
+        waterGap: true,
+      });
 
-  Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-    const stateIndex = parseInt(index);
-    if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
-      const color = states[stateIndex].color || '#cccccc';
-      bodyPaths.push(getGappedFillPaths('state', fill, waterGap, color, stateIndex));
+      const hasIsolines = Object.keys(isolines).length > 0;
+      if (hasIsolines) {
+        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+          const stateIndex = parseInt(index);
+          if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
+            const color = states[stateIndex].color || '#cccccc';
+            bodyPaths.push(getGappedFillPaths('state', fill, waterGap, color, stateIndex));
+          }
+        });
+        
+        // If we got isolines, return them
+        if (bodyPaths.length > 0) {
+          return bodyPaths.join('');
+        }
+      }
+    } catch (error) {
+      console.warn('State isoline rendering failed, using polygon fallback:', error.message);
     }
+  }
+  
+  // Fallback: render polygons directly if isolines not available
+  // Group cells by state and render as polygons
+  const stateGroups = {};
+  for (let i = 0; i < cells.i.length; i++) {
+    const stateId = cells.state[i];
+    if (stateId === undefined || stateId < 0 || !states[stateId]) continue;
+    
+    if (!stateGroups[stateId]) {
+      stateGroups[stateId] = [];
+    }
+    
+    // Get polygon from cells.vCoords[i] or convert from vertex indices
+    let polygon = null;
+    
+    // Prefer vCoords if available
+    if (cells.vCoords && cells.vCoords[i] && Array.isArray(cells.vCoords[i]) && cells.vCoords[i].length > 0) {
+      polygon = cells.vCoords[i];
+    } 
+    // Fallback: convert vertex indices to coordinates
+    else if (cells.v && cells.v[i] && pack.vertices && pack.vertices.p) {
+      const vertexIndices = cells.v[i];
+      if (Array.isArray(vertexIndices) && vertexIndices.length > 0) {
+        if (Array.isArray(vertexIndices[0]) && vertexIndices[0].length === 2) {
+          polygon = vertexIndices;
+        } else {
+          polygon = vertexIndices.map(vId => pack.vertices.p[vId]).filter(p => p !== undefined);
+        }
+      }
+    }
+    
+    if (polygon && polygon.length > 0) {
+      // Convert polygon coordinates to SVG path
+      const path = polygon.map(([x, y], idx) => 
+        idx === 0 ? `M${x},${y}` : `L${x},${y}`
+      ).join(' ') + ' Z';
+      
+      const color = states[stateId].color || '#cccccc';
+      stateGroups[stateId].push(`<path d="${path}" fill="${color}" stroke="${color}" stroke-width="0.5" opacity="0.6" />`);
+    }
+  }
+  
+  // Combine all paths for each state
+  Object.entries(stateGroups).forEach(([stateId, paths]) => {
+    bodyPaths.push(`<g id="state-${stateId}">${paths.join('')}</g>`);
   });
 
   return bodyPaths.join('');
@@ -263,6 +478,18 @@ export function drawBordersSVG(pack) {
   }
 
   const { cells, vertices } = pack;
+  
+  // Check if vertex graph is available for isoline border rendering
+  const hasVertexGraph = vertices && 
+                         vertices.c && 
+                         Array.isArray(vertices.c) && 
+                         vertices.c.length > 0;
+  
+  // If no vertex graph, use simplified border rendering
+  if (!hasVertexGraph) {
+    return drawBordersSVGSimplified(pack);
+  }
+  
   const statePath = [];
   const provincePath = [];
   const checked = {};
@@ -389,6 +616,148 @@ export function drawBordersSVG(pack) {
     : '';
 
   return { stateBorders: stateBordersSVG, provinceBorders: provinceBordersSVG };
+}
+
+/**
+ * Simplified border rendering using polygon edges (fallback when vertex graph unavailable)
+ * @param {Object} pack - Pack object
+ * @returns {Object} {stateBorders, provinceBorders} SVG path strings
+ */
+function drawBordersSVGSimplified(pack) {
+  const { cells } = pack;
+  const statePath = [];
+  const provincePath = [];
+  const checked = {};
+
+  const isLand = (cellId) => cells.h[cellId] >= MIN_LAND_HEIGHT;
+
+  for (let cellId = 0; cellId < cells.i.length; cellId++) {
+    if (!cells.state[cellId] || !isLand(cellId)) continue;
+    const provinceId = cells.province?.[cellId];
+    const stateId = cells.state[cellId];
+
+    // Get polygon for this cell
+    let polygon = null;
+    if (cells.vCoords && cells.vCoords[cellId]) {
+      polygon = cells.vCoords[cellId];
+    } else if (cells.v && cells.v[cellId] && pack.vertices && pack.vertices.p) {
+      const vertexIndices = cells.v[cellId];
+      if (Array.isArray(vertexIndices) && vertexIndices.length > 0) {
+        if (Array.isArray(vertexIndices[0]) && vertexIndices[0].length === 2) {
+          polygon = vertexIndices;
+        } else {
+          polygon = vertexIndices.map(vId => pack.vertices.p[vId]).filter(p => p !== undefined);
+        }
+      }
+    }
+
+    if (!polygon || polygon.length < 3) continue;
+
+    // Check neighbors for borders
+    const neighbors = cells.c[cellId] || [];
+    for (const neibId of neighbors) {
+      if (neibId >= cells.i.length || !isLand(neibId)) continue;
+      
+      const neibStateId = cells.state[neibId];
+      const neibProvinceId = cells.province?.[neibId];
+
+      // Province border
+      if (provinceId && neibProvinceId && provinceId !== neibProvinceId && stateId === neibStateId) {
+        const key = `prov-${Math.min(provinceId, neibProvinceId)}-${Math.max(provinceId, neibProvinceId)}-${cellId}`;
+        if (!checked[key]) {
+          checked[key] = true;
+          // Find shared edge and add to path
+          const sharedEdge = findSharedEdge(polygon, neibId, pack);
+          if (sharedEdge) {
+            provincePath.push(`M${sharedEdge[0][0]},${sharedEdge[0][1]} L${sharedEdge[1][0]},${sharedEdge[1][1]}`);
+          }
+        }
+      }
+
+      // State border
+      if (stateId !== neibStateId && stateId > neibStateId) {
+        const key = `state-${neibStateId}-${stateId}-${cellId}`;
+        if (!checked[key]) {
+          checked[key] = true;
+          // Find shared edge and add to path
+          const sharedEdge = findSharedEdge(polygon, neibId, pack);
+          if (sharedEdge) {
+            statePath.push(`M${sharedEdge[0][0]},${sharedEdge[0][1]} L${sharedEdge[1][0]},${sharedEdge[1][1]}`);
+          }
+        }
+      }
+    }
+  }
+
+  const stateBordersSVG = statePath.length
+    ? `<path d="${statePath.join(' ')}" stroke="${STYLE_CONSTANTS.stateBorderStroke}" stroke-width="${STYLE_CONSTANTS.stateBorderWidth}" stroke-dasharray="${STYLE_CONSTANTS.stateBorderDashArray}" fill="none" />`
+    : '';
+
+  const provinceBordersSVG = provincePath.length
+    ? `<path d="${provincePath.join(' ')}" stroke="${STYLE_CONSTANTS.provinceBorderStroke}" stroke-width="${STYLE_CONSTANTS.provinceBorderWidth}" stroke-dasharray="${STYLE_CONSTANTS.provinceBorderDashArray}" fill="none" />`
+    : '';
+
+  return { stateBorders: stateBordersSVG, provinceBorders: provinceBordersSVG };
+}
+
+/**
+ * Find shared edge between two cells (simplified - finds closest edge)
+ * @param {Array<Array<number>>} polygon1 - First cell polygon
+ * @param {number} cellId2 - Second cell ID
+ * @param {Object} pack - Pack object
+ * @returns {Array<Array<number>>|null} Shared edge as [[x1,y1], [x2,y2]] or null
+ */
+function findSharedEdge(polygon1, cellId2, pack) {
+  if (!polygon1 || polygon1.length < 2) return null;
+  
+  let polygon2 = null;
+  if (pack.cells.vCoords && pack.cells.vCoords[cellId2]) {
+    polygon2 = pack.cells.vCoords[cellId2];
+  } else if (pack.cells.v && pack.cells.v[cellId2] && pack.vertices && pack.vertices.p) {
+    const vertexIndices = pack.cells.v[cellId2];
+    if (Array.isArray(vertexIndices) && vertexIndices.length > 0) {
+      if (Array.isArray(vertexIndices[0]) && vertexIndices[0].length === 2) {
+        polygon2 = vertexIndices;
+      } else {
+        polygon2 = vertexIndices.map(vId => pack.vertices.p[vId]).filter(p => p !== undefined);
+      }
+    }
+  }
+  
+  if (!polygon2 || polygon2.length < 2) return null;
+  
+  // Find closest points between polygons (simplified shared edge detection)
+  let minDist = Infinity;
+  let closestEdge = null;
+  
+  for (let i = 0; i < polygon1.length; i++) {
+    const p1 = polygon1[i];
+    const p1Next = polygon1[(i + 1) % polygon1.length];
+    
+    for (let j = 0; j < polygon2.length; j++) {
+      const p2 = polygon2[j];
+      const p2Next = polygon2[(j + 1) % polygon2.length];
+      
+      // Check if edges are close (shared edge)
+      const dist1 = Math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2);
+      const dist2 = Math.sqrt((p1Next[0] - p2Next[0]) ** 2 + (p1Next[1] - p2Next[1]) ** 2);
+      
+      if (dist1 < 1 && dist2 < 1) {
+        // Found shared edge
+        return [[p1[0], p1[1]], [p1Next[0], p1Next[1]]];
+      }
+      
+      // Track closest edge for fallback
+      const avgDist = (dist1 + dist2) / 2;
+      if (avgDist < minDist) {
+        minDist = avgDist;
+        closestEdge = [[p1[0], p1[1]], [p1Next[0], p1Next[1]]];
+      }
+    }
+  }
+  
+  // Return closest edge if no exact match (fallback)
+  return minDist < 5 ? closestEdge : null;
 }
 
 /**

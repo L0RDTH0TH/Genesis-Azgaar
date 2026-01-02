@@ -62,10 +62,12 @@ export function renderMap(canvas, data) {
 
   // 3. Land polygons with biome coloring (or base land color if no biomes)
   // Biomes are drawn with blending to allow elevation shading to show through
-  if (pack.cells.biome && pack.cells.v && pack.cells.v.length > 0 && pack.cells.v[0]?.length > 0) {
+  // Check for vCoords (polygon coordinates) for canvas rendering
+  const hasPolygons = pack.cells.vCoords && pack.cells.vCoords.length > 0 && pack.cells.vCoords[0]?.length > 0;
+  if (pack.cells.biome && hasPolygons) {
     // Full rendering: use biome colors with blending
     drawBiomes(ctx, { grid, pack, options });
-  } else if (pack.cells.v && pack.cells.v.length > 0 && pack.cells.v[0]?.length > 0) {
+  } else if (hasPolygons) {
     // Polygon rendering without biomes: skip (heightmap already provides base colors)
     // Note: Could add drawLandPolygons here if we want base land color on top of heightmap
   } else {

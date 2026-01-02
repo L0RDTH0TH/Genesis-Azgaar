@@ -63,12 +63,20 @@ function createSimplifiedPack(grid, options) {
   const { cells: gridCells, points, vertices } = grid;
   
   // Create pack cells structure (simplified - mirrors grid for now)
+  // Copy cells.c properly - it's an object with numeric keys, not a regular array
+  const packCellsC = [];
+  if (gridCells.c) {
+    for (let i = 0; i < gridCells.i.length; i++) {
+      packCellsC[i] = gridCells.c[i] ? (Array.isArray(gridCells.c[i]) ? gridCells.c[i].slice() : Array.from(gridCells.c[i])) : [];
+    }
+  }
+  
   const packCells = {
     i: createTypedArray({ maxValue: gridCells.i.length, length: gridCells.i.length }).map((_, i) => i),
     p: points.slice(),
     g: createTypedArray({ maxValue: gridCells.i.length, length: gridCells.i.length }).map((_, i) => i),
     h: new Uint8Array(gridCells.h.length),
-    c: gridCells.c ? gridCells.c.slice() : [],
+    c: packCellsC,
     b: gridCells.b ? new Uint8Array(gridCells.b.length) : new Uint8Array(gridCells.i.length),
     t: gridCells.t ? new Int8Array(gridCells.t.length) : new Int8Array(gridCells.i.length),
     f: gridCells.f ? new Uint16Array(gridCells.f.length) : new Uint16Array(gridCells.i.length),

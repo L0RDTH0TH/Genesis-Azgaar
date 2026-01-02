@@ -8,6 +8,7 @@
 
 import { createTypedArray } from '../utils/array.js';
 import * as d3 from 'd3';
+import { Voronoi } from './voronoi.js';
 
 /**
  * Create pack (refined Voronoi diagram) from grid
@@ -66,7 +67,12 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   // Calculate Voronoi for pack cells
   const allPoints = newCells.p.concat(boundary);
   const delaunay = DelaunatorClass.from(allPoints);
-  const Voronoi = d3.Delaunay.from(allPoints).voronoi([0, 0, options.mapWidth, options.mapHeight]);
+  const delaunayObj = d3.Delaunay.from(allPoints);
+  const voronoiDiagram = delaunayObj.voronoi([0, 0, options.mapWidth, options.mapHeight]);
+  
+  // Build full Voronoi vertex graph using Voronoi class
+  // Note: Voronoi class expects Delaunator instance (from DelaunatorClass), not d3.Delaunay
+  const voronoiGraph = new Voronoi(delaunay, allPoints, newCells.p.length);
   
   // Create pack cells structure
   const packCells = {
@@ -74,8 +80,9 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
     p: newCells.p,
     g: createTypedArray({ maxValue: grid.points.length, length: newCells.g.length }),
     h: createTypedArray({ maxValue: 100, length: newCells.h.length }),
-    c: [], // Neighbors (will be populated)
-    v: [], // Vertices (will be populated)
+    c: [], // Neighbors (will be populated from voronoiGraph)
+    v: [], // Vertex indices (for isoline rendering)
+    vCoords: new Array(newCells.p.length), // Polygon coordinates (for canvas rendering) - pre-allocate array
     b: new Uint8Array(newCells.p.length), // Border cells
     area: new Float32Array(newCells.p.length),
   };
@@ -86,24 +93,24 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
     packCells.h[i] = newCells.h[i];
   }
 
-  // Calculate cell neighbors and vertices from Voronoi
-  const delaunayObj = d3.Delaunay.from(allPoints);
+  // Populate cells from voronoiGraph (vertex indices and neighbors)
   for (let i = 0; i < newCells.p.length; i++) {
-    const neighbors = delaunayObj.neighbors(i).filter((n) => n < newCells.p.length);
-    packCells.c[i] = neighbors;
+    // Get vertex indices for this cell (from voronoiGraph)
+    packCells.v[i] = voronoiGraph.cells.v[i] || [];
+    // Get adjacent cells (from voronoiGraph)
+    packCells.c[i] = voronoiGraph.cells.c[i] || [];
     
-    // Get polygon vertices for this cell from Voronoi diagram
-    const cellPolygon = Voronoi.renderCell(i);
+    // Get polygon coordinates for canvas rendering
+    const cellPolygon = voronoiDiagram.renderCell(i);
     if (cellPolygon && cellPolygon.length > 0) {
-      // Store polygon coordinates directly (array of [x, y] pairs)
-      // This can be used directly for Canvas rendering
-      packCells.v[i] = Array.from(cellPolygon).map(([x, y]) => [x, y]);
+      // Store polygon coordinates separately for canvas rendering
+      packCells.vCoords[i] = Array.from(cellPolygon).map(([x, y]) => [x, y]);
       
       // Calculate area from polygon
       packCells.area[i] = Math.abs(d3.polygonArea(cellPolygon));
     } else {
       // Fallback: no polygon (shouldn't happen, but handle gracefully)
-      packCells.v[i] = [];
+      packCells.vCoords[i] = [];
       packCells.area[i] = 1.0;
     }
   }
@@ -116,13 +123,12 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
     }
   }
 
-  // Create vertices structure
-  // For full rendering, polygon coordinates are stored directly in pack.cells.v[i]
-  // This vertices structure is kept for compatibility with existing code
-  // Note: For rendering, use pack.cells.v[i] directly instead of vertices
+  // Create vertices structure from voronoiGraph
+  // Round coordinates for optimization
   const vertices = {
-    p: allPoints.slice(0, newCells.p.length), // Keep for compatibility
-    c: [], // Cells for each vertex (not fully populated, kept for compatibility)
+    p: voronoiGraph.vertices.p.map(([x, y]) => [Math.round(x), Math.round(y)]), // Vertex coordinates (rounded)
+    v: voronoiGraph.vertices.v, // Adjacent vertices
+    c: voronoiGraph.vertices.c, // Adjacent cells
   };
 
   const pack = {
