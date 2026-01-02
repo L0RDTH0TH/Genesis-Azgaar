@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minimal Pack Test</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    #results {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 20px;
+      white-space: pre-wrap;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .success { color: #4ade80; }
+    .error { color: #f87171; }
+    .info { color: #60a5fa; }
+  </style>
+</head>
+<body>
+  <h1>Minimal Pack Test</h1>
+  <p>This test directly inspects pack.cells.v and vCoords after generation.</p>
+  <button id="testBtn">Run Test</button>
+  <div id="results"></div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.0/+esm"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import { initGenerator, loadOptions, generateMap } from '../dist/azgaar-genesis.esm.js';
+    import Delaunator from 'delaunator';
+
+    const resultsDiv = document.getElementById('results');
+    const testBtn = document.getElementById('testBtn');
+
+    function log(message, type = 'info') {
+      const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+      resultsDiv.innerHTML += `<div class="${className}">${message}</div>`;
+      console.log(`[${type.toUpperCase()}] ${message}`);
+    }
+
+    testBtn.addEventListener('click', async () => {
+      resultsDiv.innerHTML = '';
+      log('=== Minimal Pack Test ===', 'info');
+      
+      try {
+        // Initialize
+        initGenerator();
+        log('✓ Generator initialized', 'success');
+        
+        // Load options with fullRendering explicitly set
+        loadOptions({
+          seed: '8678460',
+          mapWidth: 960,
+          mapHeight: 540,
+          points: 4,
+          statesNumber: 20,
+          cultures: 15,
+          fullRendering: true, // Force full pack
+        });
+        log('✓ Options loaded (fullRendering: true)', 'success');
+        
+        // Generate map
+        log('Generating map...', 'info');
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const genTime = ((performance.now() - startTime) / 1000).toFixed(2);
+        log(`✓ Map generated in ${genTime}s`, 'success');
+        
+        // Immediate inspection
+        const pack = data.pack;
+        log('--- Immediate Pack Inspection ---', 'info');
+        log(`pack exists: ${!!pack}`, pack ? 'success' : 'error');
+        log(`pack.cells exists: ${!!pack.cells}`, pack.cells ? 'success' : 'error');
+        
+        if (pack.cells) {
+          log(`pack.cells keys: ${Object.keys(pack.cells).join(', ')}`, 'info');
+          log(`pack.cells.v exists: ${pack.cells.v !== undefined}`, pack.cells.v !== undefined ? 'success' : 'error');
+          log(`pack.cells.vCoords exists: ${pack.cells.vCoords !== undefined}`, pack.cells.vCoords !== undefined ? 'success' : 'error');
+          
+          if (pack.cells.v !== undefined) {
+            log(`pack.cells.v type: ${typeof pack.cells.v}`, 'info');
+            log(`pack.cells.v isArray: ${Array.isArray(pack.cells.v)}`, 'info');
+            log(`pack.cells.v length: ${pack.cells.v.length}`, pack.cells.v.length > 0 ? 'success' : 'error');
+            if (pack.cells.v.length > 0 && pack.cells.v[0]) {
+              log(`pack.cells.v[0] sample: ${JSON.stringify(pack.cells.v[0].slice(0, 3))}`, 'info');
+            }
+          }
+          
+          if (pack.cells.vCoords !== undefined) {
+            log(`pack.cells.vCoords type: ${typeof pack.cells.vCoords}`, 'info');
+            log(`pack.cells.vCoords isArray: ${Array.isArray(pack.cells.vCoords)}`, 'info');
+            log(`pack.cells.vCoords length: ${pack.cells.vCoords.length}`, pack.cells.vCoords.length > 0 ? 'success' : 'error');
+            if (pack.cells.vCoords.length > 0 && pack.cells.vCoords[0]) {
+              log(`pack.cells.vCoords[0] sample: ${JSON.stringify(pack.cells.vCoords[0].slice(0, 2))}`, 'info');
+            }
+          }
+        }
+        
+        // Check vertices (should be populated)
+        if (pack.vertices) {
+          log(`pack.vertices.p length: ${pack.vertices.p?.length || 0}`, pack.vertices.p?.length > 0 ? 'success' : 'error');
+          log(`pack.vertices.v length: ${pack.vertices.v?.length || 0}`, pack.vertices.v?.length > 0 ? 'success' : 'error');
+          log(`pack.vertices.c length: ${pack.vertices.c?.length || 0}`, pack.vertices.c?.length > 0 ? 'success' : 'error');
+        }
+        
+        log('=== Test Complete ===', 'info');
+      } catch (error) {
+        log(`✗ Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    });
+  </script>
+</body>
+</html>

@@ -155,7 +155,8 @@ function generateMapInternal(options, DelaunatorClass) {
   // Phase 7: Create pack from grid
   // Use full Voronoi pack if fullRendering is enabled, canvas is provided, or container (SVG) is provided
   // Full pack is required for rendering (both canvas and SVG need vCoords/v data)
-  const useFullPack = options.fullRendering === true || state.canvas !== null || state.container !== null;
+  // ALWAYS use full pack for now to ensure cell data is populated
+  const useFullPack = true; // Force full pack creation for all cases
   
   // Debug: Log decision
   if (typeof console !== 'undefined' && console.log) {
@@ -164,6 +165,7 @@ function generateMapInternal(options, DelaunatorClass) {
       fullRendering: options.fullRendering,
       hasCanvas: state.canvas !== null,
       hasContainer: state.container !== null,
+      forcedFullPack: true,
     });
   }
   
@@ -175,9 +177,9 @@ function generateMapInternal(options, DelaunatorClass) {
     // Ensure pack has height data from grid (pack may have fewer cells than grid)
     // Height data will be mapped via pack.cells.g (grid cell index)
     
-    // Debug: Log pack structure to verify vCoords and v are populated
+    // Debug: Log pack structure immediately after creation
     if (typeof console !== 'undefined' && console.log) {
-      console.log('[generator] Pack created (full):', {
+      console.log('[generator:lifecycle] Post-creation (immediately after createPackFromGrid):', {
         cellsCount: pack.cells.i.length,
         hasVCoords: Array.isArray(pack.cells.vCoords),
         vCoordsLength: pack.cells.vCoords?.length || 0,
@@ -186,6 +188,11 @@ function generateMapInternal(options, DelaunatorClass) {
         vCoordsSample: pack.cells.vCoords?.[0]?.length || 0,
         vSample: pack.cells.v?.[0]?.length || 0,
         verticesPLength: pack.vertices?.p?.length || 0,
+        v0Exists: pack.cells.v?.[0] !== undefined,
+        vCoords0Exists: pack.cells.vCoords?.[0] !== undefined,
+        v0Sample: pack.cells.v?.[0] ? JSON.stringify(pack.cells.v[0].slice(0, 3)) : 'undefined',
+        vCoords0Sample: pack.cells.vCoords?.[0] ? JSON.stringify(pack.cells.vCoords[0].slice(0, 2)) : 'undefined',
+        packCellsKeys: pack.cells ? Object.keys(pack.cells) : [],
       });
     }
   } else {
@@ -351,7 +358,34 @@ export function generateMap(DelaunatorClass = null) {
 
   try {
     const data = generateMapInternal(state.options, DelaunatorClass);
+    
+    // Check pack structure after generateMapInternal returns
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[generator:lifecycle] After generateMapInternal, before storing in state:', {
+        dataHasPack: 'pack' in data,
+        packHasCells: data.pack && 'cells' in data.pack,
+        packCellsHasV: data.pack?.cells && 'v' in data.pack.cells,
+        packCellsHasVCoords: data.pack?.cells && 'vCoords' in data.pack.cells,
+        packCellsVLength: data.pack?.cells?.v?.length,
+        packCellsVCoordsLength: data.pack?.cells?.vCoords?.length,
+        packCellsKeys: data.pack?.cells ? Object.keys(data.pack.cells) : [],
+      });
+    }
+    
     state.data = data;
+    
+    // Check pack structure after storing in state
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[generator:lifecycle] After storing in state.data:', {
+        stateDataHasPack: state.data && 'pack' in state.data,
+        packHasCells: state.data?.pack && 'cells' in state.data.pack,
+        packCellsHasV: state.data?.pack?.cells && 'v' in state.data.pack.cells,
+        packCellsHasVCoords: state.data?.pack?.cells && 'vCoords' in state.data.pack.cells,
+        packCellsVLength: state.data?.pack?.cells?.v?.length,
+        packCellsVCoordsLength: state.data?.pack?.cells?.vCoords?.length,
+      });
+    }
+    
     return data;
   } catch (error) {
     if (error instanceof GenerationError || error instanceof InitializationError) {

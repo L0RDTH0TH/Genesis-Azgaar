@@ -119,6 +119,7 @@
           points: 4, // ~10,000 cells
           statesNumber: 20,
           cultures: 15,
+          fullRendering: true, // Force full pack creation
         });
         log(`✓ Options loaded (seed: ${seed})`, 'success');
         
@@ -131,6 +132,25 @@
         
         // Inspect vertex graph
         const pack = data.pack;
+        
+        // Debug: Log directly from pack object to verify structure (lifecycle check)
+        console.log('[test:lifecycle] Received pack immediately after generateMap():', {
+          dataHasPack: 'pack' in data,
+          hasCells: !!pack.cells,
+          hasV: pack.cells?.v !== undefined,
+          hasVCoords: pack.cells?.vCoords !== undefined,
+          vType: typeof pack.cells?.v,
+          vIsArray: Array.isArray(pack.cells?.v),
+          vLength: pack.cells?.v?.length,
+          vCoordsType: typeof pack.cells?.vCoords,
+          vCoordsIsArray: Array.isArray(pack.cells?.vCoords),
+          vCoordsLength: pack.cells?.vCoords?.length,
+          v0: pack.cells?.v?.[0],
+          vCoords0: pack.cells?.vCoords?.[0],
+          cellsKeys: pack.cells ? Object.keys(pack.cells) : [],
+          v0Sample: pack.cells?.v?.[0] ? JSON.stringify(pack.cells.v[0].slice(0, 3)) : 'undefined',
+          vCoords0Sample: pack.cells?.vCoords?.[0] ? JSON.stringify(pack.cells.vCoords[0].slice(0, 2)) : 'undefined',
+        });
         log('--- Vertex Graph Inspection ---', 'info');
         log(`vertices.c length: ${pack.vertices?.c?.length || 0}`, 
             pack.vertices?.c?.length > 0 ? 'success' : 'error');

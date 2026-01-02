@@ -71,13 +71,14 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   const voronoiDiagram = delaunayObj.voronoi([0, 0, options.mapWidth, options.mapHeight]);
   
   // Create pack cells structure
+  // IMPORTANT: Initialize v and vCoords as arrays with proper length to ensure they're dense arrays
   const packCells = {
     i: createTypedArray({ maxValue: newCells.p.length, length: newCells.p.length }).map((_, i) => i),
     p: newCells.p,
     g: createTypedArray({ maxValue: grid.points.length, length: newCells.g.length }),
     h: createTypedArray({ maxValue: 100, length: newCells.h.length }),
-    c: [], // Neighbors (will be populated from Voronoi class)
-    v: [], // Vertex indices (for isoline rendering) - will be populated from polygons
+    c: new Array(newCells.p.length), // Neighbors (will be populated from Voronoi class)
+    v: new Array(newCells.p.length), // Vertex indices (for isoline rendering) - will be populated from polygons
     vCoords: new Array(newCells.p.length), // Polygon coordinates (for canvas rendering)
     b: new Uint8Array(newCells.p.length), // Border cells
     area: new Float32Array(newCells.p.length),
@@ -158,7 +159,19 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
       packCells.vCoords[i] = [];
       packCells.v[i] = [];
       packCells.area[i] = 1.0;
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`[regraph] Cell ${i} failed to render:`, error.message);
+      }
     }
+  }
+  
+  // Ensure arrays have proper length (for sparse arrays, length might not reflect actual content)
+  // This ensures the arrays are properly recognized as arrays with the correct length
+  if (packCells.v.length !== newCells.p.length) {
+    packCells.v.length = newCells.p.length;
+  }
+  if (packCells.vCoords.length !== newCells.p.length) {
+    packCells.vCoords.length = newCells.p.length;
   }
   
   // STEP 4: Build vertex adjacency graph (vertices.v and vertices.c)
@@ -253,10 +266,44 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
     c: verticesC, // Adjacent cells (built from cell-to-vertex mapping)
   };
 
+  // Final verification before returning pack
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[regraph:lifecycle] Before pack creation:', {
+      packCellsHasV: 'v' in packCells,
+      packCellsHasVCoords: 'vCoords' in packCells,
+      packCellsVType: typeof packCells.v,
+      packCellsVIsArray: Array.isArray(packCells.v),
+      packCellsVLength: packCells.v?.length,
+      packCellsVCoordsType: typeof packCells.vCoords,
+      packCellsVCoordsIsArray: Array.isArray(packCells.vCoords),
+      packCellsVCoordsLength: packCells.vCoords?.length,
+      packCellsKeys: Object.keys(packCells),
+      v0Exists: packCells.v?.[0] !== undefined,
+      vCoords0Exists: packCells.vCoords?.[0] !== undefined,
+      v0Sample: packCells.v?.[0] ? JSON.stringify(packCells.v[0].slice(0, 3)) : 'undefined',
+      vCoords0Sample: packCells.vCoords?.[0] ? JSON.stringify(packCells.vCoords[0].slice(0, 2)) : 'undefined',
+    });
+  }
+
   const pack = {
     cells: packCells,
     vertices,
   };
+
+  // Verify pack structure after creation
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[regraph:lifecycle] After pack creation, before return:', {
+      packHasCells: 'cells' in pack,
+      packCellsHasV: pack.cells && 'v' in pack.cells,
+      packCellsHasVCoords: pack.cells && 'vCoords' in pack.cells,
+      packCellsVType: typeof pack.cells?.v,
+      packCellsVIsArray: Array.isArray(pack.cells?.v),
+      packCellsVLength: pack.cells?.v?.length,
+      packCellsVCoordsLength: pack.cells?.vCoords?.length,
+      packCellsV0Sample: pack.cells?.v?.[0] ? JSON.stringify(pack.cells.v[0].slice(0, 3)) : 'undefined',
+      packCellsVCoords0Sample: pack.cells?.vCoords?.[0] ? JSON.stringify(pack.cells.vCoords[0].slice(0, 2)) : 'undefined',
+    });
+  }
 
   return pack;
 }
