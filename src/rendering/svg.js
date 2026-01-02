@@ -62,6 +62,21 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
       }
     }
     
+    // Verify that vertices.c is properly populated (not sparse)
+    // Sample check: verify at least some entries exist
+    let validEntries = 0;
+    const sampleSize = Math.min(100, vertices.c.length);
+    for (let i = 0; i < sampleSize; i++) {
+      if (vertices.c[i] && Array.isArray(vertices.c[i]) && vertices.c[i].length > 0) {
+        validEntries++;
+      }
+    }
+    // If less than 50% of sample entries are valid, assume sparse array and fall back
+    if (validEntries < sampleSize * 0.5) {
+      console.warn('getIsolines: vertices.c appears to be sparse, using polygon fallback');
+      return {};
+    }
+    
     const isolines = {};
 
   const checkedCells = new Uint8Array(cells.i.length);
@@ -97,7 +112,11 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     if (validVertices.length === 0) continue;
     
     // Find starting vertex with different type neighbor
+    // Double-check that vertices.c[v] exists before accessing
     const startingVertex = validVertices.find((v) => {
+      if (v < 0 || v >= vertices.c.length || !vertices.c[v] || !Array.isArray(vertices.c[v])) {
+        return false;
+      }
       const vertexCells = vertices.c[v];
       return vertexCells.some(ofDifferentType);
     });
@@ -139,13 +158,19 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
 
     if (options.waterGap) {
       if (!isolines[type].waterGap) isolines[type].waterGap = '';
-      const isLandVertex = (vertexId) => vertices.c[vertexId]?.every((i) => cells.h[i] >= MIN_LAND_HEIGHT);
+      const isLandVertex = (vertexId) => {
+        if (vertexId < 0 || vertexId >= vertices.c.length || !vertices.c[vertexId]) return false;
+        return vertices.c[vertexId].every((i) => i >= 0 && i < cells.h.length && cells.h[i] >= MIN_LAND_HEIGHT);
+      };
       isolines[type].waterGap += getBorderPath(vertices, vertexChain, isLandVertex);
     }
 
     if (options.halo) {
       if (!isolines[type].halo) isolines[type].halo = '';
-      const isBorderVertex = (vertexId) => vertices.c[vertexId]?.some((i) => cells.b[i]);
+      const isBorderVertex = (vertexId) => {
+        if (vertexId < 0 || vertexId >= vertices.c.length || !vertices.c[vertexId]) return false;
+        return vertices.c[vertexId].some((i) => i >= 0 && i < cells.b.length && cells.b[i]);
+      };
       isolines[type].halo += getBorderPath(vertices, vertexChain, isBorderVertex);
     }
   }
@@ -180,10 +205,16 @@ function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, c
     const [c1, c2, c3] = neibCells?.map(ofSameType) || [false, false, false];
     const [v1, v2, v3] = vertices.v[current] || [null, null, null];
 
-    if (v1 !== undefined && v1 !== previous && c1 !== c2) next = v1;
-    else if (v2 !== undefined && v2 !== previous && c2 !== c3) next = v2;
-    else if (v3 !== undefined && v3 !== previous && c1 !== c3) next = v3;
-    else break; // No valid next vertex
+    // Check each potential next vertex to ensure it's valid and has vertices.c entry
+    if (v1 !== undefined && v1 !== previous && v1 < vertices.c.length && vertices.c[v1] && c1 !== c2) {
+      next = v1;
+    } else if (v2 !== undefined && v2 !== previous && v2 < vertices.c.length && vertices.c[v2] && c2 !== c3) {
+      next = v2;
+    } else if (v3 !== undefined && v3 !== previous && v3 < vertices.c.length && vertices.c[v3] && c1 !== c3) {
+      next = v3;
+    } else {
+      break; // No valid next vertex
+    }
 
     if (next >= vertices.c.length || next === current || !vertices.c[next]) break;
     if (i >= MAX_ITERATIONS) break;
@@ -551,9 +582,12 @@ export function drawBordersSVG(pack) {
     const isTypeTo = (cellId) => cellId < cells.i.length && getType(cellId) === getType(toCell);
 
     addToChecked(fromCell);
-    const startingVertex = cells.v[fromCell]?.find((v) =>
-      vertices.c[v]?.some((i) => isLand(i) && isTypeTo(i))
-    );
+    const startingVertex = cells.v[fromCell]?.find((v) => {
+      if (typeof v !== 'number' || v < 0 || v >= vertices.c.length || !vertices.c[v] || !Array.isArray(vertices.c[v])) {
+        return false;
+      }
+      return vertices.c[v].some((i) => isLand(i) && isTypeTo(i));
+    });
     if (startingVertex === undefined) return null;
 
     const checkVertex = (vertex) =>
@@ -584,6 +618,12 @@ export function drawBordersSVG(pack) {
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         const previous = chain[chain.length - 1];
         const current = next;
+        
+        // Safety check: ensure vertices.c[current] exists
+        if (current < 0 || current >= vertices.c.length || !vertices.c[current] || !Array.isArray(vertices.c[current])) {
+          break; // Invalid vertex, stop chain
+        }
+        
         chain.push(current);
 
         const neibCells = vertices.c[current];
@@ -592,9 +632,16 @@ export function drawBordersSVG(pack) {
         const [c1, c2, c3] = neibCells?.map(checkCell) || [false, false, false];
         const [v1, v2, v3] = vertices.v[current] || [null, null, null];
 
-        if (v1 !== undefined && v1 !== previous && c1 !== c2) next = v1;
-        else if (v2 !== undefined && v2 !== previous && c2 !== c3) next = v2;
-        else if (v3 !== undefined && v3 !== previous && c1 !== c3) next = v3;
+        // Check each potential next vertex to ensure it's valid and has vertices.c entry
+        if (v1 !== undefined && v1 !== previous && v1 < vertices.c.length && vertices.c[v1] && c1 !== c2) {
+          next = v1;
+        } else if (v2 !== undefined && v2 !== previous && v2 < vertices.c.length && vertices.c[v2] && c2 !== c3) {
+          next = v2;
+        } else if (v3 !== undefined && v3 !== previous && v3 < vertices.c.length && vertices.c[v3] && c1 !== c3) {
+          next = v3;
+        } else {
+          break; // No valid next vertex
+        }
 
         if (next === current || next === startingVertex) {
           if (next === startingVertex) chain.push(startingVertex);

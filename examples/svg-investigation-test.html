@@ -148,10 +148,16 @@
         }
         
         // Check cells.vCoords (should be polygon coordinates)
-        const firstCellVCoords = pack.cells?.vCoords?.[0];
-        if (firstCellVCoords) {
-          log(`cells.vCoords[0] type: POLYGON COORDINATES (CORRECT)`, 'success');
-          log(`cells.vCoords[0] sample: ${JSON.stringify(firstCellVCoords.slice(0, 2))}`, 'info');
+        // vCoords is a pre-allocated array, so check if it has entries
+        const hasVCoords = pack.cells?.vCoords && Array.isArray(pack.cells.vCoords) && pack.cells.vCoords.length > 0;
+        if (hasVCoords) {
+          const firstCellVCoords = pack.cells.vCoords[0];
+          if (firstCellVCoords && Array.isArray(firstCellVCoords) && firstCellVCoords.length > 0) {
+            log(`cells.vCoords[0] type: POLYGON COORDINATES (CORRECT)`, 'success');
+            log(`cells.vCoords[0] sample: ${JSON.stringify(firstCellVCoords.slice(0, 2))}`, 'info');
+          } else {
+            log('⚠ cells.vCoords exists but first entry is empty', 'error');
+          }
         } else {
           log('⚠ cells.vCoords not found (may cause canvas rendering issues)', 'error');
         }
