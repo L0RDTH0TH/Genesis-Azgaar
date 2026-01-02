@@ -255,6 +255,11 @@ function getBorderPath(vertices, vertexChain, discontinue) {
   const pathParts = [];
 
   for (const vertexId of vertexChain) {
+    // Safety check: ensure vertexId is valid and vertices.p exists
+    if (vertexId < 0 || vertexId >= vertices.p.length || !vertices.p[vertexId]) {
+      continue; // Skip invalid vertex
+    }
+    
     if (discontinue(vertexId)) {
       discontinued = true;
       continue;
@@ -263,7 +268,9 @@ function getBorderPath(vertices, vertexChain, discontinue) {
     const operation = discontinued ? 'M' : 'L';
     discontinued = false;
     const point = vertices.p[vertexId];
-    pathParts.push(`${operation}${point[0]},${point[1]}`);
+    if (point && point.length >= 2) {
+      pathParts.push(`${operation}${point[0]},${point[1]}`);
+    }
   }
 
   return pathParts.join(' ').trim();
@@ -1025,7 +1032,13 @@ export function renderMapSVG(data, options = {}) {
   layers.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${STYLE_CONSTANTS.landBase}" />`);
 
   // 4. Biomes
-  const biomesSVG = drawBiomesSVG(pack, biomesData);
+  let biomesSVG = '';
+  try {
+    biomesSVG = drawBiomesSVG(pack, biomesData);
+  } catch (error) {
+    console.warn('Biome rendering failed, using empty layer:', error.message);
+    // Continue with empty biomes - map will still render
+  }
   if (biomesSVG) {
     layers.push(`<g id="biomes" opacity="0.7">${biomesSVG}</g>`);
   }
