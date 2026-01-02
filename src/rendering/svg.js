@@ -40,13 +40,13 @@ const MIN_LAND_HEIGHT = 20;
  * @returns {Object} Isolines object keyed by type
  */
 function getIsolines(pack, getType, options = { fill: false, waterGap: false, halo: false }) {
+  // TEMPORARY: Disable isoline rendering due to sparse array issues
+  // TODO: Fix Voronoi class to ensure all vertex entries are populated
+  // For now, return empty to trigger polygon fallback which works correctly
+  return {};
+  
   try {
     const { cells, vertices } = pack;
-    
-    // TEMPORARY: Disable isoline rendering due to sparse array issues
-    // TODO: Fix Voronoi class to ensure all vertex entries are populated
-    // For now, return empty to trigger polygon fallback which works correctly
-    return {};
     
     // Check if vertex graph is available (required for isoline rendering)
     if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
@@ -327,6 +327,8 @@ export function drawBiomesSVG(pack, biomesData) {
   // TEMPORARY: Disable isoline rendering due to sparse array issues
   // TODO: Fix Voronoi class to ensure all vertex entries are populated
   // For now, skip isolines and use polygon fallback which works correctly
+  // ISOLINE RENDERING DISABLED - Always use polygon fallback
+  /*
   const useIsolines = false; // Set to false to force polygon fallback
   
   // Try isolines first (requires full vertex graph and vertex indices)
@@ -356,6 +358,7 @@ export function drawBiomesSVG(pack, biomesData) {
       console.warn('Isoline rendering failed, using polygon fallback:', error.message);
     }
   }
+  */
   
   // Fallback: render polygons directly if isolines not available
   // Group cells by biome and render as polygons
