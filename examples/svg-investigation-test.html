@@ -139,24 +139,57 @@
             pack.vertices?.v?.length > 0 ? 'success' : 'error');
         
         // Check cells.v structure (should be vertex indices now)
-        const firstCellV = pack.cells?.v?.[0];
-        if (firstCellV) {
-          const isCoordinates = Array.isArray(firstCellV[0]) && firstCellV[0].length === 2;
-          log(`cells.v[0] type: ${isCoordinates ? 'POLYGON COORDINATES (ERROR!)' : 'VERTEX INDICES (CORRECT)'}`, 
-              isCoordinates ? 'error' : 'success');
-          log(`cells.v[0] sample: ${JSON.stringify(firstCellV.slice(0, 3))}`, 'info');
+        // Debug: Check if v exists and what type it is
+        const hasV = pack.cells?.v !== undefined;
+        const vIsArray = Array.isArray(pack.cells?.v);
+        const vLength = pack.cells?.v?.length || 0;
+        log(`cells.v exists: ${hasV}, isArray: ${vIsArray}, length: ${vLength}`, hasV && vLength > 0 ? 'success' : 'error');
+        
+        if (hasV && vLength > 0) {
+          const firstCellV = pack.cells.v[0];
+          if (firstCellV && Array.isArray(firstCellV) && firstCellV.length > 0) {
+            const isCoordinates = Array.isArray(firstCellV[0]) && firstCellV[0].length === 2;
+            log(`cells.v[0] type: ${isCoordinates ? 'POLYGON COORDINATES (ERROR!)' : 'VERTEX INDICES (CORRECT)'}`, 
+                isCoordinates ? 'error' : 'success');
+            log(`cells.v[0] sample: ${JSON.stringify(firstCellV.slice(0, 3))}`, 'info');
+          } else {
+            log(`cells.v[0] is empty or invalid: ${JSON.stringify(firstCellV)}`, 'error');
+          }
+        } else {
+          log('⚠ cells.v is missing or empty - checking if pack was created with full graph', 'error');
+          // Check a few more indices to see if it's sparse
+          let nonEmptyV = 0;
+          for (let i = 0; i < Math.min(100, pack.cells.i.length); i++) {
+            if (pack.cells.v?.[i] && Array.isArray(pack.cells.v[i]) && pack.cells.v[i].length > 0) {
+              nonEmptyV++;
+            }
+          }
+          log(`cells.v non-empty entries (first 100): ${nonEmptyV}`, nonEmptyV > 0 ? 'info' : 'error');
         }
         
         // Check cells.vCoords (should be polygon coordinates)
         // vCoords is a pre-allocated array, so check if it has entries
-        const hasVCoords = pack.cells?.vCoords && Array.isArray(pack.cells.vCoords) && pack.cells.vCoords.length > 0;
-        if (hasVCoords) {
+        const hasVCoords = pack.cells?.vCoords !== undefined;
+        const vCoordsIsArray = Array.isArray(pack.cells?.vCoords);
+        const vCoordsLength = pack.cells?.vCoords?.length || 0;
+        log(`cells.vCoords exists: ${hasVCoords}, isArray: ${vCoordsIsArray}, length: ${vCoordsLength}`, 
+            hasVCoords && vCoordsLength > 0 ? 'success' : 'error');
+        
+        if (hasVCoords && vCoordsLength > 0) {
           const firstCellVCoords = pack.cells.vCoords[0];
           if (firstCellVCoords && Array.isArray(firstCellVCoords) && firstCellVCoords.length > 0) {
             log(`cells.vCoords[0] type: POLYGON COORDINATES (CORRECT)`, 'success');
             log(`cells.vCoords[0] sample: ${JSON.stringify(firstCellVCoords.slice(0, 2))}`, 'info');
           } else {
             log('⚠ cells.vCoords exists but first entry is empty', 'error');
+            // Check a few more indices
+            let nonEmptyVCoords = 0;
+            for (let i = 0; i < Math.min(100, pack.cells.i.length); i++) {
+              if (pack.cells.vCoords[i] && Array.isArray(pack.cells.vCoords[i]) && pack.cells.vCoords[i].length > 0) {
+                nonEmptyVCoords++;
+              }
+            }
+            log(`cells.vCoords non-empty entries (first 100): ${nonEmptyVCoords}`, nonEmptyVCoords > 0 ? 'info' : 'error');
           }
         } else {
           log('⚠ cells.vCoords not found (may cause canvas rendering issues)', 'error');

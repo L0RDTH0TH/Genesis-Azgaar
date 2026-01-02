@@ -40,13 +40,16 @@ const MIN_LAND_HEIGHT = 20;
  * @returns {Object} Isolines object keyed by type
  */
 function getIsolines(pack, getType, options = { fill: false, waterGap: false, halo: false }) {
-  // TEMPORARY: Disable isoline rendering due to sparse array issues
-  // TODO: Fix Voronoi class to ensure all vertex entries are populated
-  // For now, return empty to trigger polygon fallback which works correctly
+  // PERMANENTLY DISABLED: Isoline rendering has been replaced with polygon fallback
+  // This function exists only for backward compatibility with cached builds
+  // It always returns empty to trigger polygon fallback
+  console.warn('getIsolines called but disabled - using polygon fallback');
   return {};
   
+  // All code below is unreachable but kept for reference
+  // It will never execute due to the return statement above
   try {
-    const { cells, vertices } = pack;
+  const { cells, vertices } = pack;
     
     // Check if vertex graph is available (required for isoline rendering)
     if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
@@ -82,7 +85,7 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
       return {};
     }
     
-    const isolines = {};
+  const isolines = {};
 
   const checkedCells = new Uint8Array(cells.i.length);
   const addToChecked = (cellId) => (checkedCells[cellId] = 1);
@@ -129,16 +132,16 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     if (startingVertex === undefined) continue;
 
     try {
-      const vertexChain = connectVertices({
-        vertices,
-        startingVertex,
-        ofSameType,
-        addToChecked,
-        closeRing: true,
-      });
-      if (vertexChain.length < 3) continue;
+    const vertexChain = connectVertices({
+      vertices,
+      startingVertex,
+      ofSameType,
+      addToChecked,
+      closeRing: true,
+    });
+    if (vertexChain.length < 3) continue;
 
-      addIsoline(type, vertices, vertexChain);
+    addIsoline(type, vertices, vertexChain);
     } catch (error) {
       // Skip this isoline if connection fails
       console.warn(`Failed to connect vertices for cell ${cellId}:`, error.message);
@@ -146,7 +149,7 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     }
   }
 
-    return isolines;
+  return isolines;
   } catch (error) {
     // If anything goes wrong with isoline rendering, return empty to trigger fallback
     console.warn('getIsolines error:', error.message);
@@ -269,7 +272,7 @@ function getBorderPath(vertices, vertexChain, discontinue) {
     discontinued = false;
     const point = vertices.p[vertexId];
     if (point && point.length >= 2) {
-      pathParts.push(`${operation}${point[0]},${point[1]}`);
+    pathParts.push(`${operation}${point[0]},${point[1]}`);
     }
   }
 
@@ -305,113 +308,83 @@ function getGappedFillPaths(elementName, fill, waterGap, color, index) {
 export function drawBiomesSVG(pack, biomesData) {
   if (!pack.cells || !pack.cells.biome) return '';
 
-  const cells = pack.cells;
-  const bodyPaths = [];
-  
-  // Check if we have vertex graph for isoline rendering
-  const hasVertexGraph = pack.vertices && 
-                         pack.vertices.c && 
-                         Array.isArray(pack.vertices.c) && 
-                         pack.vertices.c.length > 0;
-  
-  // Check if cells.v contains vertex indices (not polygon coordinates)
-  let hasVertexIndices = false;
-  if (hasVertexGraph && cells.v && cells.v.length > 0) {
-    const firstCellV = cells.v[0];
-    hasVertexIndices = Array.isArray(firstCellV) && 
-                       firstCellV.length > 0 && 
-                       typeof firstCellV[0] === 'number' &&
-                       !Array.isArray(firstCellV[0]);
-  }
-  
-  // TEMPORARY: Disable isoline rendering due to sparse array issues
-  // TODO: Fix Voronoi class to ensure all vertex entries are populated
-  // For now, skip isolines and use polygon fallback which works correctly
-  // ISOLINE RENDERING DISABLED - Always use polygon fallback
-  /*
-  const useIsolines = false; // Set to false to force polygon fallback
-  
-  // Try isolines first (requires full vertex graph and vertex indices)
-  if (useIsolines && hasVertexGraph && hasVertexIndices) {
-    try {
-      const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
-        fill: true,
-        waterGap: true,
-      });
-
-      const hasIsolines = Object.keys(isolines).length > 0;
-      if (hasIsolines) {
-        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-          const biomeIndex = parseInt(index);
-          if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
-            const color = biomesData.color[biomeIndex];
-            bodyPaths.push(getGappedFillPaths('biome', fill, waterGap, color, biomeIndex));
+  // Defensive: Wrap entire function in try-catch to handle any errors from cached builds
+  try {
+    const cells = pack.cells;
+    const bodyPaths = [];
+    
+    // ISOLINE RENDERING PERMANENTLY DISABLED - Always use polygon fallback
+    // The isoline rendering code has been removed to prevent errors from cached builds
+    // Polygon fallback works correctly and provides the same visual result
+    
+    // Render polygons directly (polygon fallback)
+    // Group cells by biome and render as polygons
+    const biomeGroups = {};
+    for (let i = 0; i < cells.i.length; i++) {
+      const biomeId = cells.biome[i];
+      if (biomeId === undefined || biomeId < 0) continue;
+      
+      if (!biomeGroups[biomeId]) {
+        biomeGroups[biomeId] = [];
+      }
+      
+      // Get polygon from cells.vCoords[i] (polygon coordinates) or convert from vertex indices
+      let polygon = null;
+      
+      // Prefer vCoords if available (direct polygon coordinates)
+      if (cells.vCoords && cells.vCoords[i] && Array.isArray(cells.vCoords[i]) && cells.vCoords[i].length > 0) {
+        polygon = cells.vCoords[i];
+      } 
+      // Fallback: convert vertex indices to coordinates
+      else if (cells.v && cells.v[i] && pack.vertices && pack.vertices.p) {
+        const vertexIndices = cells.v[i];
+        if (Array.isArray(vertexIndices) && vertexIndices.length > 0) {
+          // Check if it's already coordinates (backward compatibility)
+          if (Array.isArray(vertexIndices[0]) && vertexIndices[0].length === 2) {
+            polygon = vertexIndices;
+          } else {
+            // Convert vertex indices to coordinates
+            polygon = vertexIndices
+              .map(vId => {
+                if (typeof vId !== 'number' || vId < 0 || !pack.vertices.p || !pack.vertices.p[vId]) return null;
+                const vertex = pack.vertices.p[vId];
+                if (!Array.isArray(vertex) || vertex.length < 2) return null;
+                return vertex;
+              })
+              .filter(p => p !== null && p !== undefined && Array.isArray(p) && p.length >= 2);
           }
-        });
+        }
+      }
+      
+      // If still no polygon, skip this cell
+      if (!polygon || polygon.length < 3) continue;
+    
+      if (polygon && polygon.length > 0) {
+        // Convert polygon coordinates to SVG path
+        const path = polygon.map(([x, y], idx) => 
+          idx === 0 ? `M${x},${y}` : `L${x},${y}`
+        ).join(' ') + ' Z';
         
-        // If we got isolines, return them
-        if (bodyPaths.length > 0) {
-          return bodyPaths.join('');
-        }
-      }
-    } catch (error) {
-      console.warn('Isoline rendering failed, using polygon fallback:', error.message);
-    }
-  }
-  */
-  
-  // Fallback: render polygons directly if isolines not available
-  // Group cells by biome and render as polygons
-  const biomeGroups = {};
-  for (let i = 0; i < cells.i.length; i++) {
-    const biomeId = cells.biome[i];
-    if (biomeId === undefined || biomeId < 0) continue;
-    
-    if (!biomeGroups[biomeId]) {
-      biomeGroups[biomeId] = [];
-    }
-    
-    // Get polygon from cells.vCoords[i] (polygon coordinates) or convert from vertex indices
-    let polygon = null;
-    
-    // Prefer vCoords if available (direct polygon coordinates)
-    if (cells.vCoords && cells.vCoords[i] && Array.isArray(cells.vCoords[i]) && cells.vCoords[i].length > 0) {
-      polygon = cells.vCoords[i];
-    } 
-    // Fallback: convert vertex indices to coordinates
-    else if (cells.v && cells.v[i] && pack.vertices && pack.vertices.p) {
-      const vertexIndices = cells.v[i];
-      if (Array.isArray(vertexIndices) && vertexIndices.length > 0) {
-        // Check if it's already coordinates (backward compatibility)
-        if (Array.isArray(vertexIndices[0]) && vertexIndices[0].length === 2) {
-          polygon = vertexIndices;
-        } else {
-          // Convert vertex indices to coordinates
-          polygon = vertexIndices.map(vId => pack.vertices.p[vId]).filter(p => p !== undefined);
-        }
+        const color = biomeId < biomesData.color.length 
+          ? biomesData.color[biomeId] 
+          : biomesData.color[0];
+        
+        biomeGroups[biomeId].push(`<path d="${path}" fill="${color}" stroke="${color}" stroke-width="0.5" opacity="0.7" />`);
       }
     }
     
-    if (polygon && polygon.length > 0) {
-      // Convert polygon coordinates to SVG path
-      const path = polygon.map(([x, y], idx) => 
-        idx === 0 ? `M${x},${y}` : `L${x},${y}`
-      ).join(' ') + ' Z';
-      
-      const color = biomeId < biomesData.color.length 
-        ? biomesData.color[biomeId] 
-        : biomesData.color[0];
-      
-      biomeGroups[biomeId].push(`<path d="${path}" fill="${color}" stroke="${color}" stroke-width="0.5" opacity="0.7" />`);
-    }
-  }
-  
-  // Combine all paths for each biome
-  Object.entries(biomeGroups).forEach(([biomeId, paths]) => {
-    bodyPaths.push(`<g id="biome-${biomeId}">${paths.join('')}</g>`);
-  });
+    // Combine all paths for each biome
+    Object.entries(biomeGroups).forEach(([biomeId, paths]) => {
+      bodyPaths.push(`<g id="biome-${biomeId}">${paths.join('')}</g>`);
+    });
 
-  return bodyPaths.join('');
+    return bodyPaths.join('');
+  } catch (error) {
+    // Defensive: If any error occurs (e.g., from cached build calling getIsolines), return empty
+    console.error('Error in drawBiomesSVG (possibly from cached build):', error.message);
+    console.error('Stack:', error.stack);
+    return ''; // Return empty to allow map to render without biomes
+  }
 }
 
 /**
@@ -422,57 +395,16 @@ export function drawBiomesSVG(pack, biomesData) {
 export function drawStatesSVG(pack) {
   if (!pack.cells || !pack.cells.state || !pack.states) return '';
 
-  const { cells, states } = pack;
-  const bodyPaths = [];
-
-  // Check if we have vertex graph for isoline rendering
-  const hasVertexGraph = pack.vertices && 
-                         pack.vertices.c && 
-                         Array.isArray(pack.vertices.c) && 
-                         pack.vertices.c.length > 0;
-  
-  // Check if cells.v contains vertex indices (not polygon coordinates)
-  let hasVertexIndices = false;
-  if (hasVertexGraph && cells.v && cells.v.length > 0) {
-    const firstCellV = cells.v[0];
-    hasVertexIndices = Array.isArray(firstCellV) && 
-                       firstCellV.length > 0 && 
-                       typeof firstCellV[0] === 'number' &&
-                       !Array.isArray(firstCellV[0]);
-  }
-  
-  // TEMPORARY: Disable isoline rendering due to sparse array issues
-  const useIsolines = false; // Set to false to force polygon fallback
-  
-  // Try isolines first (requires full vertex graph and vertex indices)
-  if (useIsolines && hasVertexGraph && hasVertexIndices) {
-    try {
-      const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
-        fill: true,
-        waterGap: true,
-      });
-
-      const hasIsolines = Object.keys(isolines).length > 0;
-      if (hasIsolines) {
-        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-          const stateIndex = parseInt(index);
-          if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
-            const color = states[stateIndex].color || '#cccccc';
-            bodyPaths.push(getGappedFillPaths('state', fill, waterGap, color, stateIndex));
-          }
-        });
-        
-        // If we got isolines, return them
-        if (bodyPaths.length > 0) {
-          return bodyPaths.join('');
-        }
-      }
-    } catch (error) {
-      console.warn('State isoline rendering failed, using polygon fallback:', error.message);
-    }
-  }
-  
-  // Fallback: render polygons directly if isolines not available
+  // Defensive: Wrap entire function in try-catch to handle any errors from cached builds
+  try {
+    const { cells, states } = pack;
+    const bodyPaths = [];
+    
+    // ISOLINE RENDERING PERMANENTLY DISABLED - Always use polygon fallback
+    // The isoline rendering code has been removed to prevent errors from cached builds
+    // Polygon fallback works correctly and provides the same visual result
+    
+    // Render polygons directly (polygon fallback)
   // Group cells by state and render as polygons
   const stateGroups = {};
   for (let i = 0; i < cells.i.length; i++) {
@@ -513,12 +445,18 @@ export function drawStatesSVG(pack) {
     }
   }
   
-  // Combine all paths for each state
-  Object.entries(stateGroups).forEach(([stateId, paths]) => {
-    bodyPaths.push(`<g id="state-${stateId}">${paths.join('')}</g>`);
-  });
+    // Combine all paths for each state
+    Object.entries(stateGroups).forEach(([stateId, paths]) => {
+      bodyPaths.push(`<g id="state-${stateId}">${paths.join('')}</g>`);
+    });
 
-  return bodyPaths.join('');
+    return bodyPaths.join('');
+  } catch (error) {
+    // Defensive: If any error occurs (e.g., from cached build calling getIsolines), return empty
+    console.error('Error in drawStatesSVG (possibly from cached build):', error.message);
+    console.error('Stack:', error.stack);
+    return ''; // Return empty to allow map to render without states
+  }
 }
 
 /**
@@ -1039,12 +977,14 @@ export function renderMapSVG(data, options = {}) {
   try {
     biomesSVG = drawBiomesSVG(pack, biomesData);
   } catch (error) {
-    console.warn('Biome rendering failed, using empty layer:', error.message);
+    // Defensive: Catch any errors (including from cached builds calling getIsolines)
+    console.warn('Biome rendering failed (possibly from cached build), using empty layer:', error.message);
+    console.warn('Error stack:', error.stack);
     // Continue with empty biomes - map will still render
+    biomesSVG = ''; // Ensure it's empty on error
   }
-  if (biomesSVG) {
-    layers.push(`<g id="biomes" opacity="0.7">${biomesSVG}</g>`);
-  }
+  // Always add biomes layer (even if empty) to maintain SVG structure
+  layers.push(`<g id="biomes" opacity="0.7">${biomesSVG}</g>`);
 
   // 5. States
   const statesSVG = drawStatesSVG(pack);

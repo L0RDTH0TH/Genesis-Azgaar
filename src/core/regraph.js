@@ -72,6 +72,8 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   
   // Build full Voronoi vertex graph using Voronoi class
   // Note: Voronoi class expects Delaunator instance (from DelaunatorClass), not d3.Delaunay
+  // The Voronoi class indexes cells by the original point index in allPoints
+  // Since allPoints = [newCells.p (pack points), boundary], pack cell index i maps to allPoints index i
   const voronoiGraph = new Voronoi(delaunay, allPoints, newCells.p.length);
   
   // Create pack cells structure
@@ -94,25 +96,95 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   }
 
   // Populate cells from voronoiGraph (vertex indices and neighbors)
+  // IMPORTANT: voronoiGraph.cells.v[i] is indexed by the point index in allPoints
+  // Since allPoints = [newCells.p (0..newCells.p.length-1), boundary], 
+  // pack cell index i directly maps to voronoiGraph.cells.v[i] for i < newCells.p.length
+  let vCoordsPopulated = 0;
+  let vPopulated = 0;
   for (let i = 0; i < newCells.p.length; i++) {
     // Get vertex indices for this cell (from voronoiGraph)
-    packCells.v[i] = voronoiGraph.cells.v[i] || [];
+    // voronoiGraph.cells.v[i] should exist for pack cells (i < newCells.p.length)
+    const cellVertices = voronoiGraph.cells.v[i];
+    if (cellVertices && Array.isArray(cellVertices) && cellVertices.length > 0) {
+      packCells.v[i] = cellVertices;
+      vPopulated++;
+    } else {
+      packCells.v[i] = [];
+    }
+    
     // Get adjacent cells (from voronoiGraph)
-    packCells.c[i] = voronoiGraph.cells.c[i] || [];
+    // Map adjacent cell indices: if neighbor index < newCells.p.length, it's a pack cell
+    // Otherwise it's a boundary cell (skip it)
+    const cellNeighbors = voronoiGraph.cells.c[i];
+    if (cellNeighbors && Array.isArray(cellNeighbors)) {
+      packCells.c[i] = cellNeighbors.filter(neibIdx => neibIdx < newCells.p.length);
+    } else {
+      packCells.c[i] = [];
+    }
     
     // Get polygon coordinates for canvas rendering
-    const cellPolygon = voronoiDiagram.renderCell(i);
-    if (cellPolygon && cellPolygon.length > 0) {
-      // Store polygon coordinates separately for canvas rendering
-      packCells.vCoords[i] = Array.from(cellPolygon).map(([x, y]) => [x, y]);
-      
-      // Calculate area from polygon
-      packCells.area[i] = Math.abs(d3.polygonArea(cellPolygon));
-    } else {
-      // Fallback: no polygon (shouldn't happen, but handle gracefully)
-      packCells.vCoords[i] = [];
-      packCells.area[i] = 1.0;
+    try {
+      const cellPolygon = voronoiDiagram.renderCell(i);
+      if (cellPolygon && cellPolygon.length > 0) {
+        // Store polygon coordinates separately for canvas rendering
+        packCells.vCoords[i] = Array.from(cellPolygon).map(([x, y]) => [x, y]);
+        vCoordsPopulated++;
+        
+        // Calculate area from polygon
+        packCells.area[i] = Math.abs(d3.polygonArea(cellPolygon));
+      } else {
+        // Fallback: convert vertex indices to coordinates if renderCell fails
+        if (packCells.v[i] && packCells.v[i].length > 0 && voronoiGraph.vertices.p) {
+          packCells.vCoords[i] = packCells.v[i]
+            .map(vId => {
+              const vertex = voronoiGraph.vertices.p[vId];
+              return vertex && Array.isArray(vertex) ? [Math.round(vertex[0]), Math.round(vertex[1])] : null;
+            })
+            .filter(v => v !== null);
+          if (packCells.vCoords[i].length > 0) {
+            vCoordsPopulated++;
+            packCells.area[i] = Math.abs(d3.polygonArea(packCells.vCoords[i]));
+          } else {
+            packCells.vCoords[i] = [];
+            packCells.area[i] = 1.0;
+          }
+        } else {
+          packCells.vCoords[i] = [];
+          packCells.area[i] = 1.0;
+        }
+      }
+    } catch (error) {
+      // If renderCell throws, try fallback conversion
+      if (packCells.v[i] && packCells.v[i].length > 0 && voronoiGraph.vertices.p) {
+        packCells.vCoords[i] = packCells.v[i]
+          .map(vId => {
+            const vertex = voronoiGraph.vertices.p[vId];
+            return vertex && Array.isArray(vertex) ? [Math.round(vertex[0]), Math.round(vertex[1])] : null;
+          })
+          .filter(v => v !== null);
+        if (packCells.vCoords[i].length > 0) {
+          vCoordsPopulated++;
+          packCells.area[i] = Math.abs(d3.polygonArea(packCells.vCoords[i]));
+        } else {
+          packCells.vCoords[i] = [];
+          packCells.area[i] = 1.0;
+        }
+      } else {
+        packCells.vCoords[i] = [];
+        packCells.area[i] = 1.0;
+      }
     }
+  }
+  
+  // Debug logging
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[regraph] Pack cells populated:', {
+      totalCells: newCells.p.length,
+      vCoordsPopulated,
+      vPopulated,
+      vCoordsPercent: ((vCoordsPopulated / newCells.p.length) * 100).toFixed(1) + '%',
+      vPercent: ((vPopulated / newCells.p.length) * 100).toFixed(1) + '%',
+    });
   }
 
   // Mark border cells

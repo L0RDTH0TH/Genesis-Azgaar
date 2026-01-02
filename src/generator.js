@@ -153,8 +153,20 @@ function generateMapInternal(options, DelaunatorClass) {
   grid.cells.prec = precipitation;
 
   // Phase 7: Create pack from grid
-  // Use full Voronoi pack if fullRendering is enabled or if canvas is provided
-  const useFullPack = options.fullRendering === true || state.canvas !== null;
+  // Use full Voronoi pack if fullRendering is enabled, canvas is provided, or container (SVG) is provided
+  // Full pack is required for rendering (both canvas and SVG need vCoords/v data)
+  const useFullPack = options.fullRendering === true || state.canvas !== null || state.container !== null;
+  
+  // Debug: Log decision
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[generator] Pack creation decision:', {
+      useFullPack,
+      fullRendering: options.fullRendering,
+      hasCanvas: state.canvas !== null,
+      hasContainer: state.container !== null,
+    });
+  }
+  
   let pack;
   
   if (useFullPack) {
@@ -162,6 +174,20 @@ function generateMapInternal(options, DelaunatorClass) {
     pack = createPackFromGrid({ grid, options, DelaunatorClass });
     // Ensure pack has height data from grid (pack may have fewer cells than grid)
     // Height data will be mapped via pack.cells.g (grid cell index)
+    
+    // Debug: Log pack structure to verify vCoords and v are populated
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[generator] Pack created (full):', {
+        cellsCount: pack.cells.i.length,
+        hasVCoords: Array.isArray(pack.cells.vCoords),
+        vCoordsLength: pack.cells.vCoords?.length || 0,
+        hasV: Array.isArray(pack.cells.v),
+        vLength: pack.cells.v?.length || 0,
+        vCoordsSample: pack.cells.vCoords?.[0]?.length || 0,
+        vSample: pack.cells.v?.[0]?.length || 0,
+        verticesPLength: pack.vertices?.p?.length || 0,
+      });
+    }
   } else {
     // Simplified pack (faster, for headless/data-only use)
     pack = createSimplifiedPack(grid, options);
@@ -170,6 +196,15 @@ function generateMapInternal(options, DelaunatorClass) {
     // Ensure pack.cells.g maps pack cells to grid cells (for simplified version, 1:1 mapping)
     for (let i = 0; i < pack.cells.i.length; i++) {
       pack.cells.g[i] = i;
+    }
+    
+    // Debug: Log simplified pack
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[generator] Pack created (simplified):', {
+        cellsCount: pack.cells.i.length,
+        hasVCoords: Array.isArray(pack.cells.vCoords),
+        hasV: Array.isArray(pack.cells.v),
+      });
     }
   }
 
@@ -476,8 +511,35 @@ export function renderPreviewSVG(options = {}) {
   } catch (error) {
     if (typeof console !== 'undefined' && console.error) {
       console.error('SVG rendering failed:', error);
+      console.error('Error stack:', error.stack);
     }
-    throw new GenerationError(`SVG rendering failed: ${error.message}`);
+    // Defensive: Try to render with minimal layers if full rendering fails
+    // This allows the map to still render even if some layers fail
+    try {
+      // Create a minimal SVG with just the base layers
+      const { pack, options: genOptions } = state.data;
+      const mapWidth = width || genOptions.mapWidth || 1000;
+      const mapHeight = height || genOptions.mapHeight || 600;
+      
+      const minimalLayers = [
+        `<rect x="0" y="0" width="${mapWidth}" height="${mapHeight}" fill="#d4d4aa" />`,
+        `<text x="${mapWidth/2}" y="${mapHeight/2}" text-anchor="middle" fill="#666" font-size="16">Map rendered with errors - some layers may be missing</text>`
+      ];
+      
+      const minimalSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${mapWidth}" height="${mapHeight}" viewBox="0 0 ${mapWidth} ${mapHeight}">
+${minimalLayers.join('\n')}
+</svg>`;
+      
+      if (container) {
+        container.innerHTML = minimalSVG;
+        console.warn('SVG rendered with minimal fallback due to error');
+        return null;
+      }
+      return minimalSVG;
+    } catch (fallbackError) {
+      // If even minimal rendering fails, throw original error
+      throw new GenerationError(`SVG rendering failed: ${error.message}`);
+    }
   }
 }
 

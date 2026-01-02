@@ -34,7 +34,7 @@ export function getCellPolygonPath(cellIndex, pack) {
       // Check if it's already coordinates (backward compatibility)
       if (Array.isArray(vertexIndices[0]) && vertexIndices[0].length === 2) {
         return vertexIndices;
-      }
+  }
       // Convert vertex indices to coordinates
       return vertexIndices.map(vId => pack.vertices.p[vId]).filter(p => p !== undefined);
     }
