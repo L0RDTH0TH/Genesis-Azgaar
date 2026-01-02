@@ -110,13 +110,13 @@
         initGenerator({ container: svgContainer });
         log('✓ Generator initialized', 'success');
         
-        // Load options
-        const seed = String(Math.floor(Math.random() * 1000000));
+        // Load options - use default seed for consistency in testing
+        const seed = '8678460'; // Use seed from screenshot reference
         loadOptions({
           seed: seed,
           mapWidth: 960,
           mapHeight: 540,
-          points: 4, // 10,000 cells
+          points: 4, // ~10,000 cells
           statesNumber: 20,
           cultures: 15,
         });
@@ -171,27 +171,124 @@
         // Attempt SVG rendering
         log('--- SVG Rendering Attempt ---', 'info');
         const renderStart = performance.now();
-        renderPreviewSVG({
-          width: 960,
-          height: 540,
-          container: svgContainer
-        });
-        const renderTime = ((performance.now() - renderStart) / 1000).toFixed(2);
-        log(`✓ SVG rendered in ${renderTime}s`, 'success');
+        try {
+          renderPreviewSVG({
+            width: 960,
+            height: 540,
+            container: svgContainer
+          });
+          const renderTime = ((performance.now() - renderStart) / 1000).toFixed(2);
+          const hasSVG = svgContainer.innerHTML.length > 0;
+          if (hasSVG) {
+            log(`✓ SVG rendered in ${renderTime}s`, 'success');
+            log(`SVG content length: ${svgContainer.innerHTML.length} characters`, 'info');
+          } else {
+            log(`⚠ SVG rendering completed but container is empty`, 'error');
+          }
+        } catch (error) {
+          const renderTime = ((performance.now() - renderStart) / 1000).toFixed(2);
+          log(`✗ Error: SVG rendering failed: ${error.message}`, 'error');
+          log(`Stack: ${error.stack}`, 'error');
+          log(`Rendering failed after ${renderTime}s`, 'error');
+          // Check if any SVG was rendered despite the error
+          const hasSVG = svgContainer.innerHTML.length > 0;
+          if (hasSVG) {
+            log(`⚠ Error occurred but SVG was partially rendered (${svgContainer.innerHTML.length} chars)`, 'error');
+          }
+        }
         
         // Check if SVG was created
         const svg = svgContainer.querySelector('svg');
         if (svg) {
           log(`✓ SVG element created with ${svg.children.length} children`, 'success');
-          // Check for key layers
-          const hasBiomes = svg.querySelector('#biomes');
-          const hasStates = svg.querySelector('#states');
-          const hasBorders = svg.querySelector('#borders');
-          log(`  - Biomes layer: ${hasBiomes ? '✓' : '✗'}`, hasBiomes ? 'success' : 'error');
-          log(`  - States layer: ${hasStates ? '✓' : '✗'}`, hasStates ? 'success' : 'error');
-          log(`  - Borders layer: ${hasBorders ? '✓' : '✗'}`, hasBorders ? 'success' : 'error');
+          log(`SVG viewBox: ${svg.getAttribute('viewBox')}`, 'info');
+          
+          // Check for key layers and log their content length
+          const biomesLayer = svg.querySelector('#biomes');
+          const statesLayer = svg.querySelector('#states');
+          const bordersLayer = svg.querySelector('#borders');
+          
+          if (biomesLayer) {
+            const biomesContent = biomesLayer.innerHTML.trim();
+            log(`  - Biomes layer: ✓ (${biomesContent.length} chars)`, 'success');
+            const biomeGroups = biomesLayer.querySelectorAll('g[id^="biome-"]');
+            log(`    Biome groups: ${biomeGroups.length}`, 'info');
+          } else {
+            log(`  - Biomes layer: ✗`, 'error');
+          }
+          
+          if (statesLayer) {
+            const statesContent = statesLayer.innerHTML.trim();
+            log(`  - States layer: ✓ (${statesContent.length} chars)`, 'success');
+            const stateGroups = statesLayer.querySelectorAll('g[id^="state-"]');
+            log(`    State groups: ${stateGroups.length}`, 'info');
+          } else {
+            log(`  - States layer: ✗`, 'error');
+          }
+          
+          if (bordersLayer) {
+            const bordersContent = bordersLayer.innerHTML.trim();
+            log(`  - Borders layer: ✓ (${bordersContent.length} chars)`, 'success');
+          } else {
+            log(`  - Borders layer: ✗`, 'error');
+          }
+          
+          // Log full SVG structure summary
+          log('--- SVG Structure Summary ---', 'info');
+          log(`Total SVG content: ${svgContainer.innerHTML.length} characters`, 'info');
+          log(`SVG children: ${svg.children.length}`, 'info');
+          Array.from(svg.children).forEach((child, idx) => {
+            const id = child.id || child.tagName;
+            const contentLength = child.innerHTML ? child.innerHTML.trim().length : 0;
+            log(`  Layer ${idx + 1}: ${id} (${contentLength} chars)`, 'info');
+          });
         } else {
           log('✗ No SVG element found in container', 'error');
+        }
+        
+        // Detailed pack structure logging
+        log('--- Pack Structure Summary ---', 'info');
+        log(`cells.i.length: ${pack.cells?.i?.length || 0}`, 'info');
+        log(`cells.v.length: ${pack.cells?.v?.length || 0}`, 'info');
+        log(`cells.vCoords.length: ${pack.cells?.vCoords?.length || 0}`, 'info');
+        log(`vertices.p.length: ${pack.vertices?.p?.length || 0}`, 'info');
+        log(`vertices.v.length: ${pack.vertices?.v?.length || 0}`, 'info');
+        log(`vertices.c.length: ${pack.vertices?.c?.length || 0}`, 'info');
+        
+        // Sample data verification
+        if (pack.cells?.v?.[0]) {
+          const firstV = pack.cells.v[0];
+          const isVertexIndices = Array.isArray(firstV) && firstV.length > 0 && typeof firstV[0] === 'number';
+          log(`cells.v[0] contains: ${isVertexIndices ? 'VERTEX INDICES ✓' : 'COORDINATES ✗'}`, 
+              isVertexIndices ? 'success' : 'error');
+          log(`cells.v[0] sample: [${firstV.slice(0, 3).join(', ')}...]`, 'info');
+        }
+        
+        if (pack.cells?.vCoords?.[0]) {
+          const firstVCoords = pack.cells.vCoords[0];
+          const isCoords = Array.isArray(firstVCoords) && firstVCoords.length > 0 && Array.isArray(firstVCoords[0]);
+          log(`cells.vCoords[0] contains: ${isCoords ? 'POLYGON COORDINATES ✓' : 'INVALID ✗'}`, 
+              isCoords ? 'success' : 'error');
+          log(`cells.vCoords[0] length: ${firstVCoords.length}`, 'info');
+        }
+        
+        // Vertex graph connectivity check
+        if (pack.vertices?.c && pack.vertices.c.length > 0) {
+          const nonEmptyC = pack.vertices.c.filter(v => v && Array.isArray(v) && v.length > 0).length;
+          const avgCellsPerVertex = pack.vertices.c
+            .filter(v => v && Array.isArray(v) && v.length > 0)
+            .reduce((sum, v) => sum + v.length, 0) / nonEmptyC;
+          log(`vertices.c populated: ${nonEmptyC}/${pack.vertices.c.length} (avg ${avgCellsPerVertex.toFixed(1)} cells/vertex)`, 
+              nonEmptyC > 0 ? 'success' : 'error');
+        }
+        
+        if (pack.vertices?.v && pack.vertices.v.length > 0) {
+          const nonEmptyV = pack.vertices.v.filter(v => v && Array.isArray(v) && v.length > 0).length;
+          const avgVerticesPerVertex = pack.vertices.v
+            .filter(v => v && Array.isArray(v) && v.length > 0)
+            .reduce((sum, v) => sum + v.length, 0) / nonEmptyV;
+          log(`vertices.v populated: ${nonEmptyV}/${pack.vertices.v.length} (avg ${avgVerticesPerVertex.toFixed(1)} vertices/vertex)`, 
+              nonEmptyV > 0 ? 'success' : 'error');
         }
         
       } catch (error) {
