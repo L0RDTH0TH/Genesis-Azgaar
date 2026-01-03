@@ -1212,6 +1212,58 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
 }
 
 /**
+ * Draw state labels with arched paths (simplified version)
+ * Uses state centers (capitals) for positioning with simple arched paths
+ * @param {Object} pack - Pack object
+ * @returns {string} SVG elements for state labels
+ */
+export function drawStateLabelsSVG(pack) {
+  if (!pack.states || !pack.burgs || !pack.cells) return '';
+  
+  const labels = [];
+  const states = pack.states;
+  const burgs = pack.burgs;
+  const cells = pack.cells;
+  
+  for (const state of states) {
+    if (!state.i || state.removed || state.i === 0) continue; // Skip neutral state (0)
+    if (!state.name) continue;
+    
+    // Get capital burg position
+    const capitalBurg = state.capital && burgs[state.capital];
+    if (!capitalBurg || !capitalBurg.x || !capitalBurg.y) continue;
+    
+    const [x, y] = [capitalBurg.x, capitalBurg.y];
+    const stateName = state.name || `State${state.i}`;
+    const color = state.color || '#333';
+    
+    // Create simple arched path (quadratic bezier curve)
+    // Arc upward from the capital position
+    const arcHeight = 15; // Height of arc
+    const arcWidth = Math.max(stateName.length * 4, 40); // Width based on text length
+    
+    const startX = x - arcWidth / 2;
+    const startY = y - 10;
+    const endX = x + arcWidth / 2;
+    const endY = y - 10;
+    const controlX = x;
+    const controlY = y - 10 - arcHeight;
+    
+    const pathId = `stateLabelPath${state.i}`;
+    const pathD = `M ${rn(startX, 2)},${rn(startY, 2)} Q ${rn(controlX, 2)},${rn(controlY, 2)} ${rn(endX, 2)},${rn(endY, 2)}`;
+    
+    labels.push(
+      `<defs><path id="${pathId}" d="${pathD}" /></defs>`,
+      `<text id="stateLabel${state.i}" fill="${color}" stroke="#fff" stroke-width="0.5" font-size="12" font-weight="bold">`,
+      `<textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${stateName}</textPath>`,
+      `</text>`
+    );
+  }
+  
+  return labels.join('');
+}
+
+/**
  * Render complete map to SVG string
  * @param {Object} data - Map data {grid, pack, options}
  * @param {Object} options - Rendering options {width, height, container}
@@ -1293,6 +1345,12 @@ export function renderMapSVG(data, options = {}) {
   const burgsSVG = drawBurgsSVG(pack);
   if (burgsSVG) {
     layers.push(`<g id="burgs">${burgsSVG}</g>`);
+  }
+
+  // 10. State labels
+  const stateLabelsSVG = drawStateLabelsSVG(pack);
+  if (stateLabelsSVG) {
+    layers.push(`<g id="labels" class="state-labels">${stateLabelsSVG}</g>`);
   }
 
   // Combine into complete SVG
