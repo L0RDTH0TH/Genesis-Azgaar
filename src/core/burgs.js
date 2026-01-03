@@ -126,33 +126,45 @@ function placeCapitals({ pack, options, rng }) {
   // Original uses: for (let i = 0; burgs.length <= count; i++)
   // This means: continue while burgs.length <= count, stop when burgs.length > count
   // So if count=18, we want burgs.length to be 19 (18 capitals + 1 null), then stop
-  for (let i = 0; burgs.length <= count; i++) {
-    // If we've exhausted all candidates, retry with reduced spacing
-    if (i >= sorted.length) {
-      if (spacing <= 1) {
-        // Can't reduce spacing further - break out of loop
-        break;
+  // HARD LIMIT: Never place more than count capitals, even if spacing allows it
+  let retryCount = 0;
+  const maxRetries = 10;
+  
+  while (burgs.length <= count && retryCount < maxRetries) {
+    let placedThisRound = false;
+    
+    for (let i = 0; i < sorted.length && burgs.length <= count; i++) {
+      const cell = sorted[i];
+      const [x, y] = cells.p[cell];
+
+      // Only add if not too close to existing burg
+      if (!burgsTree.find(x, y, spacing)) {
+        burgs.push({ cell, x, y });
+        burgsTree.add([x, y]);
+        placedThisRound = true;
+        // Check if we've placed enough - if so, break immediately
+        if (burgs.length > count) {
+          break;
+        }
       }
-      // Retry with reduced spacing
+    }
+    
+    // If we didn't place enough and haven't exhausted retries, reduce spacing and retry
+    if (burgs.length <= count && spacing > 1 && retryCount < maxRetries - 1) {
       burgsTree = new SimpleQuadtree();
       burgs = [null]; // Reset burgs array
       spacing /= 1.2;
-      i = -1; // Reset loop counter (will be incremented to 0)
-      continue;
+      retryCount++;
+      placedThisRound = false;
+    } else {
+      // Either we placed enough, or spacing is too small, or max retries reached
+      break;
     }
-
-    const cell = sorted[i];
-    const [x, y] = cells.p[cell];
-
-    // Only add if not too close to existing burg
-    if (!burgsTree.find(x, y, spacing)) {
-      burgs.push({ cell, x, y });
-      burgsTree.add([x, y]);
-      // Check if we've placed enough - if so, break immediately
-      if (burgs.length > count) {
-        break;
-      }
-    }
+  }
+  
+  // HARD LIMIT: Truncate to exactly count capitals if we somehow placed more
+  if (burgs.length > count + 1) {
+    burgs = [null, ...burgs.slice(1, count + 1)];
   }
 
   // Log for debugging
