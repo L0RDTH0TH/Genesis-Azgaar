@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - SVG Preview (Primary Rendering)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: #2196F3;
+    }
+    button.secondary:hover {
+      background: #0b7dda;
+    }
+    button.danger {
+      background: #f44336;
+    }
+    button.danger:hover {
+      background: #da190b;
+    }
+    #svgContainer {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      margin-top: 20px;
+      width: 960px;
+      height: 540px;
+    }
+    #svgContainer svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+    }
+    .error {
+      color: #f44;
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a1a1a;
+      border-radius: 4px;
+    }
+    .success {
+      color: #4f4;
+      margin-top: 10px;
+      padding: 10px;
+      background: #1a2a1a;
+      border-radius: 4px;
+    }
+    .code-block {
+      background: #2a2a2a;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - SVG Preview (Primary Rendering)</h1>
+  <p>This example demonstrates SVG rendering (isoline-based, smooth, high-quality). Canvas rendering is deprecated.</p>
+  
+  <div class="controls">
+    <button id="initBtn">1. Initialize Generator</button>
+    <button id="loadBtn" disabled>2. Load Options (Seed: 42)</button>
+    <button id="generateBtn" disabled>3. Generate Map</button>
+    <button id="renderBtn" disabled>4. Render SVG Preview</button>
+    <button id="exportSvgBtn" disabled class="secondary">Export SVG String</button>
+    <button id="getDataBtn" disabled class="secondary">Get Map Data (JSON)</button>
+    <button id="randomBtn" disabled class="secondary">Generate Random Map</button>
+    <button id="resetBtn" class="danger">Reset</button>
+  </div>
+
+  <div id="svgContainer"></div>
+  
+  <div class="info" id="info"></div>
+  <div id="message"></div>
+  <div id="jsonOutput" style="display: none;"></div>
+
+  <script type="module">
+    // Import Delaunator (peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library (using dev server or dist bundle)
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData, 
+      renderPreviewSVG,
+      renderToSVG
+    } from libraryPath;
+
+    const svgContainer = document.getElementById('svgContainer');
+    const initBtn = document.getElementById('initBtn');
+    const loadBtn = document.getElementById('loadBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const renderBtn = document.getElementById('renderBtn');
+    const exportSvgBtn = document.getElementById('exportSvgBtn');
+    const getDataBtn = document.getElementById('getDataBtn');
+    const randomBtn = document.getElementById('randomBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const infoDiv = document.getElementById('info');
+    const messageDiv = document.getElementById('message');
+    const jsonOutputDiv = document.getElementById('jsonOutput');
+
+    let currentStep = 0;
+
+    function clearMessage() {
+      messageDiv.innerHTML = '';
+      messageDiv.className = '';
+      jsonOutputDiv.style.display = 'none';
+      jsonOutputDiv.innerHTML = '';
+    }
+
+    function showMessage(message, type = 'info') {
+      clearMessage();
+      messageDiv.innerHTML = message;
+      messageDiv.className = type;
+    }
+
+    function showInfo(message) {
+      infoDiv.textContent = message;
+    }
+
+    function enableStep(step) {
+      currentStep = Math.max(currentStep, step);
+      if (step >= 1) loadBtn.disabled = false;
+      if (step >= 2) generateBtn.disabled = false;
+      if (step >= 3) renderBtn.disabled = false;
+      if (step >= 3) exportSvgBtn.disabled = false;
+      if (step >= 3) getDataBtn.disabled = false;
+      if (step >= 3) randomBtn.disabled = false;
+    }
+
+    function disableAll() {
+      loadBtn.disabled = true;
+      generateBtn.disabled = true;
+      renderBtn.disabled = true;
+      exportSvgBtn.disabled = true;
+      getDataBtn.disabled = true;
+      randomBtn.disabled = true;
+    }
+
+    // Step 1: Initialize
+    initBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        initGenerator({ container: svgContainer });
+        showMessage('Generator initialized with SVG container', 'success');
+        showInfo('Step 1 complete: Generator initialized');
+        enableStep(1);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Initialization error:', error);
+      }
+    });
+
+    // Step 2: Load Options
+    loadBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        loadOptions({
+          seed: '42',
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+          statesNumber: 18,
+          cultures: 12,
+          fullRendering: true, // Required for SVG isoline rendering
+        });
+        showMessage('Options loaded (seed: 42)', 'success');
+        showInfo('Step 2 complete: Options loaded');
+        enableStep(2);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Load options error:', error);
+      }
+    });
+
+    // Step 3: Generate Map
+    generateBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        showInfo('Generating map...');
+        const startTime = performance.now();
+
+        const data = generateMap(Delaunator);
+
+        const generateTime = performance.now() - startTime;
+        showMessage(
+          `Map generated in ${generateTime.toFixed(2)}ms (seed: ${data.seed})`,
+          'success'
+        );
+        showInfo(`Step 3 complete: Map generated (${generateTime.toFixed(2)}ms)`);
+        enableStep(3);
+
+        console.log('Generated map data:', {
+          seed: data.seed,
+          gridCells: data.grid.cells.i.length,
+          packCells: data.pack.cells.i.length,
+          features: data.pack.features?.length || 0,
+          burgs: data.pack.burgs?.length || 0,
+          states: data.pack.states?.length || 0,
+        });
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Generation error:', error);
+      }
+    });
+
+    // Step 4: Render SVG Preview
+    renderBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        const renderStart = performance.now();
+        renderPreviewSVG({ 
+          width: 960, 
+          height: 540,
+          container: svgContainer 
+        });
+        const renderTime = performance.now() - renderStart;
+        showMessage(`SVG map rendered in ${renderTime.toFixed(2)}ms`, 'success');
+        showInfo(`Step 4 complete: SVG map rendered (${renderTime.toFixed(2)}ms)`);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Render error:', error);
+      }
+    });
+
+    // Export SVG String
+    exportSvgBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        const svgString = renderToSVG({ width: 960, height: 540 });
+        const blob = new Blob([svgString], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `azgaar-map-${Date.now()}.svg`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showMessage('SVG exported successfully', 'success');
+        console.log('SVG string length:', svgString.length);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Export error:', error);
+      }
+    });
+
+    // Get Map Data (JSON)
+    getDataBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        const json = getMapData();
+        const jsonString = JSON.stringify(json, null, 2);
+        
+        showMessage('Map data retrieved (see JSON below)', 'success');
+        jsonOutputDiv.style.display = 'block';
+        jsonOutputDiv.innerHTML = `<div class="code-block">${jsonString.substring(0, 2000)}${jsonString.length > 2000 ? '...\n(truncated)' : ''}</div>`;
+        
+        console.log('Map data JSON:', json);
+        console.log('Full JSON string:', jsonString);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Get data error:', error);
+      }
+    });
+
+    // Generate Random Map
+    randomBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        showInfo('Generating random map...');
+        
+        // Load new random options
+        loadOptions({
+          seed: String(Date.now()),
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+          fullRendering: true,
+        });
+        
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const generateTime = performance.now() - startTime;
+        
+        const renderStart = performance.now();
+        renderPreviewSVG({ 
+          width: 960, 
+          height: 540,
+          container: svgContainer 
+        });
+        const renderTime = performance.now() - renderStart;
+        
+        showMessage(
+          `Random map generated and rendered (${generateTime.toFixed(2)}ms gen, ${renderTime.toFixed(2)}ms render)`,
+          'success'
+        );
+        showInfo(`Random map: seed ${data.seed}`);
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Random generation error:', error);
+      }
+    });
+
+    // Reset
+    resetBtn.addEventListener('click', () => {
+      location.reload();
+    });
+
+    // Auto-initialize on load
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        try {
+          initGenerator({ container: svgContainer });
+          showMessage('Auto-initialized generator with SVG container', 'success');
+          enableStep(1);
+        } catch (error) {
+          showMessage(`Auto-init error: ${error.message}`, 'error');
+        }
+      }, 100);
+    });
+  </script>
+</body>
+</html>

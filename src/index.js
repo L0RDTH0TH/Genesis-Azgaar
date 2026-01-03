@@ -12,8 +12,9 @@ export {
   loadOptions,
   generateMap,
   getMapData,
-  renderPreview,
-  renderPreviewSVG,
+  renderPreview, // DEPRECATED: Use renderPreviewSVG() or renderToSVG() instead
+  renderPreviewSVG, // Primary rendering method (SVG) - appends to container or returns string
+  renderToSVG, // Convenience function - always returns SVG string
   loadMapData,
 } from './generator.js';
 

@@ -6,7 +6,8 @@
  * =============================================================================
  */
 
-export { renderMap } from './canvas.js';
+// Canvas rendering is deprecated - use SVG instead
+// export { renderMap } from './canvas.js'; // DEPRECATED
 export {
   renderMapSVG,
   drawBiomesSVG,

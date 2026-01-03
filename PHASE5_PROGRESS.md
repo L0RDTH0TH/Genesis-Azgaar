@@ -5,9 +5,23 @@
 
 ---
 
+## ⚠️ IMPORTANT: Canvas Rendering Deprecated
+
+**Canvas rendering is now DEPRECATED** in favor of SVG rendering. SVG provides:
+- **Isoline-based rendering**: Smooth, continuous paths (not pixel-based)
+- **High-quality output**: Vector graphics, infinite scalability
+- **Production pipeline**: Per audit, SVG is the production-quality rendering method
+
+**Migration Guide:**
+- Use `renderPreviewSVG()` or `renderToSVG()` instead of `renderPreview()`
+- Use `container` parameter in `initGenerator()` instead of `canvas`
+- Canvas functions still exist for backward compatibility but emit deprecation warnings
+
+---
+
 ## Summary
 
-Phase 5 implementation is progressing well. Sub-Phases 5.1 (Full Voronoi Pack), 5.2 (Polygon-Based Land & Biome Rendering), 5.3 (Heightmap & Terrain Shading), and 5.4 (Rivers, Borders & Burgs) are complete. The library now renders beautiful, three-dimensional maps with elevation-based shading, biome coloring, rivers, borders, and settlements.
+Phase 5 implementation is progressing well. Sub-Phases 5.1 (Full Voronoi Pack), 5.2 (Polygon-Based Land & Biome Rendering), 5.3 (Heightmap & Terrain Shading), and 5.4 (Rivers, Borders & Burgs) are complete. The library now renders beautiful, three-dimensional maps with elevation-based shading, biome coloring, rivers, borders, and settlements using **SVG (isoline-based) rendering**.
 
 ---
 
@@ -164,6 +178,60 @@ Phase 5 implementation is progressing well. Sub-Phases 5.1 (Full Voronoi Pack), 
 - Minified: 182.77KB
 - No compilation errors
 - All functions exported correctly
+
+---
+
+## ✅ Completed: Generation Pipeline Fix (Critical)
+
+### Issue Identified
+Per `PHASE5_GENERATION_AUDIT.md`: Missing `rankCells()` function causing 0 burgs, 1 state, sparse maps.
+
+### Changes Made
+
+1. **Created `src/core/rankCells.js`**
+   - ✅ Ported `rankCells()` function from `original/main.js:1169-1208`
+   - ✅ Calculates `cells.s` (suitability scores) based on:
+     - Biome habitability (base score)
+     - River flux and confluences (water availability bonus)
+     - Elevation (low elevation preferred)
+     - Coastline proximity (ocean coast, harbors, estuaries)
+     - Feature types (lakes, etc.)
+   - ✅ Calculates `cells.pop` (population scores) from suitability × area
+   - ✅ Uses `Int16Array` for suitability, `Float32Array` for population
+   - ✅ Includes debug logging for statistics
+
+2. **Integrated into Generation Pipeline**
+   - ✅ Added import in `src/generator.js`
+   - ✅ Added call after Phase 10 (feature detection), before Phase 11 (cultures)
+   - ✅ Exported from `src/core/index.js`
+
+3. **Dependencies Verified**
+   - ✅ `cells.fl` (flux) - from river generation
+   - ✅ `cells.conf` (confluences) - from river generation
+   - ✅ `cells.area` - from pack creation
+   - ✅ `cells.haven`, `cells.harbor` - from feature detection
+   - ✅ `cells.t` (type) - from grid markup
+   - ✅ `cells.r` (rivers) - from river generation
+   - ✅ `pack.features` - from feature specification
+
+### Expected Impact
+
+- ✅ **Cultures**: Can now place centers (requires populated cells)
+- ✅ **Burgs**: Can now be placed (requires culture AND suitability > 0)
+- ✅ **States**: Can now be created (requires capitals from burgs)
+- ✅ **Maps**: Should show 10-20 states, 50-200+ burgs (vs. previous 1 state, 0 burgs)
+
+### Testing Status
+
+- ⏳ **Pending**: Browser testing may require cache clearing
+- ⏳ **Pending**: Verify metrics (states, burgs, cultures) match expected
+- ⏳ **Pending**: Visual comparison with original Azgaar (seed 42)
+
+### Files Modified
+
+1. `src/core/rankCells.js` - New file (154 lines)
+2. `src/core/index.js` - Added export
+3. `src/generator.js` - Added import and call (Phase 10.5)
 
 ---
 

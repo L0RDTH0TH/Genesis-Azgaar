@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Generation Diagnostic</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px 5px;
+      font-size: 16px;
+    }
+    #info {
+      margin: 20px 0;
+      padding: 10px;
+      background: #f0f0f0;
+      border-radius: 5px;
+    }
+    #metrics {
+      display: none;
+      margin: 20px 0;
+      padding: 15px;
+      background: #e8f4f8;
+      border-radius: 5px;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    .error {
+      color: red;
+      font-weight: bold;
+    }
+    .warning {
+      color: orange;
+      font-weight: bold;
+    }
+    .success {
+      color: green;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Generation Diagnostic</h1>
+  <p>Diagnostic tool to analyze map generation data structure and identify issues.</p>
+  
+  <button id="testBtn">Run Diagnostic</button>
+  <button id="exportBtn" disabled>Export JSON</button>
+  
+  <div id="info">Click "Run Diagnostic" to analyze generation with seed 42...</div>
+  <div id="metrics"></div>
+
+  <script type="module">
+    const libraryPath = './src/index.js';
+    let AzgaarModule = null;
+
+    try {
+      AzgaarModule = await import(libraryPath);
+    } catch (error) {
+      console.error('Failed to load Azgaar module:', error);
+      document.getElementById('info').textContent = `Error loading module: ${error.message}`;
+      throw error;
+    }
+
+    const { initGenerator, loadOptions, generateMap, getMapData } = AzgaarModule;
+    const Delaunator = (await import('https://cdn.jsdelivr.net/npm/delaunator@5.0.0/+esm')).default;
+
+    const testBtn = document.getElementById('testBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const infoDiv = document.getElementById('info');
+    const metricsDiv = document.getElementById('metrics');
+
+    let mapData = null;
+
+    // Initialize generator
+    initGenerator({});
+
+    testBtn.addEventListener('click', async () => {
+      try {
+        infoDiv.textContent = 'Running diagnostic with seed 42...';
+        testBtn.disabled = true;
+
+        // Load options with seed 42
+        loadOptions({
+          seed: '42',
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+          statesNumber: 18,
+          cultures: 12,
+          fullRendering: true,
+        });
+
+        // Generate map
+        const genStart = performance.now();
+        const data = generateMap(Delaunator);
+        const genTime = performance.now() - genStart;
+        mapData = data;
+
+        // Analyze data structure
+        const { grid, pack } = data;
+        const { cells } = pack;
+
+        // Count land cells
+        const landCells = cells.i.filter(i => cells.h[i] >= 20).length;
+        const landPercent = ((landCells / cells.i.length) * 100).toFixed(1);
+
+        // Count cells with culture
+        const cellsWithCulture = cells.i.filter(i => cells.culture && cells.culture[i] !== undefined && cells.culture[i] !== 0).length;
+        const culturePercent = ((cellsWithCulture / cells.i.length) * 100).toFixed(1);
+
+        // Count cells with suitability
+        const cellsWithSuitability = cells.i.filter(i => cells.s && cells.s[i] !== undefined && cells.s[i] > 0).length;
+        const suitabilityPercent = ((cellsWithSuitability / cells.i.length) * 100).toFixed(1);
+
+        // Count cells with population
+        const cellsWithPopulation = cells.i.filter(i => cells.pop && cells.pop[i] !== undefined && cells.pop[i] > 0).length;
+        const populationPercent = ((cellsWithPopulation / cells.i.length) * 100).toFixed(1);
+
+        // Analyze cultures
+        const culturesCount = pack.cultures ? pack.cultures.length : 0;
+        const culturesWithCenter = pack.cultures ? pack.cultures.filter(c => c && c.center !== undefined).length : 0;
+
+        // Analyze burgs
+        const burgsCount = pack.burgs ? pack.burgs.filter(b => b && !b.removed).length : 0;
+        const capitalsCount = pack.burgs ? pack.burgs.filter(b => b && b.capital).length : 0;
+
+        // Analyze states
+        const statesCount = pack.states ? pack.states.filter(s => s && !s.removed).length : 0;
+        const statesWithCenter = pack.states ? pack.states.filter(s => s && s.center !== undefined).length : 0;
+
+        // Check suitability scores
+        const suitabilityScores = cells.s ? Array.from(cells.s).filter(s => s > 0) : [];
+        const maxSuitability = suitabilityScores.length > 0 ? Math.max(...suitabilityScores) : 0;
+        const avgSuitability = suitabilityScores.length > 0 ? (suitabilityScores.reduce((a, b) => a + b, 0) / suitabilityScores.length).toFixed(2) : 0;
+
+        // Check population scores
+        const populationScores = cells.pop ? Array.from(cells.pop).filter(p => p > 0) : [];
+        const maxPopulation = populationScores.length > 0 ? Math.max(...populationScores) : 0;
+        const avgPopulation = populationScores.length > 0 ? (populationScores.reduce((a, b) => a + b, 0) / populationScores.length).toFixed(2) : 0;
+
+        // Diagnose issues
+        const issues = [];
+        if (landPercent < 30) issues.push({ type: 'error', msg: `Low land percentage: ${landPercent}% (expected ~40-60%)` });
+        if (culturePercent < 50) issues.push({ type: 'error', msg: `Low culture coverage: ${culturePercent}% (expected ~80-100%)` });
+        if (suitabilityPercent < 50) issues.push({ type: 'warning', msg: `Low suitability coverage: ${suitabilityPercent}% (expected ~80-100%)` });
+        if (populationPercent < 50) issues.push({ type: 'warning', msg: `Low population coverage: ${populationPercent}% (expected ~80-100%)` });
+        if (capitalsCount === 0) issues.push({ type: 'error', msg: `No capitals placed (expected ${data.options.statesNumber || 18})` });
+        if (burgsCount === 0) issues.push({ type: 'error', msg: `No burgs placed (expected 50-200+)` });
+        if (statesCount <= 1) issues.push({ type: 'error', msg: `Only ${statesCount} state(s) (expected ${data.options.statesNumber || 18})` });
+        if (culturesCount === 0) issues.push({ type: 'error', msg: `No cultures generated (expected ${data.options.cultures || 12})` });
+
+        // Display metrics
+        metricsDiv.style.display = 'block';
+        metricsDiv.innerHTML = `
+<strong>Generation Metrics:</strong>
+Generation time: ${genTime.toFixed(2)}ms
+Seed: ${data.seed}
+
+<strong>Cell Statistics:</strong>
+Total cells: ${cells.i.length}
+Land cells: ${landCells} (${landPercent}%)
+Cells with culture: ${cellsWithCulture} (${culturePercent}%)
+Cells with suitability: ${cellsWithSuitability} (${suitabilityPercent}%)
+Cells with population: ${cellsWithPopulation} (${populationPercent}%)
+
+<strong>Suitability Scores:</strong>
+Max: ${maxSuitability}
+Average: ${avgSuitability}
+Scores > 0: ${suitabilityScores.length}
+
+<strong>Population Scores:</strong>
+Max: ${maxPopulation}
+Average: ${avgPopulation}
+Scores > 0: ${populationScores.length}
+
+<strong>Culture Statistics:</strong>
+Cultures generated: ${culturesCount}
+Cultures with center: ${culturesWithCenter}
+
+<strong>Burg Statistics:</strong>
+Total burgs: ${burgsCount}
+Capitals: ${capitalsCount}
+Expected capitals: ${data.options.statesNumber || 18}
+
+<strong>State Statistics:</strong>
+Total states: ${statesCount}
+States with center: ${statesWithCenter}
+Expected states: ${data.options.statesNumber || 18}
+
+<strong>Issues Found:</strong>
+${issues.length === 0 ? '<span class="success">✓ No issues detected</span>' : issues.map(i => `<span class="${i.type}">${i.type.toUpperCase()}: ${i.msg}</span>`).join('\n')}
+        `;
+
+        infoDiv.textContent = `Diagnostic complete! Found ${issues.length} issue(s).`;
+        exportBtn.disabled = false;
+        testBtn.disabled = false;
+
+        console.log('Generation Diagnostic Results:', {
+          seed: data.seed,
+          landPercent,
+          culturePercent,
+          suitabilityPercent,
+          populationPercent,
+          capitalsCount,
+          burgsCount,
+          statesCount,
+          culturesCount,
+          issues: issues.length,
+        });
+
+      } catch (error) {
+        console.error('Diagnostic error:', error);
+        infoDiv.textContent = `Error: ${error.message}`;
+        infoDiv.className = 'error';
+        testBtn.disabled = false;
+      }
+    });
+
+    exportBtn.addEventListener('click', () => {
+      if (!mapData) {
+        alert('No data to export. Run diagnostic first.');
+        return;
+      }
+      const json = JSON.stringify(mapData, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `azgaar-diagnostic-seed-${mapData.seed}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

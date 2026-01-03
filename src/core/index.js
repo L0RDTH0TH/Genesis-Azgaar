@@ -13,6 +13,7 @@ export * from './rivers.js';
 export * from './temperature.js';
 export * from './biomes.js';
 export * from './features.js';
+export * from './rankCells.js';
 export * from './cultures.js';
 export * from './burgs.js';
 export * from './states.js';

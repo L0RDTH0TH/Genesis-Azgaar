@@ -15,7 +15,7 @@ import {
   InvalidOptionError,
   GenerationError,
   NoDataError,
-  NoCanvasError,
+  // NoCanvasError, // DEPRECATED: Canvas rendering is deprecated
 } from './utils/errors.js';
 import {
   createVoronoiDiagram,
@@ -29,6 +29,7 @@ import {
   markupGrid,
   markupPack,
   specifyFeatures,
+  rankCells,
   generateCultures,
   expandCultures,
   generateBurgs,
@@ -38,14 +39,15 @@ import {
   generateEmblems,
 } from './core/index.js';
 import { createPackFromGrid } from './core/regraph.js';
-import { renderMap } from './rendering/canvas.js';
+// Canvas rendering is deprecated - use SVG instead
+// import { renderMap } from './rendering/canvas.js'; // DEPRECATED
 import { renderMapSVG } from './rendering/svg.js';
 
 /**
  * Singleton state for the generator
  */
 let state = {
-  canvas: null,
+  // canvas: null, // DEPRECATED: Canvas rendering is deprecated, use container for SVG instead
   container: null, // SVG container element (optional)
   options: getDefaultOptions(),
   data: null, // { grid, pack, seed }
@@ -153,8 +155,8 @@ function generateMapInternal(options, DelaunatorClass) {
   grid.cells.prec = precipitation;
 
   // Phase 7: Create pack from grid
-  // Use full Voronoi pack if fullRendering is enabled, canvas is provided, or container (SVG) is provided
-  // Full pack is required for rendering (both canvas and SVG need vCoords/v data)
+  // Use full Voronoi pack if fullRendering is enabled or container (SVG) is provided
+  // Full pack is required for SVG rendering (needs vCoords/v data for isoline rendering)
   // ALWAYS use full pack for now to ensure cell data is populated
   const useFullPack = true; // Force full pack creation for all cases
   
@@ -163,7 +165,6 @@ function generateMapInternal(options, DelaunatorClass) {
     console.log('[generator] Pack creation decision:', {
       useFullPack,
       fullRendering: options.fullRendering,
-      hasCanvas: state.canvas !== null,
       hasContainer: state.container !== null,
       forcedFullPack: true,
     });
@@ -233,6 +234,9 @@ function generateMapInternal(options, DelaunatorClass) {
   markupPack({ pack });
   specifyFeatures({ pack, grid, options });
 
+  // Phase 10.5: Calculate suitability and population scores (CRITICAL for cultures/burgs/states)
+  rankCells({ pack, grid, options, biomesData });
+
   // Phase 11: Culture generation
   generateCultures({ pack, grid, options, rng, biomesData });
   expandCultures({ pack, options, biomesData });
@@ -278,10 +282,13 @@ function requireInitialized() {
 }
 
 /**
- * Initialize the generator with optional canvas or container for rendering
+ * Initialize the generator with optional container for SVG rendering
+ * 
+ * ⚠️ NOTE: Canvas rendering is deprecated. Use container for SVG rendering instead.
+ * 
  * @param {Object} params - Initialization parameters
- * @param {HTMLCanvasElement|null} params.canvas - Optional canvas element for canvas rendering
  * @param {HTMLElement|null} params.container - Optional container element for SVG rendering
+ * @param {HTMLCanvasElement|null} params.canvas - DEPRECATED: Canvas rendering is deprecated. Use container for SVG instead.
  * @throws {InitializationError} If already initialized or invalid elements provided
  */
 export function initGenerator({ canvas = null, container = null } = {}) {
@@ -291,11 +298,15 @@ export function initGenerator({ canvas = null, container = null } = {}) {
     );
   }
 
-  // Validate canvas if provided
-  if (canvas !== null && !(canvas instanceof HTMLCanvasElement)) {
-    throw new InitializationError(
-      `Invalid canvas element. Expected HTMLCanvasElement, got ${typeof canvas}`
-    );
+  // Warn if canvas is provided (deprecated)
+  if (canvas !== null) {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn(
+        '⚠️ DEPRECATED: Canvas rendering is deprecated. ' +
+        'Use container parameter for SVG rendering instead. ' +
+        'Canvas parameter will be ignored.'
+      );
+    }
   }
 
   // Validate container if provided
@@ -305,7 +316,7 @@ export function initGenerator({ canvas = null, container = null } = {}) {
     );
   }
 
-  state.canvas = canvas;
+  // state.canvas = canvas; // DEPRECATED: Canvas rendering is deprecated
   state.container = container;
   state.initialized = true;
 }
@@ -472,35 +483,31 @@ export function getMapData() {
 }
 
 /**
- * Render stored map data to the initialized canvas
+ * Render stored map data to SVG (default rendering method)
+ * 
+ * ⚠️ DEPRECATED: renderPreview() (Canvas) is deprecated. Use renderPreviewSVG() instead.
+ * This function now delegates to renderPreviewSVG() for backward compatibility.
+ * 
+ * @deprecated Use renderPreviewSVG() instead
  * @throws {InitializationError} If generator not initialized
  * @throws {NoDataError} If no data generated yet
- * @throws {NoCanvasError} If no canvas provided (only if rendering is explicitly required)
  */
 export function renderPreview() {
-  requireInitialized();
-
-  if (!state.data) {
-    throw new NoDataError();
-  }
-
-  if (!state.canvas) {
-    // No-op with warning if no canvas
     if (typeof console !== 'undefined' && console.warn) {
-      console.warn('renderPreview() called but no canvas was provided during initialization. Skipping render.');
+    console.warn(
+      '⚠️ DEPRECATED: renderPreview() is deprecated. ' +
+      'Use renderPreviewSVG() instead for production-quality SVG rendering.'
+    );
     }
-    return;
-  }
-
-  try {
-    renderMap(state.canvas, state.data);
-  } catch (error) {
-    throw new GenerationError(`Rendering failed: ${error.message}`);
-  }
+  
+  // Delegate to SVG rendering for backward compatibility
+  return renderPreviewSVG();
 }
 
 /**
  * Render stored map data to SVG (returns SVG string or appends to container)
+ * This is the primary rendering method - SVG provides isoline-based, smooth, high-quality output.
+ * 
  * @param {Object} options - Rendering options {width, height, container}
  * @returns {string|null} SVG string if no container provided, null if appended to container
  * @throws {InitializationError} If generator not initialized
@@ -575,6 +582,20 @@ ${minimalLayers.join('\n')}
       throw new GenerationError(`SVG rendering failed: ${error.message}`);
     }
   }
+}
+
+/**
+ * Render map data to SVG string (alias for renderPreviewSVG without container)
+ * Convenience function for generating SVG string without container
+ * 
+ * @param {Object} options - Rendering options {width, height}
+ * @returns {string} SVG string
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ */
+export function renderToSVG(options = {}) {
+  // Ensure no container is set so we always return SVG string
+  return renderPreviewSVG({ ...options, container: null });
 }
 
 /**

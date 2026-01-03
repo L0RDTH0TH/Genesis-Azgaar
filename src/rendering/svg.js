@@ -79,6 +79,34 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     
   const isolines = {};
 
+  // Define addIsoline function inside the try block so it can access isolines
+  function addIsoline(type, vertices, vertexChain) {
+    if (!isolines[type]) isolines[type] = {};
+
+    if (options.fill) {
+      if (!isolines[type].fill) isolines[type].fill = '';
+      isolines[type].fill += getFillPath(vertices, vertexChain);
+    }
+
+    if (options.waterGap) {
+      if (!isolines[type].waterGap) isolines[type].waterGap = '';
+      const isLandVertex = (vertexId) => {
+        if (vertexId < 0 || vertexId >= vertices.c.length || !vertices.c[vertexId]) return false;
+        return vertices.c[vertexId].every((i) => i >= 0 && i < cells.h.length && cells.h[i] >= MIN_LAND_HEIGHT);
+      };
+      isolines[type].waterGap += getBorderPath(vertices, vertexChain, isLandVertex);
+    }
+
+    if (options.halo) {
+      if (!isolines[type].halo) isolines[type].halo = '';
+      const isBorderVertex = (vertexId) => {
+        if (vertexId < 0 || vertexId >= vertices.c.length || !vertices.c[vertexId]) return false;
+        return vertices.c[vertexId].some((i) => i >= 0 && i < cells.b.length && cells.b[i]);
+      };
+      isolines[type].halo += getBorderPath(vertices, vertexChain, isBorderVertex);
+    }
+  }
+
   const checkedCells = new Uint8Array(cells.i.length);
   const addToChecked = (cellId) => (checkedCells[cellId] = 1);
   const isChecked = (cellId) => checkedCells[cellId] === 1;
@@ -146,33 +174,6 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     // If anything goes wrong with isoline rendering, return empty to trigger fallback
     console.warn('getIsolines error:', error.message);
     return {};
-  }
-
-  function addIsoline(type, vertices, vertexChain) {
-    if (!isolines[type]) isolines[type] = {};
-
-    if (options.fill) {
-      if (!isolines[type].fill) isolines[type].fill = '';
-      isolines[type].fill += getFillPath(vertices, vertexChain);
-    }
-
-    if (options.waterGap) {
-      if (!isolines[type].waterGap) isolines[type].waterGap = '';
-      const isLandVertex = (vertexId) => {
-        if (vertexId < 0 || vertexId >= vertices.c.length || !vertices.c[vertexId]) return false;
-        return vertices.c[vertexId].every((i) => i >= 0 && i < cells.h.length && cells.h[i] >= MIN_LAND_HEIGHT);
-      };
-      isolines[type].waterGap += getBorderPath(vertices, vertexChain, isLandVertex);
-    }
-
-    if (options.halo) {
-      if (!isolines[type].halo) isolines[type].halo = '';
-      const isBorderVertex = (vertexId) => {
-        if (vertexId < 0 || vertexId >= vertices.c.length || !vertices.c[vertexId]) return false;
-        return vertices.c[vertexId].some((i) => i >= 0 && i < cells.b.length && cells.b[i]);
-      };
-      isolines[type].halo += getBorderPath(vertices, vertexChain, isBorderVertex);
-    }
   }
 }
 

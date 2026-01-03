@@ -140,7 +140,7 @@
       </div>
     </div>
     
-    <canvas id="azgaar-preview" :width="wizardWidth" :height="wizardHeight"></canvas>
+    <div id="azgaar-preview" :style="`width: ${wizardWidth}px; height: ${wizardHeight}px;`"></div>
     
     <div id="azgaar-status" :class="statusClass" x-text="status" x-show="status"></div>
     <div x-show="error" x-text="'Error: ' + error" class="status-error" style="padding: 10px; margin: 10px 0; border-radius: 4px;"></div>
@@ -148,6 +148,7 @@
     <div class="info-box">
       <strong>Integration Notes:</strong><br>
       This is a complete, self-contained demo ready for integration into Godot WebView.<br>
+      <strong>Uses SVG rendering</strong> (isoline-based, smooth, high-quality) - Canvas rendering is deprecated.<br>
       See <code>alpine-integration.js</code> for the Alpine.js component code.<br>
       See <code>postmessage-protocol.md</code> for the message format documentation.<br>
       See <code>docs/godot-integration-guide.md</code> for full integration instructions.
@@ -204,7 +205,8 @@
       loadOptions, 
       generateMap, 
       getMapData, 
-      renderPreview 
+      renderPreviewSVG,
+      renderToSVG
     } from libraryPath;
 
     /**
@@ -217,7 +219,7 @@
         // State
         azgaarReady: false,
         generating: false,
-        previewCanvas: null,
+        previewContainer: null,
         mapData: null,
         status: '',
         error: null,
@@ -242,18 +244,18 @@
          */
         init() {
           try {
-            this.previewCanvas = document.getElementById('azgaar-preview');
-            if (!this.previewCanvas) {
-              this.error = 'Canvas element not found (id="azgaar-preview")';
+            this.previewContainer = document.getElementById('azgaar-preview');
+            if (!this.previewContainer) {
+              this.error = 'Preview container not found (id="azgaar-preview")';
               return;
             }
             
-            // Initialize the Azgaar generator
-            initGenerator({ canvas: this.previewCanvas });
+            // Initialize the Azgaar generator with SVG container
+            initGenerator({ container: this.previewContainer });
             this.azgaarReady = true;
             this.status = 'Ready to generate';
             
-            console.log('Azgaar generator initialized successfully');
+            console.log('Azgaar generator initialized successfully (SVG rendering)');
           } catch (err) {
             this.error = 'Failed to initialize: ' + err.message;
             console.error('Initialization error:', err);
@@ -298,9 +300,13 @@
             const data = generateMap(Delaunator);
             const generateTime = performance.now() - startTime;
             
-            // Render preview
-            this.status = 'Rendering preview...';
-            renderPreview();
+            // Render preview (SVG)
+            this.status = 'Rendering preview (SVG)...';
+            renderPreviewSVG({ 
+              width: this.wizardWidth, 
+              height: this.wizardHeight,
+              container: this.previewContainer 
+            });
             
             // Export JSON data
             this.status = 'Exporting data...';
@@ -371,10 +377,9 @@
           this.status = 'Ready to generate';
           this.error = null;
           
-          // Clear canvas
-          if (this.previewCanvas) {
-            const ctx = this.previewCanvas.getContext('2d');
-            ctx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+          // Clear SVG container
+          if (this.previewContainer) {
+            this.previewContainer.innerHTML = '';
           }
         }
       };

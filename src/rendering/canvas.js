@@ -3,6 +3,11 @@
  * canvas.js
  * Desc: Canvas 2D rendering for Azgaar Genesis Mythos fork
  * Author: Lordthoth (based on original by Azgaar)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated in favor of SVG rendering.
+ * Canvas was used for initial testing but SVG (isoline-based) is the production pipeline.
+ * This file is kept for backward compatibility but should not be used in new code.
+ * Use src/rendering/svg.js and renderMapSVG() instead.
  * =============================================================================
  */
 
@@ -38,6 +43,11 @@ const MIN_LAND_HEIGHT = 20;
 
 /**
  * Render a complete map to a canvas element
+ * 
+ * ⚠️ DEPRECATED: Use renderMapSVG() from svg.js instead.
+ * Canvas rendering is deprecated in favor of SVG (isoline-based, smooth, high-quality).
+ * 
+ * @deprecated Use renderMapSVG() instead
  * @param {HTMLCanvasElement} canvas - Canvas element to render to
  * @param {Object} data - Map data from generateMap()
  * @param {Object} data.grid - Grid object
@@ -45,6 +55,12 @@ const MIN_LAND_HEIGHT = 20;
  * @param {Object} data.options - Generation options
  */
 export function renderMap(canvas, data) {
+  if (typeof console !== 'undefined' && console.warn) {
+    console.warn(
+      '⚠️ DEPRECATED: renderMap() (Canvas) is deprecated. ' +
+      'Use renderMapSVG() from svg.js instead for production-quality rendering.'
+    );
+  }
   if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
     throw new Error('Canvas element is required');
   }
@@ -109,6 +125,10 @@ export function renderMap(canvas, data) {
 
 /**
  * Draw ocean layers (base fill + depth layers)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -125,6 +145,10 @@ function drawOceans(ctx, { grid, pack, options }) {
 /**
  * Draw heightmap shading (ocean depth + land elevation) - Phase 5.3
  * Full implementation with ocean depth gradients and land elevation shading
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -238,6 +262,10 @@ function interpolateColor(color1, color2, ratio) {
 
 /**
  * Draw lakes from pack features
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -293,6 +321,10 @@ function drawLakes(ctx, { grid, pack, options }) {
 
 /**
  * Draw landmass using Voronoi polygons (Phase 5.2)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -328,6 +360,10 @@ function drawLandPolygons(ctx, { grid, pack, options }) {
 /**
  * Draw biomes with color coding (Phase 5.2)
  * Biomes are drawn with blending to allow elevation shading to show through
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -384,9 +420,12 @@ function drawBiomes(ctx, { grid, pack, options }) {
 /**
  * Draw landmass base fill (DEPRECATED - circle-based fallback)
  * This is a fallback for when polygon data is not available (simplified pack)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated Use SVG rendering instead
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
- * @deprecated Use drawLandPolygons() or drawBiomes() instead
  */
 function drawLandmass(ctx, { grid, pack, options }) {
   if (!grid || !grid.cells || !grid.points) {
@@ -427,6 +466,10 @@ function drawLandmass(ctx, { grid, pack, options }) {
 
 /**
  * Draw rivers as flowing paths (Phase 5.4)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -523,6 +566,10 @@ function addMeandering(points) {
 
 /**
  * Draw borders (state and province) (Phase 5.4)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -669,6 +716,10 @@ function findSharedEdge(polygon1, cellId2, pack) {
 
 /**
  * Draw burgs (cities/towns) (Phase 5.4)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */
@@ -708,6 +759,10 @@ function drawBurgs(ctx, { grid, pack, options }) {
 
 /**
  * Draw texture overlay (optional)
+ * 
+ * ⚠️ DEPRECATED: Canvas rendering is deprecated. Use SVG rendering instead.
+ * 
+ * @deprecated
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} params - Rendering parameters
  */

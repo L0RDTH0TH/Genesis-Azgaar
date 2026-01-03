@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Simple Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    canvas {
+      border: 1px solid #444;
+      background: #000;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 14px;
+    }
+    #status {
+      margin: 10px 0;
+      padding: 10px;
+      background: #333;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Simple Test</h1>
+  <button id="generateBtn">Generate & Render Map</button>
+  <div id="status">Click button to generate map...</div>
+  <canvas id="canvas" width="960" height="540"></canvas>
+
+  <script type="module">
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      renderPreview 
+    } from '../dist/azgaar-genesis.esm.js';
+
+    const canvas = document.getElementById('canvas');
+    const btn = document.getElementById('generateBtn');
+    const status = document.getElementById('status');
+
+    // Initialize
+    initGenerator({ canvas });
+    status.textContent = 'Ready. Click to generate...';
+
+    btn.addEventListener('click', async () => {
+      try {
+        status.textContent = 'Generating...';
+        btn.disabled = true;
+
+        loadOptions({
+          seed: String(Math.floor(Math.random() * 1000000)),
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+          statesNumber: 18,
+          cultures: 12,
+          fullRendering: true,
+        });
+
+        const startTime = performance.now();
+        generateMap(Delaunator);
+        const genTime = performance.now() - startTime;
+
+        status.textContent = `Generated in ${genTime.toFixed(0)}ms. Rendering...`;
+        const renderStart = performance.now();
+        renderPreview();
+        const renderTime = performance.now() - renderStart;
+
+        status.textContent = `Complete! Generated: ${genTime.toFixed(0)}ms, Rendered: ${renderTime.toFixed(0)}ms`;
+        btn.disabled = false;
+      } catch (error) {
+        status.textContent = `Error: ${error.message}`;
+        console.error(error);
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

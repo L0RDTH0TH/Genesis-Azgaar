@@ -11,7 +11,7 @@
  * 3. Use in your HTML: <div x-data="azgaarGenerator()" x-init="init()">
  * 
  * REQUIRED HTML ELEMENTS:
- * - <canvas id="azgaar-preview"> (for map preview)
+ * - <div id="azgaar-preview"> (for SVG map preview - Canvas rendering is deprecated)
  * - <div id="azgaar-status"> (for status messages, optional)
  * 
  * ADAPTATION NEEDED:
@@ -28,7 +28,8 @@ import {
   loadOptions, 
   generateMap, 
   getMapData, 
-  renderPreview 
+  renderPreviewSVG,
+  renderToSVG
 } from './azgaar-genesis.esm.js';
 // In production, ensure path is correct: './azgaar-genesis.esm.js' relative to this file
 
@@ -41,7 +42,7 @@ window.azgaarGenerator = function() {
     // State variables
     azgaarReady: false,
     generating: false,
-    previewCanvas: null,
+    previewContainer: null, // SVG container (Canvas rendering is deprecated)
     mapData: null,
     status: '',
     error: null,
@@ -67,20 +68,20 @@ window.azgaarGenerator = function() {
      */
     init() {
       try {
-        // Get canvas element (required)
-        this.previewCanvas = document.getElementById('azgaar-preview');
-        if (!this.previewCanvas) {
-          this.error = 'Canvas element not found (id="azgaar-preview")';
-          console.error('Azgaar: Canvas element missing');
+        // Get SVG container element (required)
+        this.previewContainer = document.getElementById('azgaar-preview');
+        if (!this.previewContainer) {
+          this.error = 'Preview container not found (id="azgaar-preview")';
+          console.error('Azgaar: Preview container missing');
           return;
         }
         
-        // Initialize the Azgaar generator with canvas
-        initGenerator({ canvas: this.previewCanvas });
+        // Initialize the Azgaar generator with SVG container (Canvas rendering is deprecated)
+        initGenerator({ container: this.previewContainer });
         this.azgaarReady = true;
         this.status = 'Ready to generate';
         
-        console.log('Azgaar: Generator initialized successfully');
+        console.log('Azgaar: Generator initialized successfully (SVG rendering)');
       } catch (err) {
         this.error = 'Failed to initialize: ' + err.message;
         console.error('Azgaar initialization error:', err);
@@ -141,9 +142,13 @@ window.azgaarGenerator = function() {
         const data = generateMap(Delaunator);
         const generateTime = performance.now() - startTime;
         
-        // Render preview to canvas
-        this.status = 'Rendering preview...';
-        renderPreview();
+        // Render preview (SVG)
+        this.status = 'Rendering preview (SVG)...';
+        renderPreviewSVG({ 
+          width: this.wizardWidth, 
+          height: this.wizardHeight,
+          container: this.previewContainer 
+        });
         
         // Export JSON data
         this.status = 'Exporting data...';
@@ -258,10 +263,9 @@ window.azgaarGenerator = function() {
       this.status = 'Ready to generate';
       this.error = null;
       
-      // Clear canvas
-      if (this.previewCanvas) {
-        const ctx = this.previewCanvas.getContext('2d');
-        ctx.clearRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+      // Clear SVG container
+      if (this.previewContainer) {
+        this.previewContainer.innerHTML = '';
       }
       
       console.log('Azgaar: Generator reset');
