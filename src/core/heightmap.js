@@ -301,8 +301,14 @@ export function generateHeightmap({ grid, options, rng, template = null }) {
     throw new Error('RNG instance is required');
   }
 
-  // For Phase 2.4, use basic generation
-  // Template support will be added in later phases
+  const templateId = template || options.template;
+  
+  // Use template system for 'continent' template
+  if (templateId === 'continent') {
+    return generateContinentTemplate(grid, options, rng);
+  }
+
+  // Fallback to basic generation for other templates
   const heights = generateBasicHeightmap(grid, options, rng);
   
   // Apply basic smoothing
@@ -312,4 +318,68 @@ export function generateHeightmap({ grid, options, rng, template = null }) {
   maskHeights(heights, grid, options.mapWidth, options.mapHeight, 1);
 
   return heights;
+}
+
+/**
+ * Generate heightmap using continent template
+ * Based on original Azgaar continents template
+ */
+function generateContinentTemplate(grid, options, rng) {
+  const heights = createTypedArray({ maxValue: 100, length: grid.points.length });
+  
+  // Initialize all as ocean
+  for (let i = 0; i < heights.length; i++) {
+    heights[i] = 10;
+  }
+
+  const template = new HeightmapTemplate(grid, options, rng);
+  template.setHeights(heights);
+
+  // Execute continent template steps (from original config/heightmap-templates.js)
+  // Hill 1 80-85 60-80 40-60
+  template.addHill('1', '80-85', '60-80', '40-60');
+  
+  // Hill 1 80-85 20-30 40-60
+  template.addHill('1', '80-85', '20-30', '40-60');
+  
+  // Hill 6-7 15-30 25-75 15-85
+  template.addHill('6-7', '15-30', '25-75', '15-85');
+  
+  // Multiply 0.6 land 0 0
+  template.modify('land', 0, 0.6);
+  
+  // Hill 8-10 5-10 15-85 20-80
+  template.addHill('8-10', '5-10', '15-85', '20-80');
+  
+  // Range 1-2 30-60 5-15 25-75
+  template.addRange('1-2', '30-60', '5-15', '25-75');
+  
+  // Range 1-2 30-60 80-95 25-75
+  template.addRange('1-2', '30-60', '80-95', '25-75');
+  
+  // Range 0-3 30-60 80-90 20-80
+  template.addRange('0-3', '30-60', '80-90', '20-80');
+  
+  // Strait 2 vertical 0 0
+  template.addStrait('2', 'vertical');
+  
+  // Strait 1 vertical 0 0
+  template.addStrait('1', 'vertical');
+  
+  // Smooth 3 0 0 0
+  template.smooth(3, 0);
+  
+  // Trough 3-4 15-20 15-85 20-80
+  template.addTrough('3-4', '15-20', '15-85', '20-80');
+  
+  // Trough 3-4 5-10 45-55 45-55
+  template.addTrough('3-4', '5-10', '45-55', '45-55');
+  
+  // Pit 3-4 10-20 15-85 20-80
+  template.addPit('3-4', '10-20', '15-85', '20-80');
+  
+  // Mask 4 0 0 0
+  template.mask(4);
+
+  return template.getHeights();
 }
