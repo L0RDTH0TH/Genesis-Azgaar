@@ -335,6 +335,16 @@ export function generateBurgs({ pack, grid, options, rng }) {
   const statesNumber = options.statesNumber || 18;
   const maxCapitals = Math.min(statesNumber, burgs.length - 1); // Exclude null at index 0
   
+  // Log before marking capitals
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[generateBurgs] Before marking capitals:', {
+      totalBurgs: burgs.length - 1, // Exclude null
+      statesNumber,
+      maxCapitals,
+    });
+  }
+  
+  let capitalsMarked = 0;
   for (let i = 1; i <= maxCapitals; i++) {
     if (!burgs[i]) continue;
     const b = burgs[i];
@@ -346,19 +356,33 @@ export function generateBurgs({ pack, grid, options, rng }) {
     b.feature = cells.f[b.cell];
     b.capital = 1;
     cells.burg[b.cell] = i;
+    capitalsMarked++;
   }
   
   // Mark remaining burgs as non-capitals (towns)
+  let townsMarked = 0;
   for (let i = maxCapitals + 1; i < burgs.length; i++) {
     if (!burgs[i]) continue;
     const b = burgs[i];
     b.i = i;
-    b.capital = 0; // Not a capital
+    b.capital = 0; // Not a capital - explicitly set to 0
     b.state = 0; // No state assigned yet
     b.culture = cells.culture[b.cell];
     b.name = `Town${i}`;
     b.feature = cells.f[b.cell];
     cells.burg[b.cell] = i;
+    townsMarked++;
+  }
+  
+  // Log after marking
+  if (typeof console !== 'undefined' && console.log) {
+    const actualCapitals = burgs.filter((b, i) => i > 0 && b && b.capital === 1).length;
+    console.log('[generateBurgs] After marking capitals:', {
+      capitalsMarked,
+      townsMarked,
+      actualCapitals,
+      totalBurgs: burgs.length - 1,
+    });
   }
 
   pack.burgs = burgs;
