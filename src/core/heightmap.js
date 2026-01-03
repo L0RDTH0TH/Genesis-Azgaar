@@ -111,7 +111,7 @@ function generateBasicHeightmap(grid, options, rng) {
   const { points, cellsDesired } = grid;
   const heights = createTypedArray({ maxValue: 100, length: points.length });
   const template = options.template || null;
-  const landPercentage = options.landPercentage || (template === 'continent' ? 45 : 30);
+  const landPercentage = options.landPercentage || (template === 'continent' ? 40 : 30);
 
   // Generate cohesive landmasses based on template preference
   // For 'continent' template, create 1-3 large landmasses with ~45% land coverage
@@ -123,18 +123,37 @@ function generateBasicHeightmap(grid, options, rng) {
   }
 
   if (template === 'continent') {
-    // Create 1-3 large continental landmasses
-    const numContinents = rng.randInt(1, 3);
+    // Create 1-5 large continental landmasses (target: 1-3 for seed 42)
+    const numContinents = rng.randInt(1, 5);
     const targetLandCells = Math.floor(points.length * (landPercentage / 100));
     
+    // Ensure minimum continent size to avoid tiny fragments
+    const minContinentSize = Math.max(100, targetLandCells / 10);
+    
     for (let c = 0; c < numContinents; c++) {
-      // Pick a random center point
-      const centerIdx = rng.randInt(0, points.length - 1);
-      const [centerX, centerY] = points[centerIdx];
+      // Pick a random center point, but avoid edges
+      const margin = Math.min(options.mapWidth, options.mapHeight) * 0.15;
+      const centerX = rng.randFloat(margin, options.mapWidth - margin);
+      const centerY = rng.randFloat(margin, options.mapHeight - margin);
       
-      // Create a blob of land around this center
-      const continentSize = targetLandCells / numContinents;
-      const radius = Math.sqrt(continentSize * options.mapWidth * options.mapHeight / (Math.PI * points.length));
+      // Find closest point to this center
+      let centerIdx = 0;
+      let minDist = Infinity;
+      for (let i = 0; i < points.length; i++) {
+        const [x, y] = points[i];
+        const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+        if (dist < minDist) {
+          minDist = dist;
+          centerIdx = i;
+        }
+      }
+      
+      // Create a large blob of land around this center
+      const continentSize = Math.max(minContinentSize, targetLandCells / numContinents);
+      // Calculate radius based on desired area coverage
+      const areaPerCell = (options.mapWidth * options.mapHeight) / points.length;
+      const targetArea = continentSize * areaPerCell;
+      const radius = Math.sqrt(targetArea / Math.PI) * 1.2; // 1.2x for better coverage
       
       for (let i = 0; i < points.length; i++) {
         const [x, y] = points[i];
@@ -144,10 +163,10 @@ function generateBasicHeightmap(grid, options, rng) {
         
         // Use exponential falloff for natural blob shape
         const normalizedDist = distance / radius;
-        if (normalizedDist < 1.5) {
-          const falloff = Math.exp(-normalizedDist * 2);
+        if (normalizedDist < 2.0) { // Increased from 1.5 for larger continents
+          const falloff = Math.exp(-normalizedDist * 1.5); // Gentler falloff
           const baseHeight = 20 + falloff * 80; // 20-100 height range
-          const height = rn(baseHeight + rng.randFloat(-10, 10));
+          const height = rn(baseHeight + rng.randFloat(-5, 5)); // Reduced noise for smoother continents
           heights[i] = Math.max(heights[i], lim(height)); // Take max to allow overlapping continents
         }
       }
