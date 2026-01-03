@@ -7,7 +7,8 @@
  */
 
 import { getDefaultBiomes } from '../core/biomes.js';
-import { rn } from '../utils/math.js';
+import { rn, minmax } from '../utils/math.js';
+import { getCellPolygonPath, pointInPolygon, poissonDiscSampler } from './utils.js';
 
 // Style constants from original Azgaar (default.json)
 const STYLE_CONSTANTS = {
@@ -1072,6 +1073,119 @@ export function drawFeaturesSVG(pack) {
 }
 
 /**
+ * Draw relief icons (mountains, hills, trees) as SVG elements
+ * Simplified version using basic SVG shapes (triangles, circles)
+ * @param {Object} pack - Pack object
+ * @param {Object} biomesData - Biome data with icons information
+ * @param {Object} options - Rendering options {density, size}
+ * @returns {string} SVG elements for relief icons
+ */
+export function drawReliefSVG(pack, biomesData, options = {}) {
+  if (!pack.cells || !pack.cells.h || !pack.cells.biome) return '';
+  
+  const density = options.density || 0.4;
+  const size = 2 * (options.size || 1);
+  const mod = 0.2 * size; // size modifier
+  const relief = [];
+  const cells = pack.cells;
+  
+  for (const i of cells.i) {
+    const height = cells.h[i];
+    if (height < 20) continue; // no icons on water
+    if (cells.r && cells.r[i]) continue; // no icons on rivers
+    
+    const biome = cells.biome[i];
+    const polygon = getCellPolygonPath(i, pack);
+    if (!polygon || polygon.length < 3) continue;
+    
+    // Get bounding box
+    const xs = polygon.map(p => p[0]);
+    const ys = polygon.map(p => p[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    
+    if (height < 50) {
+      // Biome icons (trees, grass, etc.)
+      if (biomesData.iconsDensity[biome] === 0) continue;
+      const iconsDensity = biomesData.iconsDensity[biome] / 100;
+      const radius = 2 / iconsDensity / density;
+      if (Math.random() > iconsDensity * 10) continue;
+      
+      const iconTypes = biomesData.icons[biome] || [];
+      if (iconTypes.length === 0) continue;
+      
+      for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (!pointInPolygon([cx, cy], polygon)) continue;
+        
+        const iconType = iconTypes[Math.floor(Math.random() * iconTypes.length)];
+        let h = (4 + Math.random()) * size;
+        if (iconType === 'grass') h *= 1.2;
+        
+        // Simple circle for trees/grass (simplified - can be enhanced with SVG defs later)
+        relief.push({
+          type: 'circle',
+          x: rn(cx - h, 2),
+          y: rn(cy - h, 2),
+          r: rn(h, 2),
+          fill: '#4a5d23', // dark green for trees
+        });
+      }
+    } else {
+      // Relief icons (mountains, hills)
+      const radius = 2 / density;
+      let iconType, iconSize;
+      
+      if (height > 70) {
+        iconType = 'mountain';
+        iconSize = (height - 45) * mod;
+      } else {
+        iconType = 'hill';
+        iconSize = minmax((height - 40) * mod, 3, 6);
+      }
+      
+      for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (!pointInPolygon([cx, cy], polygon)) continue;
+        
+        // Simple triangle for mountains/hills (simplified)
+        const h = iconSize;
+        const w = h * 0.8;
+        const points = [
+          [cx, cy - h],
+          [cx - w/2, cy],
+          [cx + w/2, cy],
+        ].map(p => `${rn(p[0], 2)},${rn(p[1], 2)}`).join(' ');
+        
+        relief.push({
+          type: 'polygon',
+          points,
+          fill: height > 70 ? '#6b6b6b' : '#8b8b8b', // gray for mountains/hills
+        });
+      }
+    }
+  }
+  
+  // Sort relief icons by y position (bottom to top)
+  relief.sort((a, b) => {
+    const aY = a.type === 'circle' ? a.y + a.r : parseFloat(a.points.split(',')[1]);
+    const bY = b.type === 'circle' ? b.y + b.r : parseFloat(b.points.split(',')[1]);
+    return aY - bY;
+  });
+  
+  // Generate SVG elements
+  const reliefElements = relief.map((r) => {
+    if (r.type === 'circle') {
+      return `<circle cx="${r.x}" cy="${r.y}" r="${r.r}" fill="${r.fill}" opacity="0.7" />`;
+    } else {
+      return `<polygon points="${r.points}" fill="${r.fill}" opacity="0.6" />`;
+    }
+  });
+  
+  return reliefElements.join('');
+}
+
+/**
  * Render complete map to SVG string
  * @param {Object} data - Map data {grid, pack, options}
  * @param {Object} options - Rendering options {width, height, container}
@@ -1138,7 +1252,18 @@ export function renderMapSVG(data, options = {}) {
     layers.push(`<g id="borders">${borders.stateBorders}${borders.provinceBorders}</g>`);
   }
 
-  // 8. Burgs
+  // 8. Relief icons
+  let reliefSVG = '';
+  try {
+    reliefSVG = drawReliefSVG(pack, biomesData, { density: 0.4, size: 1 });
+  } catch (error) {
+    console.warn('Relief rendering failed:', error.message);
+  }
+  if (reliefSVG) {
+    layers.push(`<g id="relief">${reliefSVG}</g>`);
+  }
+
+  // 9. Burgs
   const burgsSVG = drawBurgsSVG(pack);
   if (burgsSVG) {
     layers.push(`<g id="burgs">${burgsSVG}</g>`);
