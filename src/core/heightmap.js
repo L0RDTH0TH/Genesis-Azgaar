@@ -110,21 +110,73 @@ function getPointInRange(range, length, rng) {
 function generateBasicHeightmap(grid, options, rng) {
   const { points, cellsDesired } = grid;
   const heights = createTypedArray({ maxValue: 100, length: points.length });
+  const template = options.template || null;
+  const landPercentage = options.landPercentage || (template === 'continent' ? 45 : 30);
 
-  // Simple random heightmap - will be replaced with proper template system
-  // For now, generate a basic heightmap with some variation
+  // Generate cohesive landmasses based on template preference
+  // For 'continent' template, create 1-3 large landmasses with ~45% land coverage
+  // For other templates, use more fragmented approach with ~30% land coverage
+  
+  // Initialize all as ocean
   for (let i = 0; i < heights.length; i++) {
-    // Start with random base height
-    let height = rng.randInt(0, 100);
+    heights[i] = 10; // Start with shallow ocean
+  }
+
+  if (template === 'continent') {
+    // Create 1-3 large continental landmasses
+    const numContinents = rng.randInt(1, 3);
+    const targetLandCells = Math.floor(points.length * (landPercentage / 100));
     
-    // Bias towards ocean (lower heights more common)
-    if (rng.probability(0.6)) {
-      height = rng.randInt(0, 40); // Ocean bias
-    } else {
-      height = rng.randInt(20, 100); // Land
+    for (let c = 0; c < numContinents; c++) {
+      // Pick a random center point
+      const centerIdx = rng.randInt(0, points.length - 1);
+      const [centerX, centerY] = points[centerIdx];
+      
+      // Create a blob of land around this center
+      const continentSize = targetLandCells / numContinents;
+      const radius = Math.sqrt(continentSize * options.mapWidth * options.mapHeight / (Math.PI * points.length));
+      
+      for (let i = 0; i < points.length; i++) {
+        const [x, y] = points[i];
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // Use exponential falloff for natural blob shape
+        const normalizedDist = distance / radius;
+        if (normalizedDist < 1.5) {
+          const falloff = Math.exp(-normalizedDist * 2);
+          const baseHeight = 20 + falloff * 80; // 20-100 height range
+          const height = rn(baseHeight + rng.randFloat(-10, 10));
+          heights[i] = Math.max(heights[i], lim(height)); // Take max to allow overlapping continents
+        }
+      }
     }
+  } else {
+    // Default: More fragmented approach with smaller islands
+    const targetLandCells = Math.floor(points.length * (landPercentage / 100));
+    const numIslands = Math.floor(targetLandCells / 50); // ~50 cells per island
     
-    heights[i] = lim(height);
+    for (let i = 0; i < numIslands; i++) {
+      const centerIdx = rng.randInt(0, points.length - 1);
+      const [centerX, centerY] = points[centerIdx];
+      const radius = rng.randFloat(20, 60);
+      
+      for (let j = 0; j < points.length; j++) {
+        const [x, y] = points[j];
+        const dx = x - centerX;
+        const dy = y - centerY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < radius) {
+          const normalizedDist = distance / radius;
+          const falloff = Math.exp(-normalizedDist * 3);
+          const baseHeight = 20 + falloff * 80;
+          const height = rn(baseHeight + rng.randFloat(-15, 15));
+          heights[j] = Math.max(heights[j], lim(height));
+        }
+      }
+    }
   }
 
   return heights;
