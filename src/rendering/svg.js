@@ -986,17 +986,48 @@ export function drawBurgsSVG(pack) {
     const isCapital = burg.capital;
     const size = isCapital ? STYLE_CONSTANTS.burgCapitalSize : STYLE_CONSTANTS.burgTownSize;
     const color = isCapital ? STYLE_CONSTANTS.burgCapitalColor : STYLE_CONSTANTS.burgTownColor;
+    const population = burg.population || 0;
+    const showLabel = isCapital || population > 500; // Show labels for capitals and larger towns
 
     burgElements.push(
-      `<circle id="burg${burg.i}" cx="${rn(burg.x, 2)}" cy="${rn(burg.y, 2)}" r="${size}" fill="${color}" />`
+      `<circle id="burg${burg.i}" cx="${rn(burg.x, 2)}" cy="${rn(burg.y, 2)}" r="${size}" fill="${color}" stroke="#fff" stroke-width="0.5" />`
     );
 
-    // Add label if name exists
-    if (burg.name) {
-      const labelY = burg.y - size * 1.5;
-      burgElements.push(
-        `<text id="burgLabel${burg.i}" x="${rn(burg.x, 2)}" y="${rn(labelY, 2)}" font-size="${size * 3}" text-anchor="middle" fill="${color}">${burg.name}</text>`
-      );
+    // Add arched/curved label for capitals and larger towns
+    if (burg.name && showLabel) {
+      const labelOffset = isCapital ? size * 2.5 : size * 2;
+      const fontSize = isCapital ? 10 : 8;
+      const labelY = burg.y - labelOffset;
+      
+      // Create arched text path for capitals, straight text for towns
+      if (isCapital) {
+        // Arched text path for capitals (curved along an arc)
+        const arcRadius = labelOffset * 0.8;
+        const startAngle = -Math.PI / 6; // -30 degrees
+        const endAngle = Math.PI / 6; // +30 degrees
+        const pathId = `burgLabelPath${burg.i}`;
+        
+        // Create arc path
+        const startX = burg.x + arcRadius * Math.cos(startAngle);
+        const startY = burg.y - labelOffset + arcRadius * Math.sin(startAngle);
+        const endX = burg.x + arcRadius * Math.cos(endAngle);
+        const endY = burg.y - labelOffset + arcRadius * Math.sin(endAngle);
+        const midX = burg.x;
+        const midY = burg.y - labelOffset - arcRadius * 0.3;
+        
+        // Use quadratic bezier for smooth arc
+        const pathD = `M ${rn(startX, 2)},${rn(startY, 2)} Q ${rn(midX, 2)},${rn(midY, 2)} ${rn(endX, 2)},${rn(endY, 2)}`;
+        
+        burgElements.push(
+          `<defs><path id="${pathId}" d="${pathD}" /></defs>`,
+          `<text id="burgLabel${burg.i}"><textPath href="#${pathId}" startOffset="50%" text-anchor="middle" font-size="${fontSize}" font-weight="bold" fill="${color}" stroke="#fff" stroke-width="0.3">${burg.name}</textPath></text>`
+        );
+      } else {
+        // Straight text for towns
+        burgElements.push(
+          `<text id="burgLabel${burg.i}" x="${rn(burg.x, 2)}" y="${rn(labelY, 2)}" font-size="${fontSize}" text-anchor="middle" fill="${color}" stroke="#fff" stroke-width="0.3">${burg.name}</text>`
+        );
+      }
     }
   }
 

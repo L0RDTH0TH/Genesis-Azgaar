@@ -38,7 +38,27 @@ class SimplePriorityQueue {
  * @returns {string} Color in hex format
  */
 function getRandomColor(rng) {
-  const colors = ['#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854', '#ffd92f'];
+  // Pastel color palette matching original Azgaar aesthetic
+  const colors = [
+    '#a8d5ba', // Soft teal-green
+    '#f4a582', // Soft coral
+    '#b3cde3', // Soft blue
+    '#decbe4', // Soft purple
+    '#ccebc5', // Soft mint
+    '#fed9a6', // Soft peach
+    '#ffffcc', // Soft yellow
+    '#e5d8bd', // Soft beige
+    '#d9d9d9', // Soft gray
+    '#bebada', // Soft lavender
+    '#fb8072', // Soft rose
+    '#80b1d3', // Soft sky blue
+    '#fdb462', // Soft orange
+    '#b3de69', // Soft lime
+    '#fccde5', // Soft pink
+    '#bc80bd', // Soft mauve
+    '#ccebc5', // Soft green
+    '#ffed6f', // Soft gold
+  ];
   return rng.pick(colors);
 }
 
@@ -65,7 +85,27 @@ function getMixedColor(baseColor, rng) {
 function createStates({ pack, options, rng }) {
   const { cells, burgs, cultures } = pack;
   const states = [{ i: 0, name: 'Neutrals' }];
-  const colors = ['#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854', '#ffd92f'];
+  // Pastel color palette matching original Azgaar aesthetic
+  const colors = [
+    '#a8d5ba', // Soft teal-green
+    '#f4a582', // Soft coral
+    '#b3cde3', // Soft blue
+    '#decbe4', // Soft purple
+    '#ccebc5', // Soft mint
+    '#fed9a6', // Soft peach
+    '#ffffcc', // Soft yellow
+    '#e5d8bd', // Soft beige
+    '#d9d9d9', // Soft gray
+    '#bebada', // Soft lavender
+    '#fb8072', // Soft rose
+    '#80b1d3', // Soft sky blue
+    '#fdb462', // Soft orange
+    '#b3de69', // Soft lime
+    '#fccde5', // Soft pink
+    '#bc80bd', // Soft mauve
+    '#ccebc5', // Soft green
+    '#ffed6f', // Soft gold
+  ];
 
   // Get capitals (burgs with capital=1) and limit to statesNumber
   const statesNumber = options.statesNumber || 18;
@@ -354,7 +394,27 @@ export function assignColors({ pack, rng }) {
     throw new Error('Pack object with states is required');
   }
 
-  const colors = ['#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854', '#ffd92f'];
+  // Pastel color palette matching original Azgaar aesthetic
+  const colors = [
+    '#a8d5ba', // Soft teal-green
+    '#f4a582', // Soft coral
+    '#b3cde3', // Soft blue
+    '#decbe4', // Soft purple
+    '#ccebc5', // Soft mint
+    '#fed9a6', // Soft peach
+    '#ffffcc', // Soft yellow
+    '#e5d8bd', // Soft beige
+    '#d9d9d9', // Soft gray
+    '#bebada', // Soft lavender
+    '#fb8072', // Soft rose
+    '#80b1d3', // Soft sky blue
+    '#fdb462', // Soft orange
+    '#b3de69', // Soft lime
+    '#fccde5', // Soft pink
+    '#bc80bd', // Soft mauve
+    '#ccebc5', // Soft green
+    '#ffed6f', // Soft gold
+  ];
 
   pack.states.forEach((s) => {
     if (!s.i || s.removed || s.lock) return;
