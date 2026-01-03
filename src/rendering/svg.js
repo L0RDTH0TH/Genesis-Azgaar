@@ -1123,7 +1123,7 @@ export function renderMapSVG(data, options = {}) {
   // 5. States
   const statesSVG = drawStatesSVG(pack);
   if (statesSVG) {
-    layers.push(`<g id="states" opacity="0.6">${statesSVG}</g>`);
+    layers.push(`<g id="states" opacity="0.5">${statesSVG}</g>`);
   }
 
   // 6. Rivers

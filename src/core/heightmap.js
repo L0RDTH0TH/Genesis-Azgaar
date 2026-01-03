@@ -124,50 +124,48 @@ function generateBasicHeightmap(grid, options, rng) {
 
   if (template === 'continent') {
     // Create 1-5 large continental landmasses (target: 1-3 for seed 42)
-    const numContinents = rng.randInt(1, 5);
+    // For continent template, prioritize fewer, larger landmasses
+    const numContinents = rng.randInt(1, 4); // 1-3 continents for better cohesion
     const targetLandCells = Math.floor(points.length * (landPercentage / 100));
     
-    // Ensure minimum continent size to avoid tiny fragments
-    const minContinentSize = Math.max(100, targetLandCells / 10);
-    
     for (let c = 0; c < numContinents; c++) {
-      // Pick a random center point, but avoid edges
+      // Pick a random center point, avoid edges
       const margin = Math.min(options.mapWidth, options.mapHeight) * 0.15;
       const centerX = rng.randFloat(margin, options.mapWidth - margin);
       const centerY = rng.randFloat(margin, options.mapHeight - margin);
       
-      // Find closest point to this center
-      let centerIdx = 0;
-      let minDist = Infinity;
-      for (let i = 0; i < points.length; i++) {
-        const [x, y] = points[i];
-        const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
-        if (dist < minDist) {
-          minDist = dist;
-          centerIdx = i;
-        }
-      }
+      // Calculate desired area per continent
+      const continentAreaFraction = 1.0 / numContinents; // Even distribution
+      const targetArea = (options.mapWidth * options.mapHeight) * (landPercentage / 100) * continentAreaFraction;
       
-      // Create a large blob of land around this center
-      const continentSize = Math.max(minContinentSize, targetLandCells / numContinents);
-      // Calculate radius based on desired area coverage
-      const areaPerCell = (options.mapWidth * options.mapHeight) / points.length;
-      const targetArea = continentSize * areaPerCell;
-      const radius = Math.sqrt(targetArea / Math.PI) * 1.2; // 1.2x for better coverage
+      // Use a much larger base radius to create large, cohesive landmasses
+      // Add some variation so continents aren't all the same size
+      const sizeVariation = 0.7 + rng.randFloat() * 0.6; // 0.7 to 1.3
+      const baseRadius = Math.sqrt(targetArea / Math.PI) * sizeVariation * 1.8; // Large multiplier for big continents
       
+      // Generate large cohesive blob using distance-based falloff
       for (let i = 0; i < points.length; i++) {
         const [x, y] = points[i];
         const dx = x - centerX;
         const dy = y - centerY;
         const distance = Math.sqrt(dx * dx + dy * dy);
         
-        // Use exponential falloff for natural blob shape
-        const normalizedDist = distance / radius;
-        if (normalizedDist < 2.0) { // Increased from 1.5 for larger continents
-          const falloff = Math.exp(-normalizedDist * 1.5); // Gentler falloff
-          const baseHeight = 20 + falloff * 80; // 20-100 height range
-          const height = rn(baseHeight + rng.randFloat(-5, 5)); // Reduced noise for smoother continents
-          heights[i] = Math.max(heights[i], lim(height)); // Take max to allow overlapping continents
+        // Use much larger cutoff distance to create large continents
+        const maxDistance = baseRadius * 3.5; // Extended range for large landmasses
+        
+        if (distance < maxDistance) {
+          // Gentle falloff for smooth, large continents
+          const normalizedDist = distance / baseRadius;
+          // Use power-based falloff instead of exponential for more gradual transition
+          const falloff = Math.max(0, 1 - Math.pow(normalizedDist / 3.5, 1.5));
+          const baseHeight = 20 + falloff * 75; // 20-95 height range
+          
+          // Add minimal noise to avoid perfectly circular shapes
+          const noise = rng.randFloat(-2, 2);
+          const height = rn(baseHeight + noise);
+          
+          // Use max to allow overlapping continents to merge
+          heights[i] = Math.max(heights[i], lim(height));
         }
       }
     }

@@ -46,6 +46,7 @@ const DEFAULT_OPTIONS = {
   heightExponent: 1.8,
   lakeElevationLimit: 20,
   resolveDepressionsSteps: 250,
+  landPercentage: 40, // Percentage of map that should be land (default 40% for continent template)
 
   // Population/Economy
   populationRate: 1000, // People per population point
@@ -147,6 +148,8 @@ function validateOption(key, value) {
       return minmax(Math.round(value), 0, 100);
     case 'resolveDepressionsSteps':
       return minmax(Math.round(value), 1, 1000);
+    case 'landPercentage':
+      return minmax(value, 1, 90);
     case 'populationRate':
       return minmax(value, 10, 10000);
     case 'urbanization':
