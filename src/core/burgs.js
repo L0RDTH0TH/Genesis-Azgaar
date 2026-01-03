@@ -102,7 +102,7 @@ function getBurgType(cellId, port, pack) {
 function placeCapitals({ pack, options, rng }) {
   const { cells } = pack;
   const statesNumber = options.statesNumber || 18;
-  const burgs = [null]; // Index 0 is null
+  let burgs = [null]; // Index 0 is null - changed to let for retry logic
 
   // Use suitability score if available, otherwise use population
   const baseScore = cells.s || (cells.pop ? cells.pop : new Float32Array(cells.i.length));
@@ -119,10 +119,21 @@ function placeCapitals({ pack, options, rng }) {
     }
   }
 
-  const burgsTree = new SimpleQuadtree();
+  let burgsTree = new SimpleQuadtree(); // Changed to let for reassignment
   let spacing = (options.mapWidth + options.mapHeight) / 2 / count;
 
-  for (let i = 0; i < sorted.length && burgs.length < count + 1; i++) {
+  // Match original logic: loop until we have count capitals (burgs.length > count)
+  for (let i = 0; burgs.length <= count; i++) {
+    // If we've exhausted all candidates, retry with reduced spacing
+    if (i >= sorted.length) {
+      if (spacing <= 1) break; // Can't reduce spacing further
+      burgsTree = new SimpleQuadtree();
+      burgs = [null]; // Reset burgs array
+      spacing /= 1.2;
+      i = -1; // Reset loop counter (will be incremented to 0)
+      continue;
+    }
+
     const cell = sorted[i];
     const [x, y] = cells.p[cell];
 
@@ -131,20 +142,15 @@ function placeCapitals({ pack, options, rng }) {
       burgsTree.add([x, y]);
     }
   }
-  
-  // If we didn't place enough, reduce spacing and try again
-  if (burgs.length < count + 1 && spacing > 1) {
-    burgsTree = new SimpleQuadtree();
-    burgs = [null];
-    spacing /= 1.2;
-    for (let i = 0; i < sorted.length && burgs.length < count + 1; i++) {
-      const cell = sorted[i];
-      const [x, y] = cells.p[cell];
-      if (!burgsTree.find(x, y, spacing)) {
-        burgs.push({ cell, x, y });
-        burgsTree.add([x, y]);
-      }
-    }
+
+  // Log for debugging
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[placeCapitals] Capital placement:', {
+      desiredCount: count,
+      placedCount: burgs.length - 1, // Exclude null at index 0
+      spacing: spacing.toFixed(2),
+      sortedLength: sorted.length,
+    });
   }
 
   return burgs;
@@ -313,7 +319,11 @@ export function generateBurgs({ pack, grid, options, rng }) {
   placeTowns({ pack, options, rng, burgs, burgsTree });
 
   // Assign initial properties to capitals
-  for (let i = 1; i < burgs.length; i++) {
+  // IMPORTANT: Only mark the first (statesNumber) burgs as capitals
+  const statesNumber = options.statesNumber || 18;
+  const maxCapitals = Math.min(statesNumber, burgs.length - 1); // Exclude null at index 0
+  
+  for (let i = 1; i <= maxCapitals; i++) {
     if (!burgs[i]) continue;
     const b = burgs[i];
     b.i = i;
@@ -323,6 +333,19 @@ export function generateBurgs({ pack, grid, options, rng }) {
     b.name = `Capital${i}`;
     b.feature = cells.f[b.cell];
     b.capital = 1;
+    cells.burg[b.cell] = i;
+  }
+  
+  // Mark remaining burgs as non-capitals (towns)
+  for (let i = maxCapitals + 1; i < burgs.length; i++) {
+    if (!burgs[i]) continue;
+    const b = burgs[i];
+    b.i = i;
+    b.capital = 0; // Not a capital
+    b.state = 0; // No state assigned yet
+    b.culture = cells.culture[b.cell];
+    b.name = `Town${i}`;
+    b.feature = cells.f[b.cell];
     cells.burg[b.cell] = i;
   }
 

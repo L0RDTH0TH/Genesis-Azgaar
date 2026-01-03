@@ -67,8 +67,20 @@ function createStates({ pack, options, rng }) {
   const states = [{ i: 0, name: 'Neutrals' }];
   const colors = ['#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854', '#ffd92f'];
 
-  // Get capitals (burgs with capital=1)
-  const capitals = burgs.filter((b) => b && b.capital);
+  // Get capitals (burgs with capital=1) and limit to statesNumber
+  const statesNumber = options.statesNumber || 18;
+  const allCapitals = burgs.filter((b) => b && b.capital);
+  const capitals = allCapitals.slice(0, statesNumber); // Limit to statesNumber
+
+  // Log for debugging
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[createStates] Capital filtering:', {
+      totalCapitals: allCapitals.length,
+      limitedCapitals: capitals.length,
+      statesNumber,
+      limited: allCapitals.length > statesNumber,
+    });
+  }
 
   capitals.forEach((b, i) => {
     const stateId = i + 1;
@@ -99,6 +111,14 @@ function createStates({ pack, options, rng }) {
     // Assign state to burg
     b.state = stateId;
   });
+
+  // Mark excess capitals as non-capitals (convert to towns)
+  if (allCapitals.length > statesNumber) {
+    allCapitals.slice(statesNumber).forEach((b) => {
+      b.capital = 0; // Remove capital status
+      b.state = 0; // Remove state assignment
+    });
+  }
 
   return states;
 }
