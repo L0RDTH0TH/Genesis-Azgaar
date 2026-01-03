@@ -379,6 +379,9 @@ function generateContinentTemplate(grid, options, rng) {
   // Pit 3-4 10-20 15-85 20-80
   template.addPit('3-4', '10-20', '15-85', '20-80');
   
+  // Extra smooth pass to improve cohesion and reduce fragmentation
+  template.smooth(2, 0);
+  
   // Mask 4 0 0 0
   template.mask(4);
 
