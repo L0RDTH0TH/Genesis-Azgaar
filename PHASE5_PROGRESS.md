@@ -223,9 +223,15 @@ Per `PHASE5_GENERATION_AUDIT.md`: Missing `rankCells()` function causing 0 burgs
 
 ### Testing Status
 
-- ⏳ **Pending**: Browser testing may require cache clearing
-- ⏳ **Pending**: Verify metrics (states, burgs, cultures) match expected
-- ⏳ **Pending**: Visual comparison with original Azgaar (seed 42)
+- ✅ **Complete**: Browser testing successful (after direct import fix)
+- ⚠️ **Issue Found**: States: 677 (expected ~18) - **TOO MANY**
+- ⚠️ **Issue Found**: Burgs: 676 (expected 50-200) - **TOO MANY**
+- ✅ **Working**: rankCells() executes correctly, calculates suitability/population
+- ✅ **Working**: SVG rendering successful (608KB, all layers visible)
+
+**Test Results:** See `PHASE5_RANKCELLS_TEST_RESULTS.md` for detailed analysis.
+
+**Root Cause:** `createStates()` creates a state for **every capital burg**, not limiting to `options.statesNumber`. Fix required in `src/core/states.js:71`.
 
 ### Files Modified
 
