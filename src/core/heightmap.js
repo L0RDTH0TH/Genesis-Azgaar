@@ -337,14 +337,18 @@ function generateContinentTemplate(grid, options, rng) {
   template.setHeights(heights);
 
   // Execute continent template steps (from original config/heightmap-templates.js)
+  // Modified for better cohesion: larger initial blobs, more aggressive smoothing
   // Hill 1 80-85 60-80 40-60
   template.addHill('1', '80-85', '60-80', '40-60');
   
   // Hill 1 80-85 20-30 40-60
   template.addHill('1', '80-85', '20-30', '40-60');
   
-  // Hill 6-7 15-30 25-75 15-85
+  // Hill 6-7 15-30 25-75 15-85 (larger hills for cohesion)
   template.addHill('6-7', '15-30', '25-75', '15-85');
+  
+  // First aggressive smooth to merge initial blobs
+  template.smooth(4, 0);
   
   // Multiply 0.6 land 0 0
   template.modify('land', 0, 0.6);
@@ -361,6 +365,9 @@ function generateContinentTemplate(grid, options, rng) {
   // Range 0-3 30-60 80-90 20-80
   template.addRange('0-3', '30-60', '80-90', '20-80');
   
+  // Second aggressive smooth before straits
+  template.smooth(3, 0);
+  
   // Strait 2 vertical 0 0
   template.addStrait('2', 'vertical');
   
@@ -370,20 +377,25 @@ function generateContinentTemplate(grid, options, rng) {
   // Smooth 3 0 0 0
   template.smooth(3, 0);
   
-  // Trough 3-4 15-20 15-85 20-80
-  template.addTrough('3-4', '15-20', '15-85', '20-80');
+  // Reduced trough/pit counts for less fragmentation
+  // Trough 2-3 15-20 15-85 20-80 (reduced from 3-4)
+  template.addTrough('2-3', '15-20', '15-85', '20-80');
   
-  // Trough 3-4 5-10 45-55 45-55
-  template.addTrough('3-4', '5-10', '45-55', '45-55');
+  // Trough 2-3 5-10 45-55 45-55 (reduced from 3-4)
+  template.addTrough('2-3', '5-10', '45-55', '45-55');
   
-  // Pit 3-4 10-20 15-85 20-80
-  template.addPit('3-4', '10-20', '15-85', '20-80');
+  // Pit 2-3 10-20 15-85 20-80 (reduced from 3-4)
+  template.addPit('2-3', '10-20', '15-85', '20-80');
   
-  // Extra smooth pass to improve cohesion and reduce fragmentation
-  template.smooth(2, 0);
+  // Multiple aggressive smooth passes to reduce fragmentation
+  template.smooth(4, 0);
+  template.smooth(3, 0);
   
   // Mask 4 0 0 0
   template.mask(4);
+  
+  // Final smooth pass after masking
+  template.smooth(2, 0);
 
   return template.getHeights();
 }
