@@ -123,10 +123,17 @@ function placeCapitals({ pack, options, rng }) {
   let spacing = (options.mapWidth + options.mapHeight) / 2 / count;
 
   // Match original logic: loop until we have count capitals (burgs.length > count)
+  // Original uses: for (let i = 0; burgs.length <= count; i++)
+  // This means: continue while burgs.length <= count, stop when burgs.length > count
+  // So if count=18, we want burgs.length to be 19 (18 capitals + 1 null), then stop
   for (let i = 0; burgs.length <= count; i++) {
     // If we've exhausted all candidates, retry with reduced spacing
     if (i >= sorted.length) {
-      if (spacing <= 1) break; // Can't reduce spacing further
+      if (spacing <= 1) {
+        // Can't reduce spacing further - break out of loop
+        break;
+      }
+      // Retry with reduced spacing
       burgsTree = new SimpleQuadtree();
       burgs = [null]; // Reset burgs array
       spacing /= 1.2;
@@ -137,9 +144,14 @@ function placeCapitals({ pack, options, rng }) {
     const cell = sorted[i];
     const [x, y] = cells.p[cell];
 
+    // Only add if not too close to existing burg
     if (!burgsTree.find(x, y, spacing)) {
       burgs.push({ cell, x, y });
       burgsTree.add([x, y]);
+      // Check if we've placed enough - if so, break immediately
+      if (burgs.length > count) {
+        break;
+      }
     }
   }
 
