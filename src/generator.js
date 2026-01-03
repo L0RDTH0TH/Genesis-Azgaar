@@ -29,7 +29,6 @@ import {
   markupGrid,
   markupPack,
   specifyFeatures,
-  rankCells,
   generateCultures,
   expandCultures,
   generateBurgs,
@@ -38,6 +37,7 @@ import {
   generateReligions,
   generateEmblems,
 } from './core/index.js';
+import { rankCells } from './core/rankCells.js';
 import { createPackFromGrid } from './core/regraph.js';
 // Canvas rendering is deprecated - use SVG instead
 // import { renderMap } from './rendering/canvas.js'; // DEPRECATED
