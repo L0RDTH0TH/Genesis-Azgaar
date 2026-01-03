@@ -19,8 +19,9 @@ export class HeightmapTemplate {
     this.options = options;
     this.rng = rng;
     this.heights = null;
-    this.blobPower = this.getBlobPower(grid.cellsDesired || 10000);
-    this.linePower = this.getLinePower(grid.cellsDesired || 10000);
+    const cellsDesired = options.cellsDesired || 10000;
+    this.blobPower = this.getBlobPower(cellsDesired);
+    this.linePower = this.getLinePower(cellsDesired);
     this.graphWidth = options.mapWidth;
     this.graphHeight = options.mapHeight;
   }
@@ -267,7 +268,7 @@ export class HeightmapTemplate {
       limit++;
     } while ((dist < this.graphWidth / 8 || dist > this.graphWidth / 2) && limit < 50);
 
-    const startCell = findGridCell(startX, startY, this.grid);
+    startCell = findGridCell(startX, startY, this.grid);
     const endCell = findGridCell(endX, endY, this.grid);
     const range = this.getRangePath(startCell, endCell, used);
 

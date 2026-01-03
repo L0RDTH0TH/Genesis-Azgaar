@@ -9,6 +9,7 @@
 import { rn, lim, minmax } from '../utils/math.js';
 import { createTypedArray } from '../utils/array.js';
 import { findGridCell } from './voronoi.js';
+import { HeightmapTemplate } from './heightmap-template.js';
 
 /**
  * Get blob power based on cell count
