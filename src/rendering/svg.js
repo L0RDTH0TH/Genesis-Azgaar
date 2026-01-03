@@ -1113,26 +1113,28 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
     const maxY = Math.max(...ys);
     
     if (height < 50) {
-      // Biome icons (trees, grass, etc.) - sparse distribution
+      // Biome icons (trees, grass, etc.) - very sparse distribution (<500 total target)
       const iconsDensity = biomesData.iconsDensity[biome] || 0;
       if (iconsDensity === 0) continue;
       
-      // Sparse probability: only 20-30% of eligible cells get icons
-      // Original uses iconsDensity * 10, but that's > 1, so we use a fraction
+      // Very sparse probability: only 10-15% of eligible cells get icons
       const densityValue = iconsDensity / 100; // e.g., 120/100 = 1.2
-      const cellProbability = Math.min(densityValue * 0.15, 0.3); // Cap at 30%
+      const cellProbability = Math.min(densityValue * 0.08, 0.15); // Reduced to 8-15%
       if (Math.random() > cellProbability) continue;
       
       const iconTypes = biomesData.icons[biome] || [];
       if (iconTypes.length === 0) continue;
       
-      // Larger radius for sparser distribution
-      const radius = Math.max(2 / densityValue / density * 1.5, 8);
+      // Even larger radius for very sparse distribution
+      const radius = Math.max(2 / densityValue / density * 2.5, 12);
       
-      // Sample only 1-2 points per cell (very sparse)
+      // Sample only 1 point per cell, and only for larger cells
+      const cellArea = (maxX - minX) * (maxY - minY);
+      if (cellArea < 100) continue; // Skip small cells
+      
       let sampled = 0;
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
-        if (sampled >= 1) break; // Only 1 icon per cell for sparsity
+        if (sampled >= 1) break; // Only 1 icon per cell
         if (!pointInPolygon([cx, cy], polygon)) continue;
         
         const iconType = iconTypes[Math.floor(Math.random() * iconTypes.length)];
@@ -1152,10 +1154,13 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
       }
     } else {
       // Relief icons (mountains, hills) - very sparse for height >= 50
-      // Only 20-25% of eligible cells get relief icons
-      if (Math.random() > 0.22) continue;
+      // Only 10-15% of eligible cells get relief icons
+      if (Math.random() > 0.12) continue;
       
-      const radius = 2 / density * 2; // Larger radius for sparser distribution
+      // Only place on significant heights (hills/mountains)
+      if (height < 55) continue; // Skip lower elevations
+      
+      const radius = 2 / density * 3; // Even larger radius for sparser distribution
       let iconSize;
       
       if (height > 70) {
@@ -1164,7 +1169,10 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
         iconSize = minmax((height - 40) * mod, 3, 6);
       }
       
-      // Sample only 1 point per cell (very sparse)
+      // Sample only 1 point per cell, and only for larger cells
+      const cellArea = (maxX - minX) * (maxY - minY);
+      if (cellArea < 150) continue; // Skip small cells for mountains
+      
       let sampled = 0;
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
         if (sampled >= 1) break; // Only 1 icon per cell
