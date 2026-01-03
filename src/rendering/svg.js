@@ -204,21 +204,22 @@ function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, c
       neibCells.filter(ofSameType).forEach(addToChecked);
     }
 
-    const [c1, c2, c3] = neibCells?.map(ofSameType) || [false, false, false];
-    const [v1, v2, v3] = vertices.v[current] || [null, null, null];
+    const [c1, c2, c3] = neibCells.map(ofSameType);
+    const [v1, v2, v3] = vertices.v[current];
 
-    // Check each potential next vertex to ensure it's valid and has vertices.c entry
-    if (v1 !== undefined && v1 !== previous && v1 < vertices.c.length && vertices.c[v1] && c1 !== c2) {
+    // Match original logic exactly: simpler checks without extra bounds validation
+    if (v1 !== undefined && v1 !== previous && c1 !== c2) {
       next = v1;
-    } else if (v2 !== undefined && v2 !== previous && v2 < vertices.c.length && vertices.c[v2] && c2 !== c3) {
+    } else if (v2 !== undefined && v2 !== previous && c2 !== c3) {
       next = v2;
-    } else if (v3 !== undefined && v3 !== previous && v3 < vertices.c.length && vertices.c[v3] && c1 !== c3) {
+    } else if (v3 !== undefined && v3 !== previous && c1 !== c3) {
       next = v3;
     } else {
       break; // No valid next vertex
     }
 
-    if (next >= vertices.c.length || next === current || !vertices.c[next]) break;
+    if (next >= vertices.c.length) break;
+    if (next === current) break;
     if (i >= MAX_ITERATIONS) break;
   }
 
