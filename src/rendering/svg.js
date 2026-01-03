@@ -1088,6 +1088,8 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
   const mod = 0.2 * size; // size modifier
   const relief = [];
   const cells = pack.cells;
+  let processedCells = 0;
+  let reliefIconsAdded = 0;
   
   for (const i of cells.i) {
     const height = cells.h[i];
@@ -1095,8 +1097,12 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
     if (cells.r && cells.r[i]) continue; // no icons on rivers
     
     const biome = cells.biome[i];
+    if (biome === undefined) continue;
+    
     const polygon = getCellPolygonPath(i, pack);
     if (!polygon || polygon.length < 3) continue;
+    
+    processedCells++;
     
     // Get bounding box
     const xs = polygon.map(p => p[0]);
@@ -1107,48 +1113,60 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
     const maxY = Math.max(...ys);
     
     if (height < 50) {
-      // Biome icons (trees, grass, etc.)
-      if (biomesData.iconsDensity[biome] === 0) continue;
-      const iconsDensity = biomesData.iconsDensity[biome] / 100;
-      const radius = 2 / iconsDensity / density;
-      if (Math.random() > iconsDensity * 10) continue;
+      // Biome icons (trees, grass, etc.) - only for certain biomes
+      const iconsDensity = biomesData.iconsDensity[biome] || 0;
+      if (iconsDensity === 0) continue;
+      
+      const densityValue = iconsDensity / 100;
+      const radius = Math.max(2 / densityValue / density, 5); // Minimum radius
+      
+      // Only place icons for a fraction of cells (sparse distribution)
+      if (Math.random() > densityValue * 0.5) continue;
       
       const iconTypes = biomesData.icons[biome] || [];
       if (iconTypes.length === 0) continue;
       
+      // Sample only a few points per cell
+      let sampled = 0;
+      const maxSamples = Math.ceil((maxX - minX) * (maxY - minY) / (radius * radius * 4));
+      
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (sampled >= 3) break; // Limit icons per cell
         if (!pointInPolygon([cx, cy], polygon)) continue;
         
         const iconType = iconTypes[Math.floor(Math.random() * iconTypes.length)];
-        let h = (4 + Math.random()) * size;
+        let h = (4 + Math.random() * 2) * size;
         if (iconType === 'grass') h *= 1.2;
         
-        // Simple circle for trees/grass (simplified - can be enhanced with SVG defs later)
         relief.push({
           type: 'circle',
           x: rn(cx - h, 2),
           y: rn(cy - h, 2),
           r: rn(h, 2),
           fill: '#4a5d23', // dark green for trees
+          ySort: cy,
         });
+        sampled++;
+        reliefIconsAdded++;
       }
     } else {
-      // Relief icons (mountains, hills)
+      // Relief icons (mountains, hills) - for height >= 50
       const radius = 2 / density;
-      let iconType, iconSize;
+      let iconSize;
       
       if (height > 70) {
-        iconType = 'mountain';
-        iconSize = (height - 45) * mod;
+        iconSize = minmax((height - 45) * mod, 4, 12);
       } else {
-        iconType = 'hill';
         iconSize = minmax((height - 40) * mod, 3, 6);
       }
       
+      // Sample only a few points per cell for sparse relief
+      let sampled = 0;
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (sampled >= 2) break; // Limit icons per cell for sparsity
         if (!pointInPolygon([cx, cy], polygon)) continue;
         
-        // Simple triangle for mountains/hills (simplified)
+        // Simple triangle for mountains/hills
         const h = iconSize;
         const w = h * 0.8;
         const points = [
@@ -1161,17 +1179,16 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
           type: 'polygon',
           points,
           fill: height > 70 ? '#6b6b6b' : '#8b8b8b', // gray for mountains/hills
+          ySort: cy,
         });
+        sampled++;
+        reliefIconsAdded++;
       }
     }
   }
   
-  // Sort relief icons by y position (bottom to top)
-  relief.sort((a, b) => {
-    const aY = a.type === 'circle' ? a.y + a.r : parseFloat(a.points.split(',')[1]);
-    const bY = b.type === 'circle' ? b.y + b.r : parseFloat(b.points.split(',')[1]);
-    return aY - bY;
-  });
+  // Sort relief icons by y position (bottom to top) for proper rendering order
+  relief.sort((a, b) => a.ySort - b.ySort);
   
   // Generate SVG elements
   const reliefElements = relief.map((r) => {
@@ -1181,6 +1198,11 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
       return `<polygon points="${r.points}" fill="${r.fill}" opacity="0.6" />`;
     }
   });
+  
+  // Debug logging (can be removed later)
+  if (typeof console !== 'undefined' && console.log && reliefElements.length > 0) {
+    console.log(`[drawReliefSVG] Generated ${reliefElements.length} relief icons from ${processedCells} cells`);
+  }
   
   return reliefElements.join('');
 }
