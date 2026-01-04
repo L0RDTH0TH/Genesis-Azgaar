@@ -147,12 +147,38 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
   // Helper: round number
   const rn = (n, d = 0) => Math.round(n * Math.pow(10, d)) / Math.pow(10, d);
   
+  // Calculate average cell size for radius estimation
+  let totalArea = 0;
+  let cellCount = 0;
+  for (const i of cells.i) {
+    const polygon = getCellPolygonPath(i, pack);
+    if (!polygon || polygon.length < 3) continue;
+    const xs = polygon.map(p => p[0]);
+    const ys = polygon.map(p => p[1]);
+    const area = (Math.max(...xs) - Math.min(...xs)) * (Math.max(...ys) - Math.min(...ys));
+    totalArea += area;
+    cellCount++;
+  }
+  const avgCellSize = cellCount > 0 ? Math.sqrt(totalArea / cellCount) : 50;
+  const radiusBase = avgCellSize * 0.5; // ~cellSize*0.5 as requested
+  
+  // High-density biome indices (forests/swamps with icons): 5,6,7,8,9 (forests), 12 (wetland)
+  const highDensityBiomes = new Set([5, 6, 7, 8, 9, 12]); // Tropical seasonal, Temperate deciduous, Tropical rainforest, Temperate rainforest, Taiga, Wetland
+  
   for (const i of cells.i) {
     const height = cells.h[i];
     if (height < 20) continue; // no icons on water
     if (cells.r && cells.r[i]) continue; // no icons on rivers
     const biome = cells.biome[i];
-    if (height < 50 && biomesData.iconsDensity[biome] === 0) continue; // no icons for this biome
+    
+    // For height < 50, ONLY place icons on forests/swamps (high-density biomes) with height 20-50
+    if (height < 50) {
+      if (!highDensityBiomes.has(biome)) continue; // Skip non-forest/swamp biomes
+      if (biomesData.iconsDensity[biome] === 0) continue;
+    } else {
+      // Relief icons (height >= 50) - skip for now to reduce density further
+      continue;
+    }
     
     const polygon = getCellPolygonPath(i, pack);
     if (!polygon || polygon.length < 3) continue;
@@ -164,46 +190,28 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
     
-    if (height < 50) {
-      // Biome icons (trees, grass, etc.) - sparse distribution (target 200-400 total)
-      const iconsDensity = biomesData.iconsDensity[biome] / 100;
-      // Original logic: radius = 2 / iconsDensity / density
-      // For sparser distribution (target 200-400 vs 1646), use larger radius (5x multiplier)
-      const radius = (2 / iconsDensity / density) * 5;
-      // Original probability: Math.random() > iconsDensity * 10
-      // Reduce probability for sparser distribution (use iconsDensity * 3 instead of * 10)
-      if (Math.random() > iconsDensity * 3) continue;
-      
-      const iconTypes = biomesData.icons[biome] || [];
-      if (iconTypes.length === 0) continue;
-      
-      // Limit to 1 icon per cell for sparsity
-      let sampled = 0;
-      for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
-        if (sampled >= 1) break; // Only 1 icon per cell
-        if (!pointInPolygon([cx, cy], polygon)) continue;
-        let h = (4 + Math.random()) * size;
-        const icon = getBiomeIcon(i, iconTypes, grid, pack);
-        if (!icon) continue;
-        if (icon === "#relief-grass-1") h *= 1.2;
-        relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
-        sampled++;
-      }
-    } else {
-      // Relief icons (mountains, hills) - sparse distribution
-      // Original logic: radius = 2 / density
-      // For sparser distribution, use larger radius (5x multiplier)
-      const radius = (2 / density) * 5;
-      const [icon, h] = getReliefIcon(i, height, grid, pack, mod);
-      
-      // Limit to 1 icon per cell for sparsity
-      let sampled = 0;
-      for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
-        if (sampled >= 1) break; // Only 1 icon per cell
-        if (!pointInPolygon([cx, cy], polygon)) continue;
-        relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
-        sampled++;
-      }
+    // Biome icons (forests/swamps only, height 20-50) - aggressive sparsity (target 200-400 total)
+    const iconsDensity = biomesData.iconsDensity[biome] / 100;
+    // Use radius based on cellSize*0.5 (much larger than original)
+    const radius = radiusBase;
+    // Port default probability 0.2-0.3 (much lower than iconsDensity * 10)
+    const probability = 0.25; // Fixed 0.25 probability (between 0.2-0.3)
+    if (Math.random() > probability) continue;
+    
+    const iconTypes = biomesData.icons[biome] || [];
+    if (iconTypes.length === 0) continue;
+    
+    // Limit to 1 icon per cell for sparsity
+    let sampled = 0;
+    for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+      if (sampled >= 1) break; // Only 1 icon per cell
+      if (!pointInPolygon([cx, cy], polygon)) continue;
+      let h = (4 + Math.random()) * size;
+      const icon = getBiomeIcon(i, iconTypes, grid, pack);
+      if (!icon) continue;
+      if (icon === "#relief-grass-1") h *= 1.2;
+      relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
+      sampled++;
     }
   }
   
