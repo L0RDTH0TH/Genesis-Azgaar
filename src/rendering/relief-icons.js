@@ -165,30 +165,41 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
     const maxY = Math.max(...ys);
     
     if (height < 50) {
-      // Biome icons (trees, grass, etc.)
+      // Biome icons (trees, grass, etc.) - sparse distribution (target 200-400 total)
       const iconsDensity = biomesData.iconsDensity[biome] / 100;
-      const radius = 2 / iconsDensity / density;
-      if (Math.random() > iconsDensity * 10) continue;
+      // Increase radius significantly for sparser distribution (3x multiplier)
+      const radius = (2 / iconsDensity / density) * 3;
+      // Reduce probability significantly (from iconsDensity * 10 to iconsDensity * 2)
+      if (Math.random() > iconsDensity * 2) continue;
       
       const iconTypes = biomesData.icons[biome] || [];
       if (iconTypes.length === 0) continue;
       
+      // Limit to 1 icon per cell for sparsity
+      let sampled = 0;
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (sampled >= 1) break; // Only 1 icon per cell
         if (!pointInPolygon([cx, cy], polygon)) continue;
         let h = (4 + Math.random()) * size;
         const icon = getBiomeIcon(i, iconTypes, grid, pack);
         if (!icon) continue;
         if (icon === "#relief-grass-1") h *= 1.2;
         relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
+        sampled++;
       }
     } else {
-      // Relief icons (mountains, hills)
-      const radius = 2 / density;
+      // Relief icons (mountains, hills) - sparse distribution
+      // Increase radius significantly for sparser distribution (3x multiplier)
+      const radius = (2 / density) * 3;
       const [icon, h] = getReliefIcon(i, height, grid, pack, mod);
       
+      // Limit to 1 icon per cell for sparsity
+      let sampled = 0;
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (sampled >= 1) break; // Only 1 icon per cell
         if (!pointInPolygon([cx, cy], polygon)) continue;
         relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
+        sampled++;
       }
     }
   }
@@ -208,6 +219,3 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
   
   return reliefHTML.join('');
 }
-
-// Import utilities (will be imported in svg.js)
-import { getCellPolygonPath, pointInPolygon, poissonDiscSampler } from './utils.js';

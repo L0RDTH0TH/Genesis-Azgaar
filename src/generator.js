@@ -189,7 +189,7 @@ function generateMapInternal(options, DelaunatorClass) {
     }
     const packLandPercentage = (packLandCells / pack.cells.i.length) * 100;
     
-    // Adjust if land percentage is too high (multiply non-ocean heights by 0.5-0.7)
+    // Adjust if land percentage is too high (multiply non-ocean heights by 0.5-0.7, then reduce lowest cells)
     if (packLandPercentage > targetLandPercentage) {
       const excessRatio = packLandPercentage / targetLandPercentage;
       const reductionMultiplier = Math.max(0.5, Math.min(0.7, targetLandPercentage / packLandPercentage));
@@ -202,12 +202,38 @@ function generateMapInternal(options, DelaunatorClass) {
         }
       }
       
-      // Recalculate after adjustment
+      // Recalculate after multiplier adjustment
       packLandCells = 0;
       for (let i = 0; i < pack.cells.i.length; i++) {
         if (pack.cells.h[i] >= landThreshold) packLandCells++;
       }
-      const adjustedPackLandPercentage = (packLandCells / pack.cells.i.length) * 100;
+      let adjustedPackLandPercentage = (packLandCells / pack.cells.i.length) * 100;
+      
+      // If still too high, reduce lowest land cells to below threshold
+      if (adjustedPackLandPercentage > targetLandPercentage) {
+        const landIndices = [];
+        for (let i = 0; i < pack.cells.i.length; i++) {
+          if (pack.cells.h[i] >= landThreshold) {
+            landIndices.push(i);
+          }
+        }
+        landIndices.sort((a, b) => pack.cells.h[a] - pack.cells.h[b]);
+        
+        const targetLandCells = Math.floor(pack.cells.i.length * (targetLandPercentage / 100));
+        const cellsToReduce = Math.max(0, landIndices.length - targetLandCells);
+        
+        // Reduce lowest land cells to just below threshold
+        for (let j = 0; j < cellsToReduce && j < landIndices.length; j++) {
+          pack.cells.h[landIndices[j]] = landThreshold - 1; // Set to 19 (just below threshold)
+        }
+        
+        // Recalculate final
+        packLandCells = 0;
+        for (let i = 0; i < pack.cells.i.length; i++) {
+          if (pack.cells.h[i] >= landThreshold) packLandCells++;
+        }
+        adjustedPackLandPercentage = (packLandCells / pack.cells.i.length) * 100;
+      }
       
       // Diagnostic logging
       if (typeof console !== 'undefined' && console.log) {
