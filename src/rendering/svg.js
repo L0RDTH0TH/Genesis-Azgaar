@@ -321,19 +321,19 @@ export function drawBiomesSVG(pack, biomesData) {
       
       const hasIsolines = Object.keys(isolines).length > 0;
       if (hasIsolines) {
-        // Process all isolines - use them even if some are empty
+        // Process ALL isolines - ensure every type gets a path (even if empty)
+        // Match original behavior: process all entries from getIsolines, no fallback
         Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
           const biomeIndex = parseInt(index);
           if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
             const color = biomesData.color[biomeIndex];
             const pathStr = getGappedFillPaths('biome', fill, waterGap, color, biomeIndex);
-            if (pathStr) {
-              bodyPaths.push(pathStr);
-            }
+            // Always add path (even if empty) to ensure all types are processed
+            bodyPaths.push(pathStr || '');
           }
         });
         
-        // Return isolines (even if empty) - NO polygon fallback
+        // Return isolines - NO polygon fallback (match original drawBiomes)
         return bodyPaths.join('');
       }
     }
@@ -441,19 +441,19 @@ export function drawStatesSVG(pack) {
       
       const hasIsolines = Object.keys(isolines).length > 0;
       if (hasIsolines) {
-        // Process all isolines - use them even if some are empty
+        // Process ALL isolines - ensure every state gets a path (even if empty)
+        // Match original behavior: process all entries from getIsolines, no fallback
         Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
           const stateIndex = parseInt(index);
           if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
             const color = states[stateIndex].color || '#cccccc';
             const pathStr = getGappedFillPaths('state', fill, waterGap, color, stateIndex);
-            if (pathStr) {
-              bodyPaths.push(pathStr);
-            }
+            // Always add path (even if empty) to ensure all states are processed
+            bodyPaths.push(pathStr || '');
           }
         });
         
-        // Return isolines (even if empty) - NO polygon fallback
+        // Return isolines - NO polygon fallback (match original drawStates)
         return bodyPaths.join('');
       }
     }
