@@ -64,21 +64,19 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
     newCells.h.push(height);
   }
 
-  // Calculate Voronoi for pack cells
+  // Calculate Voronoi for pack cells (matches original calculateVoronoi)
   const allPoints = newCells.p.concat(boundary);
   const delaunay = DelaunatorClass.from(allPoints);
-  const delaunayObj = d3.Delaunay.from(allPoints);
-  const voronoiDiagram = delaunayObj.voronoi([0, 0, options.mapWidth, options.mapHeight]);
+  const voronoiGraph = new Voronoi(delaunay, allPoints, newCells.p.length);
   
   // Create pack cells structure
-  // IMPORTANT: Initialize v and vCoords as arrays with proper length to ensure they're dense arrays
   const packCells = {
     i: createTypedArray({ maxValue: newCells.p.length, length: newCells.p.length }).map((_, i) => i),
     p: newCells.p,
     g: createTypedArray({ maxValue: grid.points.length, length: newCells.g.length }),
     h: createTypedArray({ maxValue: 100, length: newCells.h.length }),
-    c: new Array(newCells.p.length), // Neighbors (will be populated from Voronoi class)
-    v: new Array(newCells.p.length), // Vertex indices (for isoline rendering) - will be populated from polygons
+    c: new Array(newCells.p.length), // Neighbors (from Voronoi class)
+    v: new Array(newCells.p.length), // Vertex indices (from Voronoi class - for isoline rendering)
     vCoords: new Array(newCells.p.length), // Polygon coordinates (for canvas rendering)
     b: new Uint8Array(newCells.p.length), // Border cells
     area: new Float32Array(newCells.p.length),
@@ -89,62 +87,35 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
     packCells.g[i] = newCells.g[i];
     packCells.h[i] = newCells.h[i];
   }
-
-  // STEP 1: Collect all unique vertices from all cell polygons
-  // This creates a dense vertex array indexed sequentially (0, 1, 2, ...)
-  // IMPORTANT: Use cellPolygon() which returns array of [x,y] pairs: [[x0,y0], [x1,y1], ...]
-  const uniqueVertices = new Map(); // key: "x,y" -> value: [x, y]
   
+  // Use Voronoi diagram for polygon coordinates (for canvas rendering)
+  const delaunayObj = d3.Delaunay.from(allPoints);
+  const voronoiDiagram = delaunayObj.voronoi([0, 0, options.mapWidth, options.mapHeight]);
+
+  // STEP 1: Use Voronoi class vertices directly (matches original calculateVoronoi approach)
+  // voronoiGraph.vertices contains vertices with exactly 3 adjacent vertices each (triangle centers)
+  // voronoiGraph.cells.v[i] contains vertex indices (triangle IDs) for cell i
+  
+  // Populate packCells.v and packCells.c from Voronoi graph (for isoline rendering)
   for (let i = 0; i < newCells.p.length; i++) {
-    try {
-      const cellPolygon = voronoiDiagram.cellPolygon(i); // Returns array of [x,y] pairs: [[x0,y0], [x1,y1], ...]
-      if (cellPolygon && cellPolygon.length > 0) {
-        // cellPolygon returns array of [x,y] pairs directly - iterate over pairs
-        cellPolygon.forEach((point) => {
-          if (Array.isArray(point) && point.length >= 2) {
-            const x = Math.round(point[0]);
-            const y = Math.round(point[1]);
-            const key = `${x},${y}`;
-            if (!uniqueVertices.has(key)) {
-              uniqueVertices.set(key, [x, y]);
-            }
-          }
-        });
-      }
-    } catch (error) {
-      // Skip cells that fail to render
-      continue;
+    // Use Voronoi cell vertices directly (these are triangle indices into vertices)
+    packCells.v[i] = voronoiGraph.cells.v[i] || [];
+    
+    // Use Voronoi cell neighbors
+    const cellNeighbors = voronoiGraph.cells.c[i];
+    if (cellNeighbors && Array.isArray(cellNeighbors)) {
+      packCells.c[i] = cellNeighbors.filter(neibIdx => neibIdx < newCells.p.length);
+    } else {
+      packCells.c[i] = [];
     }
   }
   
-  // STEP 2: Create dense vertex array and index mapping
-  const verticesP = Array.from(uniqueVertices.values());
-  const verticesIndexMap = new Map();
-  verticesP.forEach((vertex, index) => {
-    verticesIndexMap.set(`${vertex[0]},${vertex[1]}`, index);
-  });
-  
-  // STEP 3: Populate cell data (vCoords and v) from polygons
-  // IMPORTANT: Use cellPolygon() which returns array of [x,y] points, NOT renderCell() which returns SVG path string
+  // STEP 2: Populate vCoords from polygons (for canvas rendering)
   let vCoordsPopulated = 0;
-  let vPopulated = 0;
-  
   for (let i = 0; i < newCells.p.length; i++) {
     try {
-      const cellPolygon = voronoiDiagram.cellPolygon(i); // Returns array of [x,y] pairs: [[x0,y0], [x1,y1], ...]
-      
-      // Debug: Log first cell to verify cellPolygon return type
-      if (i === 0 && typeof console !== 'undefined' && console.log) {
-        console.log('[regraph:debug] cellPolygon(0) type:', typeof cellPolygon);
-        console.log('[regraph:debug] cellPolygon(0) isArray:', Array.isArray(cellPolygon));
-        console.log('[regraph:debug] cellPolygon(0) constructor:', cellPolygon?.constructor?.name);
-        console.log('[regraph:debug] cellPolygon(0) length:', cellPolygon?.length);
-        console.log('[regraph:debug] cellPolygon(0)[0]:', cellPolygon?.[0]);
-        console.log('[regraph:debug] cellPolygon(0) sample:', JSON.stringify(Array.isArray(cellPolygon) ? cellPolygon.slice(0, 3) : cellPolygon?.substring?.(0, 30)));
-      }
-      
+      const cellPolygon = voronoiDiagram.cellPolygon(i);
       if (cellPolygon && cellPolygon.length > 0) {
-        // cellPolygon returns array of [x,y] pairs directly - round coordinates
         const roundedPoly = cellPolygon.map((point) => {
           if (Array.isArray(point) && point.length >= 2) {
             return [Math.round(point[0]), Math.round(point[1])];
@@ -153,145 +124,49 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
         }).filter(p => p !== null);
         
         if (roundedPoly.length > 0) {
-          // Store polygon coordinates for canvas rendering
           packCells.vCoords[i] = roundedPoly;
-          vCoordsPopulated++;
-          
-          // Map polygon coordinates to vertex indices for isoline rendering
-          packCells.v[i] = roundedPoly.map(p => {
-            const key = `${p[0]},${p[1]}`;
-            return verticesIndexMap.get(key);
-          }).filter(idx => idx !== undefined);
-          
-          if (packCells.v[i].length > 0) {
-            vPopulated++;
-          }
-          
-          // Calculate area from polygon
           packCells.area[i] = Math.abs(d3.polygonArea(roundedPoly));
+          vCoordsPopulated++;
         } else {
-          // Invalid polygon data
           packCells.vCoords[i] = [];
-          packCells.v[i] = [];
           packCells.area[i] = 1.0;
         }
       } else {
-        // Degenerate cell - no polygon
         packCells.vCoords[i] = [];
-        packCells.v[i] = [];
         packCells.area[i] = 1.0;
       }
     } catch (error) {
-      // Cell failed to render - set empty data
       packCells.vCoords[i] = [];
-      packCells.v[i] = [];
       packCells.area[i] = 1.0;
       if (typeof console !== 'undefined' && console.warn) {
-        console.warn(`[regraph] Cell ${i} failed to render:`, error.message);
+        console.warn(`[regraph] Cell ${i} failed to render polygon:`, error.message);
       }
     }
   }
   
-  // Ensure arrays have proper length (for sparse arrays, length might not reflect actual content)
-  // This ensures the arrays are properly recognized as arrays with the correct length
-  if (packCells.v.length !== newCells.p.length) {
-    packCells.v.length = newCells.p.length;
-  }
-  if (packCells.vCoords.length !== newCells.p.length) {
-    packCells.vCoords.length = newCells.p.length;
-  }
-  
-  // STEP 4: Build vertex adjacency graph (vertices.v and vertices.c)
-  // For each vertex, find which cells use it and which vertices share edges with it
-  const verticesV = new Array(verticesP.length).fill(null).map(() => []);
-  const verticesC = new Array(verticesP.length).fill(null).map(() => []);
-  
-  // Build cell-to-vertex mapping (reverse lookup)
-  const cellVertexMap = new Map(); // vertex index -> set of cell indices
-  for (let i = 0; i < newCells.p.length; i++) {
-    if (packCells.v[i] && packCells.v[i].length > 0) {
-      packCells.v[i].forEach(vIdx => {
-        if (!cellVertexMap.has(vIdx)) {
-          cellVertexMap.set(vIdx, new Set());
-        }
-        cellVertexMap.get(vIdx).add(i);
-      });
-    }
-  }
-  
-  // For each vertex, find adjacent vertices (vertices that share an edge in a cell)
-  for (let i = 0; i < newCells.p.length; i++) {
-    if (packCells.v[i] && packCells.v[i].length > 0) {
-      const cellVertices = packCells.v[i];
-      // Each consecutive pair of vertices in the polygon shares an edge
-      for (let j = 0; j < cellVertices.length; j++) {
-        const v1 = cellVertices[j];
-        const v2 = cellVertices[(j + 1) % cellVertices.length];
-        
-        if (v1 !== undefined && v2 !== undefined && v1 !== v2) {
-          // Add v2 to v1's adjacent vertices (if not already present)
-          if (!verticesV[v1].includes(v2)) {
-            verticesV[v1].push(v2);
-          }
-          // Add v1 to v2's adjacent vertices (if not already present)
-          if (!verticesV[v2].includes(v1)) {
-            verticesV[v2].push(v1);
-          }
-        }
-      }
-      
-      // Add this cell to all its vertices' adjacent cells
-      cellVertices.forEach(vIdx => {
-        if (vIdx !== undefined && !verticesC[vIdx].includes(i)) {
-          verticesC[vIdx].push(i);
-        }
-      });
-    }
-  }
-  
-  // STEP 5: Get cell neighbors from Voronoi class (for packCells.c)
-  // Build Voronoi graph for neighbor information
-  const voronoiGraph = new Voronoi(delaunay, allPoints, newCells.p.length);
-  
-  for (let i = 0; i < newCells.p.length; i++) {
-    const cellNeighbors = voronoiGraph.cells.c[i];
-    if (cellNeighbors && Array.isArray(cellNeighbors)) {
-      // Filter to only include pack cells (exclude boundary cells)
-      packCells.c[i] = cellNeighbors.filter(neibIdx => neibIdx < newCells.p.length);
-    } else {
-      packCells.c[i] = [];
-    }
-  }
-  
-  // Debug logging
-  if (typeof console !== 'undefined' && console.log) {
-    console.log('[regraph] Pack cells populated (polygon-based):', {
-      totalCells: newCells.p.length,
-      uniqueVertices: verticesP.length,
-      vCoordsPopulated,
-      vPopulated,
-      vCoordsPercent: ((vCoordsPopulated / newCells.p.length) * 100).toFixed(1) + '%',
-      vPercent: ((vPopulated / newCells.p.length) * 100).toFixed(1) + '%',
-      sampleVCoords: packCells.vCoords[0]?.length || 0,
-      sampleV: packCells.v[0]?.length || 0,
-    });
-  }
-
-  // Mark border cells
+  // STEP 3: Mark border cells
   for (let i = 0; i < newCells.p.length; i++) {
     const [x, y] = newCells.p[i];
     if (x <= 0 || x >= options.mapWidth || y <= 0 || y >= options.mapHeight) {
       packCells.b[i] = 1;
     }
   }
-
-  // Create vertices structure from collected unique vertices
-  // verticesP is already dense and indexed sequentially (0, 1, 2, ...)
-  const vertices = {
-    p: verticesP, // Vertex coordinates (already rounded)
-    v: verticesV, // Adjacent vertices (built from polygon edges)
-    c: verticesC, // Adjacent cells (built from cell-to-vertex mapping)
-  };
+  
+  // STEP 4: Use Voronoi vertices directly (guarantees exactly 3 adjacent vertices)
+  const vertices = voronoiGraph.vertices;
+  
+  // Debug logging
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[regraph] Pack cells populated (Voronoi vertices):', {
+      totalCells: newCells.p.length,
+      verticesCount: vertices.p.length,
+      vCoordsPopulated,
+      vCoordsPercent: ((vCoordsPopulated / newCells.p.length) * 100).toFixed(1) + '%',
+      sampleVCoords: packCells.vCoords[0]?.length || 0,
+      sampleV: packCells.v[0]?.length || 0,
+      sampleVerticesV: vertices.v[0]?.length || 0,
+    });
+  }
 
   // Final verification before returning pack
   if (typeof console !== 'undefined' && console.log) {
