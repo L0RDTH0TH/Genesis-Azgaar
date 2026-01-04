@@ -21,9 +21,10 @@ function dist2(p1, p2) {
 /**
  * Merge nearby land clusters by bridging gaps between them
  * This raises water cells between nearby land features to create land bridges
+ * Enhanced with iterative merging and smarter prioritization
  * @param {Object} pack - Pack object (will be modified)
  * @param {Object} options - Options with mergeDistance threshold
- * @returns {number} Number of clusters merged
+ * @returns {number} Total number of clusters merged across all iterations
  */
 export function mergeNearbyClusters(pack, options = {}) {
   if (!pack || !pack.cells || !pack.features) {
@@ -34,44 +35,80 @@ export function mergeNearbyClusters(pack, options = {}) {
   const { c: neighbors, h: heights, p: points } = cells;
   const packCellsNumber = cells.i.length;
   
-  // Get land features (islands/continents)
-  const landFeatures = features.filter(f => f && f.land === true);
-  if (landFeatures.length <= 1) return 0; // No merging needed if 0 or 1 land feature
+  // Enhanced parameters for more aggressive merging
+  const mergeDistance = options.mergeDistance || 6; // Increased from 3 to 6 cells (more aggressive)
+  const maxMergeDistance = options.maxMergeDistance || 8; // Maximum distance to consider
+  const minClusterSize = options.minClusterSize || 5; // Reduced from 10 to 5 (include smaller isles)
+  const maxIterations = options.maxIterations || 10; // Maximum iterations for convergence
+  const maxClusterSize = options.maxClusterSize || packCellsNumber * 0.6; // Prevent supercontinents
 
-  // Merge distance threshold: 2-5 cells (configurable)
-  const mergeDistance = options.mergeDistance || 3; // Default: 3 cells
-  const maxMergeDistance = options.maxMergeDistance || 5; // Maximum distance to consider
-  const minClusterSize = options.minClusterSize || 10; // Don't merge very small clusters (preserve islands)
+  let totalMergesPerformed = 0;
+  let iteration = 0;
 
-  let mergesPerformed = 0;
-  const mergedFeatures = new Set();
+  // Iterative merging: loop until no more merges are possible
+  while (iteration < maxIterations) {
+    // Get current land features (recalculate each iteration as features change)
+    const landFeatures = features.filter(f => f && f.land === true);
+    if (landFeatures.length <= 1) break; // No merging needed if 0 or 1 land feature
 
-  // Find pairs of nearby land features
-  for (let i = 0; i < landFeatures.length; i++) {
-    const feature1 = landFeatures[i];
-    if (mergedFeatures.has(feature1.i)) continue;
-    if (feature1.cells < minClusterSize) continue; // Skip very small clusters
+    // Sort by size (smallest first) to prioritize small-to-large merges
+    const sortedFeatures = [...landFeatures].sort((a, b) => a.cells - b.cells);
 
-    for (let j = i + 1; j < landFeatures.length; j++) {
-      const feature2 = landFeatures[j];
-      if (mergedFeatures.has(feature2.i)) continue;
-      if (feature2.cells < minClusterSize) continue; // Skip very small clusters
+    let iterationMerges = 0;
+    const mergedThisIteration = new Set();
 
-      // Find minimum distance between features
-      const distance = findMinDistanceBetweenFeatures(feature1, feature2, pack, cells);
-      
-      if (distance <= mergeDistance && distance > 0) {
-        // Bridge the gap between features
-        const bridged = bridgeFeatures(feature1, feature2, pack, cells, distance, maxMergeDistance);
+    // Find pairs of nearby land features (prioritize small-to-large)
+    for (let i = 0; i < sortedFeatures.length; i++) {
+      const feature1 = sortedFeatures[i];
+      if (mergedThisIteration.has(feature1.i)) continue;
+      if (feature1.cells >= maxClusterSize) continue; // Don't merge into supercontinents
+
+      // Find nearest large feature to merge into (or nearby feature if small)
+      let bestMerge = null;
+      let bestDistance = Infinity;
+      let bestTarget = null;
+
+      for (let j = i + 1; j < sortedFeatures.length; j++) {
+        const feature2 = sortedFeatures[j];
+        if (mergedThisIteration.has(feature2.i)) continue;
+        if (feature2.cells >= maxClusterSize) continue;
+
+        // Find minimum distance between features
+        const distance = findMinDistanceBetweenFeatures(feature1, feature2, pack, cells);
+        
+        if (distance > 0 && distance <= mergeDistance) {
+          // Prefer merging small into large, or nearest if similar size
+          const sizeDiff = feature2.cells - feature1.cells;
+          const score = distance - (sizeDiff * 0.01); // Prefer larger targets (lower score = better)
+          
+          if (score < bestDistance) {
+            bestDistance = score;
+            bestMerge = feature2;
+            bestTarget = feature1; // Merge feature1 (smaller) into feature2 (larger)
+          }
+        }
+      }
+
+      // Perform best merge found
+      if (bestMerge && bestTarget) {
+        const distance = findMinDistanceBetweenFeatures(bestTarget, bestMerge, pack, cells);
+        const bridged = bridgeFeatures(bestTarget, bestMerge, pack, cells, distance, maxMergeDistance);
         if (bridged) {
-          mergesPerformed++;
-          mergedFeatures.add(feature2.i); // Mark feature2 as merged into feature1
+          iterationMerges++;
+          totalMergesPerformed++;
+          mergedThisIteration.add(bestTarget.i); // Mark source as merged
+          // Note: bestMerge (target) stays active for potential further merges
         }
       }
     }
+
+    // If no merges this iteration, we've converged
+    if (iterationMerges === 0) break;
+
+    iteration++;
   }
 
-  return mergesPerformed;
+  return totalMergesPerformed;
 }
 
 /**
@@ -196,12 +233,28 @@ function bridgeFeatures(feature1, feature2, pack, cells, distance, maxDistance) 
   if (!path || path.length === 0) return false;
 
   // Raise water cells along path to create land bridge
-  // Only raise cells that are water (h < 20) and within maxDistance
+  // Enhanced: raise heights more intelligently (average of endpoints, with gradient)
   let raised = 0;
-  for (const cellId of path) {
+  if (path.length === 0) return false;
+
+  // Calculate average height of endpoint land cells
+  const startHeight = heights[closestPair[0]];
+  const endHeight = heights[closestPair[1]];
+  const avgEndpointHeight = (startHeight + endHeight) / 2;
+  const targetHeight = Math.max(20, Math.min(avgEndpointHeight, 30)); // Raise to 20-30 range
+
+  // Raise path cells with gradient (higher near endpoints)
+  for (let idx = 0; idx < path.length; idx++) {
+    const cellId = path[idx];
     if (cellId < 0 || cellId >= packCellsNumber) continue;
-    if (heights[cellId] < 20 && heights[cellId] >= 10) { // Water but not deep ocean
-      heights[cellId] = 20; // Raise to land threshold
+    
+    const currentHeight = heights[cellId];
+    if (currentHeight < 20 && currentHeight >= 10) { // Water but not deep ocean
+      // Gradient: cells closer to endpoints get higher values
+      const progress = idx / Math.max(path.length - 1, 1);
+      const gradient = 1 - Math.abs(progress - 0.5) * 2; // Higher near start/end
+      const heightValue = 20 + (targetHeight - 20) * gradient;
+      heights[cellId] = Math.max(20, Math.min(heightValue, 35)); // Clamp to reasonable range
       raised++;
     }
   }

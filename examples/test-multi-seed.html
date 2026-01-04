@@ -73,14 +73,14 @@
       throw error;
     }
 
-    // Fixed seeds: 42, 123, 1000 + 4 new random seeds (Date.now()-based for this cycle)
+    // Fixed seeds: 42, 123, 1000 + 4 new random seeds (Date.now()-based for Cycle 4)
     const fixedSeeds = [42, 123, 1000];
     const now = Date.now();
     const randomSeeds = [
-      Math.floor(now % 1000000),
-      Math.floor((now * 2) % 1000000),
-      Math.floor((now * 3) % 1000000),
-      Math.floor((now * 5) % 1000000)
+      Math.floor((now * 7) % 1000000),
+      Math.floor((now * 11) % 1000000),
+      Math.floor((now * 13) % 1000000),
+      Math.floor((now * 17) % 1000000)
     ];
     const allSeeds = [...fixedSeeds, ...randomSeeds];
 

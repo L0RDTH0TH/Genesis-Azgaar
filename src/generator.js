@@ -304,14 +304,16 @@ function generateMapInternal(options, DelaunatorClass) {
   markupPack({ pack });
   
   // Phase 10.25: Post-processing cluster merging (connect nearby land features)
-  // This bridges gaps between nearby land clusters to reduce fragmentation
+  // Enhanced iterative merging to aggressively reduce fragmentation
   const initialClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
   if (initialClusters > 5) {
-    // Only merge if we have more than 5 clusters (target is 1-5)
+    // Enhanced merging with iterative passes and more aggressive parameters
     const mergesPerformed = mergeNearbyClusters(pack, {
-      mergeDistance: 3, // Merge clusters within 3 cells
-      maxMergeDistance: 5, // Maximum distance to consider
-      minClusterSize: 10 // Don't merge very small clusters (preserve small islands)
+      mergeDistance: 6, // Increased from 3 to 6 cells (more aggressive)
+      maxMergeDistance: 8, // Maximum distance to consider
+      minClusterSize: 5, // Reduced from 10 to 5 (include smaller isles)
+      maxIterations: 10, // Allow up to 10 iterations for convergence
+      maxClusterSize: pack.cells.i.length * 0.6 // Prevent supercontinents (60% of cells)
     });
     
     // Re-run feature detection after merging (heights changed, so features need recalculation)
@@ -321,13 +323,16 @@ function generateMapInternal(options, DelaunatorClass) {
       
       const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
       if (typeof console !== 'undefined' && console.log) {
-        console.log('[cluster-merge] Post-processing merge:', {
+        console.log('[cluster-merge] Enhanced iterative merge:', {
           initialClusters,
           mergesPerformed,
           finalClusters,
-          reduction: initialClusters - finalClusters
+          reduction: initialClusters - finalClusters,
+          iterations: mergesPerformed > 0 ? 'multiple' : 0
         });
       }
+    } else {
+      specifyFeatures({ pack, grid, options });
     }
   } else {
     specifyFeatures({ pack, grid, options });
