@@ -1073,7 +1073,7 @@ export function drawFeaturesSVG(pack) {
 export function drawReliefSVG(pack, biomesData, options = {}) {
   if (!pack.cells || !pack.cells.h || !pack.cells.biome) return '';
   
-  const density = options.density || 0.4;
+  const density = options.density || 0.3; // Reduced default from 0.4 to 0.3 for sparser relief
   const size = 2 * (options.size || 1);
   const mod = 0.2 * size; // size modifier
   const relief = [];
@@ -1331,8 +1331,8 @@ export function renderMapSVG(data, options = {}) {
   // 8. Relief icons (with SVG symbols)
   let reliefSVG = '';
   try {
-    // Use original relief icon rendering with SVG symbols (default density 0.4 for ~200-400 icons)
-    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, { density: 0.4, size: 1 });
+    // Use original relief icon rendering with SVG symbols (density 0.3 for ~200-300 icons)
+    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, { density: 0.3, size: 1 });
   } catch (error) {
     console.warn('Relief rendering failed:', error.message);
   }
