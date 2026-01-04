@@ -263,6 +263,29 @@ function generateMapInternal(options, DelaunatorClass) {
   // Phase 16: Emblem generation
   generateEmblems({ pack, options, rng });
 
+  // Diagnostic logging after generation
+  if (typeof console !== 'undefined' && console.log) {
+    const landCells = pack.cells.i.filter(i => pack.cells.h[i] >= 20);
+    const landPercentage = ((landCells.length / pack.cells.i.length) * 100).toFixed(1);
+    const features = pack.features || [];
+    const landFeatures = features.filter(f => f && f.land);
+    const landClusters = landFeatures.length;
+    
+    console.log('[diagnostics] Generation complete:', {
+      packCells: pack.cells.i.length,
+      landCells: landCells.length,
+      landPercentage: `${landPercentage}%`,
+      landClusters: landClusters,
+      features: features.length,
+      verticesCount: pack.vertices?.p?.length || 0,
+      verticesVSample: pack.vertices?.v?.[0]?.length || 0,
+      verticesCSample: pack.vertices?.c?.[0]?.length || 0,
+      heightMin: pack.cells.h ? Math.min(...Array.from(pack.cells.h).filter(h => h !== undefined)) : 'N/A',
+      heightMax: pack.cells.h ? Math.max(...Array.from(pack.cells.h).filter(h => h !== undefined)) : 'N/A',
+      heightMean: pack.cells.h ? (Array.from(pack.cells.h).reduce((a, b) => (a || 0) + (b || 0), 0) / pack.cells.h.length).toFixed(1) : 'N/A',
+    });
+  }
+
   return {
     grid,
     pack,

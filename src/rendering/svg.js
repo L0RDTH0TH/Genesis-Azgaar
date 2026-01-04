@@ -52,7 +52,35 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     return {};
   }
   
+  // Diagnostic: Check vertex structure
+  let verticesWith3Adj = 0;
+  let verticesWithMoreAdj = 0;
+  let verticesWithLessAdj = 0;
+  const sampleSize = Math.min(100, vertices.v.length);
+  for (let i = 0; i < sampleSize; i++) {
+    if (vertices.v[i] && Array.isArray(vertices.v[i])) {
+      const count = vertices.v[i].length;
+      if (count === 3) verticesWith3Adj++;
+      else if (count > 3) verticesWithMoreAdj++;
+      else if (count < 3 && count > 0) verticesWithLessAdj++;
+    }
+  }
+  
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[getIsolines:diagnostics] Vertex structure:', {
+      totalVertices: vertices.v.length,
+      sampleSize,
+      verticesWith3Adj,
+      verticesWithMoreAdj,
+      verticesWithLessAdj,
+      threeAdjPercent: ((verticesWith3Adj / sampleSize) * 100).toFixed(1) + '%',
+    });
+  }
+  
   const isolines = {};
+  let connectVerticesErrors = 0;
+  let isolineCount = 0;
+  let skippedCount = 0;
 
   // Define addIsoline function inside the try block so it can access isolines
   function addIsoline(type, vertices, vertexChain) {
@@ -113,14 +141,30 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
         addToChecked,
         closeRing: true,
       });
-      if (vertexChain.length < 3) continue;
+      if (vertexChain.length < 3) {
+        skippedCount++;
+        continue;
+      }
 
       addIsoline(type, vertices, vertexChain);
+      isolineCount++;
     } catch (error) {
       // Skip this isoline if connection fails, but continue processing others
+      connectVerticesErrors++;
       console.warn(`Failed to connect vertices for cell ${cellId}:`, error.message);
       continue;
     }
+  }
+
+  // Diagnostic logging
+  if (typeof console !== 'undefined' && console.log) {
+    const totalTypes = Object.keys(isolines).length;
+    console.log('[getIsolines:diagnostics] Results:', {
+      totalTypes,
+      isolineCount,
+      skippedCount,
+      connectVerticesErrors,
+    });
   }
 
   return isolines;
