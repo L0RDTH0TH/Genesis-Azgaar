@@ -395,26 +395,30 @@ function generateContinentTemplate(grid, options, rng) {
   }
   const currentLandPercentage = (landCells / heights.length) * 100;
   
-  // Adjust if land percentage is too high (direct adjustment using template.modify)
-  if (currentLandPercentage > targetLandPercentage) {
-    const excessRatio = currentLandPercentage / targetLandPercentage;
-    // Calculate multiplier to reduce land to target (e.g., if 49.4% target 40%, need 40/49.4 = 0.81)
-    // But we need to account for threshold - use more aggressive reduction
-    const targetRatio = targetLandPercentage / currentLandPercentage;
-    const reductionMultiplier = Math.pow(targetRatio, 1.5); // More aggressive reduction
+  // Aggressively adjust if land percentage is too high (target ~20-25% grid to account for pack interpolation → pack ~30-40%)
+  // Pack interpolation increases land %, so we need to target lower grid land % to achieve pack target
+  const packInterpolationFactor = 1.5; // Estimated: pack land % ≈ grid land % * 1.5 (conservative estimate)
+  const effectiveGridTarget = targetLandPercentage / packInterpolationFactor; // e.g., 40% / 1.5 = ~26.7%
+  const gridTarget = Math.max(effectiveGridTarget, 20); // Minimum 20% to ensure some land
+  
+  if (currentLandPercentage > gridTarget) {
+    const excessRatio = currentLandPercentage / gridTarget;
+    // Calculate multiplier to reduce land to grid target (more aggressive: 0.4-0.6 multiplier)
+    const targetRatio = gridTarget / currentLandPercentage;
+    const reductionMultiplier = Math.max(0.4, Math.min(0.6, targetRatio)); // Clamp to 0.4-0.6 range
     
-    // Use template.modify to reduce land heights multiplicatively
+    // Apply aggressive reduction to land heights
     template.modify('land', 0, reductionMultiplier);
     
-    // Recalculate after adjustment
+    // Recalculate after modification
     landCells = 0;
     for (let i = 0; i < heights.length; i++) {
       if (heights[i] >= landThreshold) landCells++;
     }
-    const adjustedLandPercentage = (landCells / heights.length) * 100;
+    let adjustedLandPercentage = (landCells / heights.length) * 100;
     
-    // If still too high, apply additional reduction via direct height adjustment
-    if (adjustedLandPercentage > targetLandPercentage) {
+    // If still too high, apply direct height reduction to reach target
+    if (adjustedLandPercentage > gridTarget) {
       // Sort land cells by height (lowest first) and reduce enough to reach target
       const landIndices = [];
       for (let i = 0; i < heights.length; i++) {
@@ -424,8 +428,8 @@ function generateContinentTemplate(grid, options, rng) {
       }
       landIndices.sort((a, b) => heights[a] - heights[b]);
       
-      const targetLandCells = Math.floor(heights.length * (targetLandPercentage / 100));
-      const cellsToReduce = landIndices.length - targetLandCells;
+      const targetLandCells = Math.floor(heights.length * (gridTarget / 100));
+      const cellsToReduce = Math.max(0, landIndices.length - targetLandCells);
       
       // Reduce lowest land cells to just below threshold
       for (let j = 0; j < cellsToReduce && j < landIndices.length; j++) {
@@ -437,33 +441,21 @@ function generateContinentTemplate(grid, options, rng) {
       for (let i = 0; i < heights.length; i++) {
         if (heights[i] >= landThreshold) landCells++;
       }
-      const finalLandPercentage = (landCells / heights.length) * 100;
-      
-      // Diagnostic logging
-      if (typeof console !== 'undefined' && console.log) {
-        console.log('[heightmap:land-adjust] Land percentage adjustment:', {
-          target: targetLandPercentage,
-          initial: currentLandPercentage.toFixed(1),
-          afterModify: adjustedLandPercentage.toFixed(1),
-          final: finalLandPercentage.toFixed(1),
-          cellsReduced: cellsToReduce,
-          reductionMultiplier: reductionMultiplier.toFixed(3),
-          blobPower: template.blobPower,
-          linePower: template.linePower,
-        });
-      }
-    } else {
-      // Diagnostic logging (modify was sufficient)
-      if (typeof console !== 'undefined' && console.log) {
-        console.log('[heightmap:land-adjust] Land percentage adjustment:', {
-          target: targetLandPercentage,
-          initial: currentLandPercentage.toFixed(1),
-          adjusted: adjustedLandPercentage.toFixed(1),
-          reductionMultiplier: reductionMultiplier.toFixed(3),
-          blobPower: template.blobPower,
-          linePower: template.linePower,
-        });
-      }
+      adjustedLandPercentage = (landCells / heights.length) * 100;
+    }
+    
+    // Diagnostic logging
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[heightmap:land-adjust] Aggressive land percentage adjustment:', {
+        targetPack: targetLandPercentage,
+        gridTarget: gridTarget.toFixed(1),
+        initial: currentLandPercentage.toFixed(1),
+        final: adjustedLandPercentage.toFixed(1),
+        reductionMultiplier: reductionMultiplier.toFixed(3),
+        packInterpolationFactor: packInterpolationFactor.toFixed(2),
+        blobPower: template.blobPower,
+        linePower: template.linePower,
+      });
     }
   }
   
