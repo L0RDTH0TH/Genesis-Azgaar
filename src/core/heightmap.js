@@ -370,6 +370,11 @@ function generateContinentTemplate(grid, options, rng) {
   // Smooth 3 0 0 0
   template.smooth(3, 0);
   
+  // Cluster merging: Additional smooth passes (5-7) to connect fragmented islands
+  template.smooth(5, 0);
+  template.smooth(6, 0);
+  template.smooth(7, 0);
+  
   // Trough 3-4 15-20 15-85 20-80
   template.addTrough('3-4', '15-20', '15-85', '20-80');
   
@@ -381,6 +386,11 @@ function generateContinentTemplate(grid, options, rng) {
   
   // Mask 4 0 0 0
   template.mask(4);
+  
+  // Cluster merging: Additional mask passes (6-8) to merge nearby landmasses
+  template.mask(6);
+  template.mask(7);
+  template.mask(8);
 
   const heights = template.getHeights();
   

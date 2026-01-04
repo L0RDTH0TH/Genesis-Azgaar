@@ -20,7 +20,13 @@ export class HeightmapTemplate {
     this.rng = rng;
     this.heights = null;
     const cellsDesired = options.cellsDesired || 10000;
-    this.blobPower = this.getBlobPower(cellsDesired);
+    // Increase blobPower for larger, more cohesive landmasses (cluster merging)
+    // Original blobPower * 1.5-2.0 multiplier effect: use lower exponent for larger blobs
+    const baseBlobPower = this.getBlobPower(cellsDesired);
+    // To make blobs larger, we reduce the exponent (closer to 1.0 = larger blobs)
+    // But we want to keep it reasonable, so we adjust: newPower = 1 - (1 - base) * 0.5
+    // This makes blobs ~2x larger in radius
+    this.blobPower = 1 - (1 - baseBlobPower) * 0.5;
     this.linePower = this.getLinePower(cellsDesired);
     this.graphWidth = options.mapWidth;
     this.graphHeight = options.mapHeight;

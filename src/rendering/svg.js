@@ -10,6 +10,7 @@ import { getDefaultBiomes } from '../core/biomes.js';
 import { rn, minmax } from '../utils/math.js';
 import { getCellPolygonPath, pointInPolygon, poissonDiscSampler } from './utils.js';
 import { drawReliefIconsSVG, getReliefIconDefs } from './relief-icons.js';
+import { drawOceanLayersSVG } from './ocean-layers.js';
 
 // Style constants from original Azgaar (default.json)
 const STYLE_CONSTANTS = {
@@ -1286,6 +1287,18 @@ export function renderMapSVG(data, options = {}) {
 
   // 1. Ocean base
   layers.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${STYLE_CONSTANTS.oceanBase}" />`);
+
+  // 1.5. Ocean layers (fog/atmosphere)
+  if (options.showOceanLayers !== false) {
+    try {
+      const oceanLayersSVG = drawOceanLayersSVG(pack, { oceanLayers: options.oceanLayers || 'random' });
+      if (oceanLayersSVG) {
+        layers.push(`<g id="ocean-layers">${oceanLayersSVG}</g>`);
+      }
+    } catch (error) {
+      console.warn('Ocean layers rendering failed:', error.message);
+    }
+  }
 
   // 2. Features (lakes, islands)
   const featuresSVG = drawFeaturesSVG(pack);
