@@ -192,10 +192,10 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
     
     // Biome icons (forests/swamps only, height 20-50) - further reduced for ~200-300 total
       const iconsDensity = biomesData.iconsDensity[biome] / 100;
-      // Use radius based on cellSize*0.5, increased slightly for sparser distribution
-      const radius = radiusBase * 1.2; // 3-5px equivalent (slightly larger)
-      // Reduced probability to 0.1-0.2 for ~200-300 icons (down from 0.25)
-      const probability = 0.15; // Fixed 0.15 probability (between 0.1-0.2)
+      // Use radius based on cellSize*0.5, increased for sparser distribution (4-6px equivalent)
+      const radius = radiusBase * 1.5; // 4-6px equivalent for sparse distribution
+      // Reduced probability to 0.1 for ~200 sparse icons (down from 0.15)
+      const probability = 0.1; // Fixed 0.1 probability for sparse distribution
       if (Math.random() > probability) continue;
     
     const iconTypes = biomesData.icons[biome] || [];
