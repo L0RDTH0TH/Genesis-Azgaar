@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Multi-Template Validation Suite</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #e0e0e0;
+    }
+    h1 {
+      color: #fff;
+      border-bottom: 2px solid #4a9eff;
+      padding-bottom: 10px;
+    }
+    .controls {
+      margin: 20px 0;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 8px;
+    }
+    button {
+      background: #4a9eff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px;
+    }
+    button:hover {
+      background: #5aaeff;
+    }
+    button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+    .results {
+      margin-top: 20px;
+    }
+    .template-section {
+      margin: 30px 0;
+      padding: 20px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      border-left: 4px solid #4a9eff;
+    }
+    .template-section h2 {
+      color: #4a9eff;
+      margin-top: 0;
+    }
+    .seed-result {
+      margin: 15px 0;
+      padding: 15px;
+      background: #1a1a1a;
+      border-radius: 5px;
+      border: 1px solid #333;
+    }
+    .seed-result img {
+      max-width: 100%;
+      border: 2px solid #4a9eff;
+      border-radius: 5px;
+      margin-top: 10px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .metric {
+      padding: 8px;
+      background: #333;
+      border-radius: 4px;
+    }
+    .metric strong {
+      color: #4a9eff;
+    }
+    .summary {
+      margin-top: 20px;
+      padding: 15px;
+      background: #333;
+      border-radius: 5px;
+    }
+    .status {
+      display: inline-block;
+      padding: 5px 10px;
+      border-radius: 3px;
+      font-weight: bold;
+      margin-left: 10px;
+    }
+    .status.running {
+      background: #ffaa00;
+      color: #000;
+    }
+    .status.complete {
+      background: #00aa00;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Multi-Template Validation Suite</h1>
+  
+  <div class="controls">
+    <button id="runAll">Run Full Suite (4 Templates × 7 Seeds = 28 Maps)</button>
+    <button id="runTemplate" disabled>Run Current Template Only</button>
+    <span id="status"></span>
+  </div>
+
+  <div id="results" class="results"></div>
+
+  <script type="module">
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    import { initGenerator, loadOptions, generateMap } from '../src/generator.js';
+
+    const templates = ['continent', 'archipelago', 'pangea', 'shattered'];
+    const fixedSeeds = [42, 123, 1000];
+    const now = Date.now();
+    const randomSeeds = [
+      Math.floor((now * 19) % 1000000),
+      Math.floor((now * 23) % 1000000),
+      Math.floor((now * 29) % 1000000),
+      Math.floor((now * 31) % 1000000)
+    ];
+    const allSeeds = [...fixedSeeds, ...randomSeeds];
+
+    let currentTemplateIndex = 0;
+    let currentSeedIndex = 0;
+    let allResults = {};
+
+    // Initialize generator once
+    initGenerator({ container: null });
+
+    function updateStatus(text, className = '') {
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = text;
+      statusEl.className = `status ${className}`;
+    }
+
+    async function generateAndCapture(template, seed) {
+      try {
+        updateStatus(`Generating ${template} / Seed ${seed}...`, 'running');
+        
+        const options = {
+          seed: seed.toString(),
+          statesNumber: 18,
+          template: template,
+          showLabels: true,
+          showRelief: true,
+          fullRendering: true,
+          enforceLandPercentage: false // Allow natural land % per template
+        };
+
+        loadOptions(options);
+        const data = await generateMap(Delaunator);
+        const pack = data.pack;
+
+        // Calculate metrics
+        const landCells = pack.cells.i.filter(i => pack.cells.h[i] >= 20).length;
+        const landPercentage = (landCells / pack.cells.i.length) * 100;
+        const clusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
+        
+        // Render SVG to get isoline percentage
+        const { renderMapSVG } = await import('../src/rendering/svg.js');
+        const svgString = renderMapSVG(data, options);
+        
+        // Count isolines (simplified - check for path elements with gap IDs)
+        const parser = new DOMParser();
+        const svgDoc = parser.parseFromString(svgString, 'image/svg+xml');
+        const paths = svgDoc.querySelectorAll('path');
+        let isolineCount = 0;
+        paths.forEach(p => {
+          const id = p.getAttribute('id') || '';
+          if (id.includes('gap') || id.includes('isoline')) isolineCount++;
+        });
+        const isolinePercent = paths.length > 0 ? (isolineCount / paths.length) * 100 : 0;
+
+        // Count relief icons (if any)
+        const reliefIcons = svgDoc.querySelectorAll('use[href*="#relief"], use[href*="#icon"]').length;
+
+        // Create data URL for screenshot
+        const svgBlob = new Blob([svgString], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(svgBlob);
+
+        return {
+          seed,
+          landPercentage: landPercentage.toFixed(1),
+          clusters,
+          isolinePercent: isolinePercent.toFixed(1),
+          reliefIcons,
+          svgUrl: url,
+          svgString
+        };
+      } catch (error) {
+        console.error(`Error generating ${template} / Seed ${seed}:`, error);
+        return {
+          seed,
+          error: error.message,
+          landPercentage: 'N/A',
+          clusters: 'N/A',
+          isolinePercent: 'N/A',
+          reliefIcons: 'N/A'
+        };
+      }
+    }
+
+    function renderResults() {
+      const resultsEl = document.getElementById('results');
+      resultsEl.innerHTML = '';
+
+      for (const template of templates) {
+        const templateResults = allResults[template] || {};
+        
+        const section = document.createElement('div');
+        section.className = 'template-section';
+        
+        const title = document.createElement('h2');
+        title.textContent = `Template: ${template}`;
+        section.appendChild(title);
+
+        const summary = document.createElement('div');
+        summary.className = 'summary';
+        
+        const seeds = allSeeds.filter(s => templateResults[s]);
+        if (seeds.length > 0) {
+          const landAvgs = seeds.map(s => parseFloat(templateResults[s].landPercentage)).filter(n => !isNaN(n));
+          const clusterAvgs = seeds.map(s => templateResults[s].clusters).filter(n => typeof n === 'number');
+          
+          const avgLand = landAvgs.length > 0 ? (landAvgs.reduce((a, b) => a + b, 0) / landAvgs.length).toFixed(1) : 'N/A';
+          const avgClusters = clusterAvgs.length > 0 ? (clusterAvgs.reduce((a, b) => a + b, 0) / clusterAvgs.length).toFixed(1) : 'N/A';
+          const minClusters = clusterAvgs.length > 0 ? Math.min(...clusterAvgs) : 'N/A';
+          const maxClusters = clusterAvgs.length > 0 ? Math.max(...clusterAvgs) : 'N/A';
+          
+          summary.innerHTML = `
+            <strong>Summary (${seeds.length} seeds):</strong><br>
+            Average Land %: ${avgLand}% | Average Clusters: ${avgClusters} (Min: ${minClusters}, Max: ${maxClusters})
+          `;
+        } else {
+          summary.textContent = 'No results yet...';
+        }
+        section.appendChild(summary);
+
+        for (const seed of allSeeds) {
+          const result = templateResults[seed];
+          if (!result) continue;
+
+          const seedDiv = document.createElement('div');
+          seedDiv.className = 'seed-result';
+          
+          const seedTitle = document.createElement('h3');
+          seedTitle.textContent = `Seed ${seed}`;
+          seedDiv.appendChild(seedTitle);
+
+          const metrics = document.createElement('div');
+          metrics.className = 'metrics';
+          metrics.innerHTML = `
+            <div class="metric"><strong>Land %:</strong> ${result.landPercentage}%</div>
+            <div class="metric"><strong>Clusters:</strong> ${result.clusters}</div>
+            <div class="metric"><strong>Isolines:</strong> ${result.isolinePercent}%</div>
+            <div class="metric"><strong>Relief:</strong> ${result.reliefIcons}</div>
+          `;
+          seedDiv.appendChild(metrics);
+
+          if (result.svgUrl) {
+            const img = document.createElement('img');
+            img.src = result.svgUrl;
+            img.alt = `${template} - Seed ${seed}`;
+            img.style.width = '100%';
+            img.style.height = 'auto';
+            seedDiv.appendChild(img);
+          }
+
+          if (result.error) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.color = '#ff4444';
+            errorDiv.textContent = `Error: ${result.error}`;
+            seedDiv.appendChild(errorDiv);
+          }
+
+          section.appendChild(seedDiv);
+        }
+
+        resultsEl.appendChild(section);
+      }
+    }
+
+    document.getElementById('runAll').addEventListener('click', async () => {
+      allResults = {};
+      currentTemplateIndex = 0;
+      currentSeedIndex = 0;
+
+      updateStatus('Starting full suite...', 'running');
+
+      for (const template of templates) {
+        if (!allResults[template]) allResults[template] = {};
+        
+        for (const seed of allSeeds) {
+          const result = await generateAndCapture(template, seed);
+          allResults[template][seed] = result;
+          renderResults();
+          
+          // Small delay to prevent overwhelming
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+
+      updateStatus('Complete! All 28 maps generated.', 'complete');
+    });
+
+    renderResults();
+  </script>
+</body>
+</html>
