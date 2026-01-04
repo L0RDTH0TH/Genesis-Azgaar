@@ -1331,8 +1331,8 @@ export function renderMapSVG(data, options = {}) {
   // 8. Relief icons (with SVG symbols)
   let reliefSVG = '';
   try {
-    // Use original relief icon rendering with SVG symbols
-    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, { density: 0.3, size: 1 });
+    // Use original relief icon rendering with SVG symbols (default density 0.4 for ~200-400 icons)
+    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, { density: 0.4, size: 1 });
   } catch (error) {
     console.warn('Relief rendering failed:', error.message);
   }

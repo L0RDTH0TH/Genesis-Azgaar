@@ -167,10 +167,12 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
     if (height < 50) {
       // Biome icons (trees, grass, etc.) - sparse distribution (target 200-400 total)
       const iconsDensity = biomesData.iconsDensity[biome] / 100;
-      // Increase radius significantly for sparser distribution (3x multiplier)
-      const radius = (2 / iconsDensity / density) * 3;
-      // Reduce probability significantly (from iconsDensity * 10 to iconsDensity * 2)
-      if (Math.random() > iconsDensity * 2) continue;
+      // Original logic: radius = 2 / iconsDensity / density
+      // For sparser distribution (target 200-400 vs 1646), use larger radius (5x multiplier)
+      const radius = (2 / iconsDensity / density) * 5;
+      // Original probability: Math.random() > iconsDensity * 10
+      // Reduce probability for sparser distribution (use iconsDensity * 3 instead of * 10)
+      if (Math.random() > iconsDensity * 3) continue;
       
       const iconTypes = biomesData.icons[biome] || [];
       if (iconTypes.length === 0) continue;
@@ -189,8 +191,9 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
       }
     } else {
       // Relief icons (mountains, hills) - sparse distribution
-      // Increase radius significantly for sparser distribution (3x multiplier)
-      const radius = (2 / density) * 3;
+      // Original logic: radius = 2 / density
+      // For sparser distribution, use larger radius (5x multiplier)
+      const radius = (2 / density) * 5;
       const [icon, h] = getReliefIcon(i, height, grid, pack, mod);
       
       // Limit to 1 icon per cell for sparsity
