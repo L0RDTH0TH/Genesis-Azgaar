@@ -9,6 +9,7 @@
 import { getDefaultBiomes } from '../core/biomes.js';
 import { rn, minmax } from '../utils/math.js';
 import { getCellPolygonPath, pointInPolygon, poissonDiscSampler } from './utils.js';
+import { drawReliefIconsSVG, getReliefIconDefs } from './relief-icons.js';
 
 // Style constants from original Azgaar (default.json)
 const STYLE_CONSTANTS = {
@@ -1327,10 +1328,11 @@ export function renderMapSVG(data, options = {}) {
     layers.push(`<g id="borders">${borders.stateBorders}${borders.provinceBorders}</g>`);
   }
 
-  // 8. Relief icons
+  // 8. Relief icons (with SVG symbols)
   let reliefSVG = '';
   try {
-    reliefSVG = drawReliefSVG(pack, biomesData, { density: 0.4, size: 1 });
+    // Use original relief icon rendering with SVG symbols
+    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, { density: 0.3, size: 1 });
   } catch (error) {
     console.warn('Relief rendering failed:', error.message);
   }
@@ -1350,8 +1352,12 @@ export function renderMapSVG(data, options = {}) {
     layers.push(`<g id="labels" class="state-labels">${stateLabelsSVG}</g>`);
   }
 
+  // Add relief icon symbol definitions
+  const defs = getReliefIconDefs();
+  
   // Combine into complete SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+${defs}
 ${layers.join('\n')}
 </svg>`;
 

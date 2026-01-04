@@ -178,6 +178,49 @@ function generateMapInternal(options, DelaunatorClass) {
     // Ensure pack has height data from grid (pack may have fewer cells than grid)
     // Height data will be mapped via pack.cells.g (grid cell index)
     
+    // Post-pack land adjustment: Adjust pack.cells.h if land percentage is too high
+    const targetLandPercentage = options.landPercentage || 40;
+    const landThreshold = 20;
+    
+    // Calculate current pack land percentage
+    let packLandCells = 0;
+    for (let i = 0; i < pack.cells.i.length; i++) {
+      if (pack.cells.h[i] >= landThreshold) packLandCells++;
+    }
+    const packLandPercentage = (packLandCells / pack.cells.i.length) * 100;
+    
+    // Adjust if land percentage is too high (multiply non-ocean heights by 0.5-0.7)
+    if (packLandPercentage > targetLandPercentage) {
+      const excessRatio = packLandPercentage / targetLandPercentage;
+      const reductionMultiplier = Math.max(0.5, Math.min(0.7, targetLandPercentage / packLandPercentage));
+      
+      // Apply reduction to non-ocean cells
+      for (let i = 0; i < pack.cells.i.length; i++) {
+        if (pack.cells.h[i] >= landThreshold) {
+          const newH = (pack.cells.h[i] - landThreshold) * reductionMultiplier + landThreshold;
+          pack.cells.h[i] = Math.max(landThreshold - 1, Math.min(100, Math.round(newH)));
+        }
+      }
+      
+      // Recalculate after adjustment
+      packLandCells = 0;
+      for (let i = 0; i < pack.cells.i.length; i++) {
+        if (pack.cells.h[i] >= landThreshold) packLandCells++;
+      }
+      const adjustedPackLandPercentage = (packLandCells / pack.cells.i.length) * 100;
+      
+      // Diagnostic logging
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[generator:post-pack-land-adjust] Post-pack land percentage adjustment:', {
+          target: targetLandPercentage,
+          initial: packLandPercentage.toFixed(1),
+          adjusted: adjustedPackLandPercentage.toFixed(1),
+          reductionMultiplier: reductionMultiplier.toFixed(3),
+          excessRatio: excessRatio.toFixed(2),
+        });
+      }
+    }
+    
     // Debug: Log pack structure immediately after creation
     if (typeof console !== 'undefined' && console.log) {
       console.log('[generator:lifecycle] Post-creation (immediately after createPackFromGrid):', {
