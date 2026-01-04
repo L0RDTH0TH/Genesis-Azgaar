@@ -73,9 +73,15 @@
       throw error;
     }
 
-    // Fixed seeds: 42, 123, 1000 + 4 deterministic "random" seeds (for reproducibility)
+    // Fixed seeds: 42, 123, 1000 + 4 new random seeds (Date.now()-based for this cycle)
     const fixedSeeds = [42, 123, 1000];
-    const randomSeeds = [54321, 98765, 111222, 333444]; // Fixed for reproducibility
+    const now = Date.now();
+    const randomSeeds = [
+      Math.floor(now % 1000000),
+      Math.floor((now * 2) % 1000000),
+      Math.floor((now * 3) % 1000000),
+      Math.floor((now * 5) % 1000000)
+    ];
     const allSeeds = [...fixedSeeds, ...randomSeeds];
 
     document.getElementById('runTest').addEventListener('click', async () => {
