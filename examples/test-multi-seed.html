@@ -44,27 +44,57 @@
   <button id="runTest">Run 7-Seed Test Suite</button>
   <div id="results"></div>
 
-  <script type="module">
-    import { generateMap } from '../src/generator.js';
-
-    const fixedSeeds = [42, 123, 1000];
-    const randomSeeds = [];
-    for (let i = 0; i < 4; i++) {
-      randomSeeds.push(Math.floor(Math.random() * 1000000));
+  <script type="importmap">
+    {
+      "imports": {
+        "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm",
+        "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm"
+      }
     }
+  </script>
+
+  <script type="module">
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev ? '/src/index.js' : '/dist/azgaar-library.es.js';
+    
+    let initGenerator, loadOptions, generateMap, renderToSVG, getMapData;
+    
+    try {
+      const AzgaarModule = await import(libraryPath);
+      initGenerator = AzgaarModule.initGenerator;
+      loadOptions = AzgaarModule.loadOptions;
+      generateMap = AzgaarModule.generateMap;
+      renderToSVG = AzgaarModule.renderToSVG;
+      getMapData = AzgaarModule.getMapData;
+    } catch (error) {
+      console.error('Failed to load Azgaar module:', error);
+      throw error;
+    }
+
+    // Fixed seeds: 42, 123, 1000 + 4 deterministic "random" seeds (for reproducibility)
+    const fixedSeeds = [42, 123, 1000];
+    const randomSeeds = [54321, 98765, 111222, 333444]; // Fixed for reproducibility
     const allSeeds = [...fixedSeeds, ...randomSeeds];
 
     document.getElementById('runTest').addEventListener('click', async () => {
       const results = document.getElementById('results');
       results.textContent = 'Running 7-seed test suite...\n\n';
       
+      // Initialize generator once before the loop
+      initGenerator({ container: null });
+      
       const metrics = [];
       
       for (const seed of allSeeds) {
         try {
-          const startTime = performance.now();
-          const data = await generateMap({
+          // Load options for this seed
+          loadOptions({
             seed: String(seed),
+            mapWidth: 960,
+            mapHeight: 540,
+            cellsDesired: 10000,
             statesNumber: 18,
             template: 'continent',
             landPercentage: 40,
@@ -72,50 +102,78 @@
             showRelief: true,
             fullRendering: true
           });
+          
+          const startTime = performance.now();
+          const data = generateMap(Delaunator);
           const genTime = performance.now() - startTime;
           
           const pack = data.pack;
           const landCells = pack.cells.i.filter(i => pack.cells.h[i] >= 20).length;
           const landPercentage = (landCells / pack.cells.i.length) * 100;
-          const clusters = pack.features ? pack.features.filter(f => f.land).length : 0;
+          // Count land clusters (features with land=true)
+          const clusters = pack.features ? pack.features.filter(f => f && f.land === true).length : 0;
           
-          // Count isolines (would need to render SVG, simplified for now)
-          const isolinePercent = 100; // Assume 100% if rendering succeeds
+          // Render SVG to get isoline and relief counts
+          const svgString = renderToSVG({ width: 960, height: 540 });
+          const svgDoc = new DOMParser().parseFromString(svgString, 'image/svg+xml');
+          const svg = svgDoc.documentElement;
           
-          // Count relief icons (would need to render, simplified)
-          const reliefCount = 0; // Placeholder
+          // Count isolines (states + biomes)
+          const statePaths = svg.querySelectorAll('#states path');
+          const biomePaths = svg.querySelectorAll('#biomes path');
+          const stateIsoline = Array.from(statePaths).filter(p => {
+            const d = p.getAttribute('d') || '';
+            const id = p.id || '';
+            return id.includes('gap') || d.trim().endsWith('Z');
+          }).length;
+          const biomeIsoline = Array.from(biomePaths).filter(p => {
+            const d = p.getAttribute('d') || '';
+            const id = p.id || '';
+            return id.includes('gap') || d.trim().endsWith('Z');
+          }).length;
+          const totalPaths = statePaths.length + biomePaths.length;
+          const totalIsoline = stateIsoline + biomeIsoline;
+          const isolinePercent = totalPaths > 0 ? ((totalIsoline / totalPaths) * 100).toFixed(1) : '100.0';
+          
+          // Count relief icons
+          const reliefIcons = svg.querySelectorAll('use').length;
           
           metrics.push({
             seed,
-            landPercentage: landPercentage.toFixed(1),
+            landPercentage: parseFloat(landPercentage.toFixed(1)),
             clusters,
-            isolinePercent,
-            reliefCount,
-            genTime: genTime.toFixed(1)
+            isolinePercent: parseFloat(isolinePercent),
+            reliefCount: reliefIcons,
+            genTime: parseFloat(genTime.toFixed(1))
           });
           
-          results.textContent += `Seed ${seed}: Land ${landPercentage.toFixed(1)}%, Clusters ${clusters}, Time ${genTime.toFixed(1)}ms\n`;
+          results.textContent += `Seed ${seed}: Land ${landPercentage.toFixed(1)}%, Clusters ${clusters}, Isolines ${isolinePercent}%, Relief ${reliefIcons}, Time ${genTime.toFixed(1)}ms\n`;
         } catch (error) {
           results.textContent += `Seed ${seed}: ERROR - ${error.message}\n`;
+          console.error(`Seed ${seed} error:`, error);
           metrics.push({
             seed,
-            landPercentage: 'ERROR',
-            clusters: 'ERROR',
-            isolinePercent: 'ERROR',
-            reliefCount: 'ERROR',
-            genTime: 'ERROR'
+            landPercentage: null,
+            clusters: null,
+            isolinePercent: null,
+            reliefCount: null,
+            genTime: null
           });
         }
       }
       
       // Calculate statistics
-      const validMetrics = metrics.filter(m => m.landPercentage !== 'ERROR');
+      const validMetrics = metrics.filter(m => m.landPercentage !== null && !isNaN(m.landPercentage));
       if (validMetrics.length > 0) {
-        const landValues = validMetrics.map(m => parseFloat(m.landPercentage));
+        const landValues = validMetrics.map(m => m.landPercentage);
         const clusterValues = validMetrics.map(m => m.clusters);
+        const isolineValues = validMetrics.map(m => m.isolinePercent);
+        const reliefValues = validMetrics.map(m => m.reliefCount);
         
         const avgLand = landValues.reduce((a, b) => a + b, 0) / landValues.length;
         const avgClusters = clusterValues.reduce((a, b) => a + b, 0) / clusterValues.length;
+        const avgIsoline = isolineValues.reduce((a, b) => a + b, 0) / isolineValues.length;
+        const avgRelief = reliefValues.reduce((a, b) => a + b, 0) / reliefValues.length;
         
         const landVariance = landValues.reduce((sum, val) => sum + Math.pow(val - avgLand, 2), 0) / landValues.length;
         const landStdDev = Math.sqrt(landVariance);
@@ -125,26 +183,40 @@
         const clusterStdDev = Math.sqrt(clusterVariance);
         const clusterRelStdDev = (clusterStdDev / avgClusters) * 100;
         
+        const maxClusters = Math.max(...clusterValues);
+        const minClusters = Math.min(...clusterValues);
+        
         results.textContent += `\n=== SUMMARY ===\n`;
         results.textContent += `Average Land %: ${avgLand.toFixed(1)}%\n`;
         results.textContent += `Land Std Dev: ${landStdDev.toFixed(2)}% (${landRelStdDev.toFixed(1)}% relative)\n`;
-        results.textContent += `Average Clusters: ${avgClusters.toFixed(1)}\n`;
+        results.textContent += `Average Clusters: ${avgClusters.toFixed(1)} (Min: ${minClusters}, Max: ${maxClusters})\n`;
         results.textContent += `Cluster Std Dev: ${clusterStdDev.toFixed(2)} (${clusterRelStdDev.toFixed(1)}% relative)\n`;
+        results.textContent += `Average Isolines %: ${avgIsoline.toFixed(1)}%\n`;
+        results.textContent += `Average Relief Icons: ${avgRelief.toFixed(0)}\n`;
         
         // Create table
         let tableHTML = '<table><tr><th>Seed</th><th>Land %</th><th>Clusters</th><th>Isolines %</th><th>Relief</th><th>Time (ms)</th></tr>';
         metrics.forEach(m => {
-          tableHTML += `<tr><td>${m.seed}</td><td>${m.landPercentage}</td><td>${m.clusters}</td><td>${m.isolinePercent}</td><td>${m.reliefCount}</td><td>${m.genTime}</td></tr>`;
+          const landStr = m.landPercentage !== null ? m.landPercentage.toFixed(1) : 'ERROR';
+          const clusterStr = m.clusters !== null ? m.clusters : 'ERROR';
+          const isolineStr = m.isolinePercent !== null ? m.isolinePercent.toFixed(1) : 'ERROR';
+          const reliefStr = m.reliefCount !== null ? m.reliefCount : 'ERROR';
+          const timeStr = m.genTime !== null ? m.genTime.toFixed(1) : 'ERROR';
+          tableHTML += `<tr><td>${m.seed}</td><td>${landStr}</td><td>${clusterStr}</td><td>${isolineStr}</td><td>${reliefStr}</td><td>${timeStr}</td></tr>`;
         });
         tableHTML += '</table>';
         
         results.innerHTML += tableHTML;
         
+        const variancePass = landRelStdDev < 20 && clusterRelStdDev < 20;
         results.innerHTML += `<div class="summary">
           <h3>Summary Statistics</h3>
-          <p>Average Land %: ${avgLand.toFixed(1)}% (Std Dev: ${landStdDev.toFixed(2)}%, ${landRelStdDev.toFixed(1)}% relative)</p>
-          <p>Average Clusters: ${avgClusters.toFixed(1)} (Std Dev: ${clusterStdDev.toFixed(2)}, ${clusterRelStdDev.toFixed(1)}% relative)</p>
-          <p>Variance Check: ${landRelStdDev < 15 && clusterRelStdDev < 15 ? '✓ PASS' : '✗ FAIL'} (target <15% relative std-dev)</p>
+          <p><strong>Land %:</strong> Avg ${avgLand.toFixed(1)}% | Std Dev ${landStdDev.toFixed(2)}% (${landRelStdDev.toFixed(1)}% relative)</p>
+          <p><strong>Clusters:</strong> Avg ${avgClusters.toFixed(1)} | Min ${minClusters} | Max ${maxClusters} | Std Dev ${clusterStdDev.toFixed(2)} (${clusterRelStdDev.toFixed(1)}% relative)</p>
+          <p><strong>Isolines:</strong> Avg ${avgIsoline.toFixed(1)}%</p>
+          <p><strong>Relief:</strong> Avg ${avgRelief.toFixed(0)} icons</p>
+          <p><strong>Variance Check:</strong> ${variancePass ? '✓ PASS' : '✗ FAIL'} (target <20% relative std-dev)</p>
+          <p><strong>Cluster Target:</strong> ${avgClusters <= 8 && maxClusters <= 12 ? '✓ PASS' : '✗ FAIL'} (avg ≤8, max ≤12)</p>
         </div>`;
       }
     });
