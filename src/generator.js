@@ -29,6 +29,7 @@ import {
   markupGrid,
   markupPack,
   specifyFeatures,
+  mergeNearbyClusters,
   generateCultures,
   expandCultures,
   generateBurgs,
@@ -301,7 +302,36 @@ function generateMapInternal(options, DelaunatorClass) {
 
   // Phase 10: Pack-level feature detection
   markupPack({ pack });
-  specifyFeatures({ pack, grid, options });
+  
+  // Phase 10.25: Post-processing cluster merging (connect nearby land features)
+  // This bridges gaps between nearby land clusters to reduce fragmentation
+  const initialClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
+  if (initialClusters > 5) {
+    // Only merge if we have more than 5 clusters (target is 1-5)
+    const mergesPerformed = mergeNearbyClusters(pack, {
+      mergeDistance: 3, // Merge clusters within 3 cells
+      maxMergeDistance: 5, // Maximum distance to consider
+      minClusterSize: 10 // Don't merge very small clusters (preserve small islands)
+    });
+    
+    // Re-run feature detection after merging (heights changed, so features need recalculation)
+    if (mergesPerformed > 0) {
+      markupPack({ pack });
+      specifyFeatures({ pack, grid, options });
+      
+      const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[cluster-merge] Post-processing merge:', {
+          initialClusters,
+          mergesPerformed,
+          finalClusters,
+          reduction: initialClusters - finalClusters
+        });
+      }
+    }
+  } else {
+    specifyFeatures({ pack, grid, options });
+  }
 
   // Phase 10.5: Calculate suitability and population scores (CRITICAL for cultures/burgs/states)
   rankCells({ pack, grid, options, biomesData });

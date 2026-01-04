@@ -21,3 +21,4 @@ export * from './provinces.js';
 export * from './religions.js';
 export * from './emblems.js';
 export * from './regraph.js';
+export * from './cluster-merge.js';
