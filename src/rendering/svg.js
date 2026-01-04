@@ -49,6 +49,9 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
   // Check if vertex graph is available (required for isoline rendering)
   // Only return empty if vertex graph is truly missing
   if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
+    if (typeof console !== 'undefined' && console.log) {
+      console.warn('[getIsolines] Vertex graph not available, returning empty isolines');
+    }
     return {};
   }
   
@@ -308,35 +311,33 @@ export function drawBiomesSVG(pack, biomesData) {
                              cells.v[0].length > 0 && 
                              typeof cells.v[0][0] === 'number';
     
-    // Try isoline rendering first if available
+    // Use isoline rendering if available (NO polygon fallback when isolines exist)
     if (hasVertexGraph && hasVertexIndices) {
-      try {
-        const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
-          fill: true,
-          waterGap: true,
+      const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
+        fill: true,
+        waterGap: true,
+      });
+      
+      const hasIsolines = Object.keys(isolines).length > 0;
+      if (hasIsolines) {
+        // Process all isolines - use them even if some are empty
+        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+          const biomeIndex = parseInt(index);
+          if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
+            const color = biomesData.color[biomeIndex];
+            const pathStr = getGappedFillPaths('biome', fill, waterGap, color, biomeIndex);
+            if (pathStr) {
+              bodyPaths.push(pathStr);
+            }
+          }
         });
         
-        const hasIsolines = Object.keys(isolines).length > 0;
-        if (hasIsolines) {
-          Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-            const biomeIndex = parseInt(index);
-            if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
-              const color = biomesData.color[biomeIndex];
-              bodyPaths.push(getGappedFillPaths('biome', fill, waterGap, color, biomeIndex));
-            }
-          });
-          
-          // If we got isolines, return them
-          if (bodyPaths.length > 0) {
-            return bodyPaths.join('');
-          }
-        }
-      } catch (error) {
-        console.warn('Biome isoline rendering failed, using polygon fallback:', error.message);
+        // Return isolines (even if empty) - NO polygon fallback
+        return bodyPaths.join('');
       }
     }
     
-    // Fallback: Render polygons directly (polygon fallback)
+    // Fallback: Render polygons ONLY if isolines cannot be generated at all
     // Group cells by biome and render as polygons
     const biomeGroups = {};
     for (let i = 0; i < cells.i.length; i++) {
@@ -430,35 +431,33 @@ export function drawStatesSVG(pack) {
                              cells.v[0].length > 0 && 
                              typeof cells.v[0][0] === 'number';
     
-    // Try isoline rendering first if available
+    // Use isoline rendering if available (NO polygon fallback when isolines exist)
     if (hasVertexGraph && hasVertexIndices) {
-      try {
-        const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
-          fill: true,
-          waterGap: true,
+      const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
+        fill: true,
+        waterGap: true,
+      });
+      
+      const hasIsolines = Object.keys(isolines).length > 0;
+      if (hasIsolines) {
+        // Process all isolines - use them even if some are empty
+        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+          const stateIndex = parseInt(index);
+          if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
+            const color = states[stateIndex].color || '#cccccc';
+            const pathStr = getGappedFillPaths('state', fill, waterGap, color, stateIndex);
+            if (pathStr) {
+              bodyPaths.push(pathStr);
+            }
+          }
         });
         
-        const hasIsolines = Object.keys(isolines).length > 0;
-        if (hasIsolines) {
-          Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-            const stateIndex = parseInt(index);
-            if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
-              const color = states[stateIndex].color || '#cccccc';
-              bodyPaths.push(getGappedFillPaths('state', fill, waterGap, color, stateIndex));
-            }
-          });
-          
-          // If we got isolines, return them
-          if (bodyPaths.length > 0) {
-            return bodyPaths.join('');
-          }
-        }
-      } catch (error) {
-        console.warn('State isoline rendering failed, using polygon fallback:', error.message);
+        // Return isolines (even if empty) - NO polygon fallback
+        return bodyPaths.join('');
       }
     }
     
-    // Fallback: Render polygons directly (polygon fallback)
+    // Fallback: Render polygons ONLY if isolines cannot be generated at all
   // Group cells by state and render as polygons
   const stateGroups = {};
   for (let i = 0; i < cells.i.length; i++) {
