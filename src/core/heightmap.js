@@ -326,15 +326,15 @@ export function generateHeightmap({ grid, options, rng, template = null }) {
  * Based on original Azgaar continents template
  */
 function generateContinentTemplate(grid, options, rng) {
-  const heights = createTypedArray({ maxValue: 100, length: grid.points.length });
+  const initialHeights = createTypedArray({ maxValue: 100, length: grid.points.length });
   
   // Initialize all as ocean
-  for (let i = 0; i < heights.length; i++) {
-    heights[i] = 10;
+  for (let i = 0; i < initialHeights.length; i++) {
+    initialHeights[i] = 10;
   }
 
   const template = new HeightmapTemplate(grid, options, rng);
-  template.setHeights(heights);
+  template.setHeights(initialHeights);
 
   // Execute continent template steps (exact match from original/config/heightmap-templates.js lines 41-55)
   // Hill 1 80-85 60-80 40-60
@@ -382,5 +382,90 @@ function generateContinentTemplate(grid, options, rng) {
   // Mask 4 0 0 0
   template.mask(4);
 
-  return template.getHeights();
+  const heights = template.getHeights();
+  
+  // Post-template adjustment: Enforce landPercentage option
+  const targetLandPercentage = options.landPercentage || 40;
+  const landThreshold = 20; // Height threshold for land (h >= 20)
+  
+  // Calculate current land percentage
+  let landCells = 0;
+  for (let i = 0; i < heights.length; i++) {
+    if (heights[i] >= landThreshold) landCells++;
+  }
+  const currentLandPercentage = (landCells / heights.length) * 100;
+  
+  // Adjust if land percentage is too high (direct adjustment using template.modify)
+  if (currentLandPercentage > targetLandPercentage) {
+    const excessRatio = currentLandPercentage / targetLandPercentage;
+    // Calculate multiplier to reduce land to target (e.g., if 49.4% target 40%, need 40/49.4 = 0.81)
+    // But we need to account for threshold - use more aggressive reduction
+    const targetRatio = targetLandPercentage / currentLandPercentage;
+    const reductionMultiplier = Math.pow(targetRatio, 1.5); // More aggressive reduction
+    
+    // Use template.modify to reduce land heights multiplicatively
+    template.modify('land', 0, reductionMultiplier);
+    
+    // Recalculate after adjustment
+    landCells = 0;
+    for (let i = 0; i < heights.length; i++) {
+      if (heights[i] >= landThreshold) landCells++;
+    }
+    const adjustedLandPercentage = (landCells / heights.length) * 100;
+    
+    // If still too high, apply additional reduction via direct height adjustment
+    if (adjustedLandPercentage > targetLandPercentage) {
+      // Sort land cells by height (lowest first) and reduce enough to reach target
+      const landIndices = [];
+      for (let i = 0; i < heights.length; i++) {
+        if (heights[i] >= landThreshold) {
+          landIndices.push(i);
+        }
+      }
+      landIndices.sort((a, b) => heights[a] - heights[b]);
+      
+      const targetLandCells = Math.floor(heights.length * (targetLandPercentage / 100));
+      const cellsToReduce = landIndices.length - targetLandCells;
+      
+      // Reduce lowest land cells to just below threshold
+      for (let j = 0; j < cellsToReduce && j < landIndices.length; j++) {
+        heights[landIndices[j]] = landThreshold - 1; // Set to 19 (just below threshold)
+      }
+      
+      // Recalculate final
+      landCells = 0;
+      for (let i = 0; i < heights.length; i++) {
+        if (heights[i] >= landThreshold) landCells++;
+      }
+      const finalLandPercentage = (landCells / heights.length) * 100;
+      
+      // Diagnostic logging
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[heightmap:land-adjust] Land percentage adjustment:', {
+          target: targetLandPercentage,
+          initial: currentLandPercentage.toFixed(1),
+          afterModify: adjustedLandPercentage.toFixed(1),
+          final: finalLandPercentage.toFixed(1),
+          cellsReduced: cellsToReduce,
+          reductionMultiplier: reductionMultiplier.toFixed(3),
+          blobPower: template.blobPower,
+          linePower: template.linePower,
+        });
+      }
+    } else {
+      // Diagnostic logging (modify was sufficient)
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[heightmap:land-adjust] Land percentage adjustment:', {
+          target: targetLandPercentage,
+          initial: currentLandPercentage.toFixed(1),
+          adjusted: adjustedLandPercentage.toFixed(1),
+          reductionMultiplier: reductionMultiplier.toFixed(3),
+          blobPower: template.blobPower,
+          linePower: template.linePower,
+        });
+      }
+    }
+  }
+  
+  return heights;
 }

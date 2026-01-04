@@ -271,10 +271,26 @@ function generateMapInternal(options, DelaunatorClass) {
     const landFeatures = features.filter(f => f && f.land);
     const landClusters = landFeatures.length;
     
+    // Get blobPower/linePower from template lookup
+    const cellsDesired = grid.cellsDesired || 10000;
+    const blobPowerMap = {
+      1000: 0.93, 2000: 0.95, 5000: 0.97, 10000: 0.98,
+      20000: 0.99, 30000: 0.991, 40000: 0.993, 50000: 0.994,
+      60000: 0.995, 70000: 0.9955, 80000: 0.996, 90000: 0.9964, 100000: 0.9973
+    };
+    const linePowerMap = {
+      1000: 0.75, 2000: 0.77, 5000: 0.79, 10000: 0.81,
+      20000: 0.82, 30000: 0.83, 40000: 0.84, 50000: 0.86,
+      60000: 0.87, 70000: 0.88, 80000: 0.91, 90000: 0.92, 100000: 0.93
+    };
+    const blobPower = blobPowerMap[cellsDesired] || 0.98;
+    const linePower = linePowerMap[cellsDesired] || 0.81;
+    
     console.log('[diagnostics] Generation complete:', {
       packCells: pack.cells.i.length,
       landCells: landCells.length,
       landPercentage: `${landPercentage}%`,
+      targetLandPercentage: options.landPercentage || 40,
       landClusters: landClusters,
       features: features.length,
       verticesCount: pack.vertices?.p?.length || 0,
@@ -283,6 +299,9 @@ function generateMapInternal(options, DelaunatorClass) {
       heightMin: pack.cells.h ? Math.min(...Array.from(pack.cells.h).filter(h => h !== undefined)) : 'N/A',
       heightMax: pack.cells.h ? Math.max(...Array.from(pack.cells.h).filter(h => h !== undefined)) : 'N/A',
       heightMean: pack.cells.h ? (Array.from(pack.cells.h).reduce((a, b) => (a || 0) + (b || 0), 0) / pack.cells.h.length).toFixed(1) : 'N/A',
+      blobPower: blobPower,
+      linePower: linePower,
+      cellsDesired: cellsDesired,
     });
   }
 
