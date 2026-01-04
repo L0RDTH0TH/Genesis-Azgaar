@@ -10,6 +10,7 @@ import { rn, lim, minmax } from '../utils/math.js';
 import { createTypedArray } from '../utils/array.js';
 import { findGridCell } from './voronoi.js';
 import { HeightmapTemplate } from './heightmap-template.js';
+import { getTemplate } from './heightmap-templates.js';
 
 /**
  * Get blob power based on cell count
@@ -199,47 +200,7 @@ function generateBasicHeightmap(grid, options, rng) {
   return heights;
 }
 
-/**
- * Generate heightmap from template string
- * @param {Object} grid - Grid object
- * @param {string} templateString - Template steps (newline-separated)
- * @param {Object} options - Generation options
- * @param {Object} rng - RNG instance
- * @returns {Uint8Array} Height array
- */
-function generateFromTemplate(grid, templateString, options, rng) {
-  const { points, cellsDesired } = grid;
-  const heights = createTypedArray({ maxValue: 100, length: points.length });
-  
-  // Initialize with base height (ocean level)
-  for (let i = 0; i < heights.length; i++) {
-    heights[i] = 10; // Start with shallow ocean
-  }
-
-  const steps = templateString.split('\n');
-  const blobPower = getBlobPower(cellsDesired);
-  const linePower = getLinePower(cellsDesired);
-  const width = options.mapWidth;
-  const height = options.mapHeight;
-
-  for (const step of steps) {
-    const elements = step.trim().split(' ');
-    if (elements.length < 2) continue;
-    
-    const tool = elements[0];
-    const args = elements.slice(1);
-    
-    // For now, implement basic tools - full implementation in later phases
-    if (tool === 'Smooth') {
-      smoothHeights(heights, grid, +args[0] || 2, rng);
-    } else if (tool === 'Mask') {
-      maskHeights(heights, grid, width, height, +args[0] || 1);
-    }
-    // More tools (Hill, Pit, Range, etc.) will be added as needed
-  }
-
-  return heights;
-}
+// Legacy generateFromTemplate removed - now using new template system (see generateFromTemplate below)
 
 /**
  * Smooth heights
@@ -322,7 +283,96 @@ export function generateHeightmap({ grid, options, rng, template = null }) {
 }
 
 /**
- * Generate heightmap using continent template
+ * Generate heightmap from template string
+ * Parses template string and executes operations
+ */
+function generateFromTemplate(grid, options, rng, templateString, templateId) {
+  const initialHeights = createTypedArray({ maxValue: 100, length: grid.points.length });
+  
+  // Initialize all as ocean (height 10)
+  for (let i = 0; i < initialHeights.length; i++) {
+    initialHeights[i] = 10;
+  }
+
+  const template = new HeightmapTemplate(grid, options, rng);
+  template.setHeights(initialHeights);
+
+  // Parse template string: split by newlines, trim, skip empty lines
+  const steps = templateString.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+
+  // Execute each step
+  for (const step of steps) {
+    const elements = step.split(/\s+/).filter(e => e.length > 0);
+    if (elements.length < 2) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`[generateFromTemplate] Skipping invalid step: ${step}`);
+      }
+      continue;
+    }
+
+    const [tool, a2 = '0', a3 = '0', a4 = '0', a5 = '0'] = elements;
+    try {
+      template.executeStep(tool, a2, a3, a4, a5);
+    } catch (error) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`[generateFromTemplate] Error executing step "${step}":`, error.message);
+      }
+    }
+  }
+
+  const heights = template.getHeights();
+  
+  // Post-template adjustment: Enforce landPercentage option (if enabled)
+  const enforceLandPercentage = options.enforceLandPercentage !== false; // Default true for backward compat
+  const targetLandPercentage = options.landPercentage || 40;
+  
+  if (enforceLandPercentage) {
+    const landThreshold = 20; // Height threshold for land (h >= 20)
+    const currentLandCount = heights.filter(h => h >= landThreshold).length;
+    const currentLandPercentage = (currentLandCount / heights.length) * 100;
+    
+    if (currentLandPercentage > targetLandPercentage) {
+      // Reduce land percentage
+      const targetRatio = targetLandPercentage / currentLandPercentage;
+      const reductionMultiplier = Math.pow(targetRatio, 1.5); // Aggressive reduction
+      
+      for (let i = 0; i < heights.length; i++) {
+        if (heights[i] >= landThreshold) {
+          const newHeight = (heights[i] - 20) * reductionMultiplier + 20;
+          heights[i] = Math.max(newHeight, 10);
+        }
+      }
+      
+      // Double-check: if still too high, direct reduction
+      const newLandCount = heights.filter(h => h >= landThreshold).length;
+      const newLandPercentage = (newLandCount / heights.length) * 100;
+      
+      if (newLandPercentage > targetLandPercentage) {
+        const finalReduction = targetLandPercentage / newLandPercentage;
+        for (let i = 0; i < heights.length; i++) {
+          if (heights[i] >= landThreshold) {
+            heights[i] = Math.max((heights[i] - 20) * finalReduction + 20, 10);
+          }
+        }
+      }
+      
+      if (typeof console !== 'undefined' && console.log) {
+        console.log(`[heightmap:template] Land % adjustment for ${templateId}:`, {
+          initial: currentLandPercentage.toFixed(1),
+          target: targetLandPercentage,
+          final: (heights.filter(h => h >= landThreshold).length / heights.length * 100).toFixed(1)
+        });
+      }
+    }
+  }
+
+  return heights;
+}
+
+/**
+ * Generate heightmap using continent template (legacy function - now uses template system)
  * Based on original Azgaar continents template
  */
 function generateContinentTemplate(grid, options, rng) {

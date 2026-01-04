@@ -399,4 +399,46 @@ export class HeightmapTemplate {
       this.heights[i] = lim((this.heights[i] * (fr - 1) + masked) / fr);
     }
   }
+
+  /**
+   * Invert heightmap along axes (simplified - not fully implemented for Voronoi grids)
+   * Note: Original uses regular grid cellsX/cellsY; this is a placeholder
+   * @param {number} count - Probability (0-1)
+   * @param {string} axes - 'x', 'y', 'both', or null
+   */
+  invert(count = 1, axes = 'both') {
+    // Skip if probability doesn't match
+    if (count > 0 && count < 1 && !this.rng.probability(count)) return;
+    
+    // For Voronoi-based grids, inversion is complex
+    // This is a simplified version that doesn't fully match original behavior
+    // Original: flips heightmap along X/Y axes using regular grid coordinates
+    // Voronoi: would require coordinate transformation which is non-trivial
+    // For now, skip inversion (templates using Invert will still work, just skip that step)
+    // TODO: Implement proper inversion for Voronoi grids if needed
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('[HeightmapTemplate] Invert operation not fully implemented for Voronoi grids - skipping');
+    }
+  }
+
+  /**
+   * Execute a template step (parsed from template string)
+   * @param {string} tool - Operation name (Hill, Pit, Range, etc.)
+   * @param {string} a2 - First argument
+   * @param {string} a3 - Second argument
+   * @param {string} a4 - Third argument
+   * @param {string} a5 - Fourth argument
+   */
+  executeStep(tool, a2, a3, a4, a5) {
+    if (tool === 'Hill') return this.addHill(a2, a3, a4, a5);
+    if (tool === 'Pit') return this.addPit(a2, a3, a4, a5);
+    if (tool === 'Range') return this.addRange(a2, a3, a4, a5);
+    if (tool === 'Trough') return this.addTrough(a2, a3, a4, a5);
+    if (tool === 'Strait') return this.addStrait(a2, a3);
+    if (tool === 'Mask') return this.mask(+a2 || 1);
+    if (tool === 'Invert') return this.invert(+a2 || 1, a3);
+    if (tool === 'Add') return this.modify(a3 || 'all', +a2, 1);
+    if (tool === 'Multiply') return this.modify(a3 || 'all', 0, +a2);
+    if (tool === 'Smooth') return this.smooth(+a2 || 2, 0);
+  }
 }
