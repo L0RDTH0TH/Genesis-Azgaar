@@ -32,6 +32,9 @@ const STYLE_CONSTANTS = {
 
 const MIN_LAND_HEIGHT = 20;
 
+// Debug flag (from original main.js)
+const ERROR = true;
+
 /**
  * Get isolines (continuous paths) for cells based on a type function
  * Ported from original pathUtils.js
@@ -180,47 +183,44 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
 
 /**
  * Connect vertices to form a closed chain
+ * Exact port from original/utils/pathUtils.js lines 140-178
  * @param {Object} params - {vertices, startingVertex, ofSameType, addToChecked, closeRing}
  * @returns {Array<number>} Chain of vertex IDs
  */
-function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, closeRing }) {
+function connectVertices({vertices, startingVertex, ofSameType, addToChecked, closeRing}) {
   const MAX_ITERATIONS = vertices.c.length;
-  const chain = [];
-  let next = startingVertex;
+  const chain = []; // vertices chain to form a path
 
+  let next = startingVertex;
   for (let i = 0; i === 0 || next !== startingVertex; i++) {
-    const previous = chain[chain.length - 1];
+    const previous = chain.at(-1);
     const current = next;
-    
-    // Safety check: ensure vertices.c[current] exists
-    if (!vertices.c[current] || !Array.isArray(vertices.c[current])) {
-      break; // Invalid vertex, stop chain
-    }
-    
     chain.push(current);
 
     const neibCells = vertices.c[current];
-    if (addToChecked && neibCells) {
-      neibCells.filter(ofSameType).forEach(addToChecked);
-    }
+    if (addToChecked) neibCells.filter(ofSameType).forEach(addToChecked);
 
     const [c1, c2, c3] = neibCells.map(ofSameType);
     const [v1, v2, v3] = vertices.v[current];
 
-    // Match original logic exactly: simpler checks without extra bounds validation
-    if (v1 !== undefined && v1 !== previous && c1 !== c2) {
-      next = v1;
-    } else if (v2 !== undefined && v2 !== previous && c2 !== c3) {
-      next = v2;
-    } else if (v3 !== undefined && v3 !== previous && c1 !== c3) {
-      next = v3;
-    } else {
-      break; // No valid next vertex
+    if (v1 !== previous && c1 !== c2) next = v1;
+    else if (v2 !== previous && c2 !== c3) next = v2;
+    else if (v3 !== previous && c1 !== c3) next = v3;
+
+    if (next >= vertices.c.length) {
+      ERROR && console.error("ConnectVertices: next vertex is out of bounds");
+      break;
     }
 
-    if (next >= vertices.c.length) break;
-    if (next === current) break;
-    if (i >= MAX_ITERATIONS) break;
+    if (next === current) {
+      ERROR && console.error("ConnectVertices: next vertex is not found");
+      break;
+    }
+
+    if (i === MAX_ITERATIONS) {
+      ERROR && console.error("ConnectVertices: max iterations reached", MAX_ITERATIONS);
+      break;
+    }
   }
 
   if (closeRing) chain.push(startingVertex);
@@ -1118,25 +1118,24 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
       const iconsDensity = biomesData.iconsDensity[biome] || 0;
       if (iconsDensity === 0) continue;
       
-      // Increased probability: 25-35% of eligible cells get icons for target 200-400
+      // Balanced probability: 18-28% of eligible cells get icons (reduced from 25-35% to target 200-400)
       const densityValue = iconsDensity / 100; // e.g., 120/100 = 1.2
-      const cellProbability = Math.min(densityValue * 0.2, 0.35); // Increased to 20-35%
+      const cellProbability = Math.min(densityValue * 0.15, 0.28); // Reduced to 15-28%
       if (Math.random() > cellProbability) continue;
       
       const iconTypes = biomesData.icons[biome] || [];
       if (iconTypes.length === 0) continue;
       
-      // Smaller radius for more icons (was 1.8x, now 1.4x for denser distribution)
-      const radius = Math.max(2 / densityValue / density * 1.4, 8);
+      // Moderate radius for balanced distribution (1.5x multiplier)
+      const radius = Math.max(2 / densityValue / density * 1.5, 9);
       
-      // Sample 1-2 points per cell for larger cells (more permissive)
+      // Sample 1 point per cell (sparse)
       const cellArea = (maxX - minX) * (maxY - minY);
-      if (cellArea < 60) continue; // Further relaxed from 80
+      if (cellArea < 70) continue; // Moderate threshold
       
       let sampled = 0;
-      const maxPerCell = cellArea > 150 ? 2 : 1; // Allow 2 icons for larger cells (relaxed from 200)
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
-        if (sampled >= maxPerCell) break;
+        if (sampled >= 1) break; // Only 1 icon per cell for sparsity
         if (!pointInPolygon([cx, cy], polygon)) continue;
         
         const iconType = iconTypes[Math.floor(Math.random() * iconTypes.length)];
@@ -1156,13 +1155,13 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
       }
     } else {
       // Relief icons (mountains, hills) - balanced sparse for height >= 50
-      // 20-25% of eligible cells get relief icons (increased from 18%)
-      if (Math.random() > 0.23) continue;
+      // 18-22% of eligible cells get relief icons (reduced from 23%)
+      if (Math.random() > 0.20) continue;
       
       // Only place on significant heights (hills/mountains)
-      if (height < 52) continue; // Further relaxed from 53
+      if (height < 53) continue;
       
-      const radius = 2 / density * 1.8; // Smaller radius (was 2.2x, now 1.8x)
+      const radius = 2 / density * 2.0; // Moderate radius (2.0x)
       let iconSize;
       
       if (height > 70) {
@@ -1173,7 +1172,7 @@ export function drawReliefSVG(pack, biomesData, options = {}) {
       
       // Sample 1 point per cell for larger cells
       const cellArea = (maxX - minX) * (maxY - minY);
-      if (cellArea < 100) continue; // Further relaxed from 120
+      if (cellArea < 110) continue;
       
       let sampled = 0;
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
