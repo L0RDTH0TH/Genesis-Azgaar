@@ -44,43 +44,14 @@ const ERROR = true;
  * @returns {Object} Isolines object keyed by type
  */
 function getIsolines(pack, getType, options = { fill: false, waterGap: false, halo: false }) {
-  try {
-    const { cells, vertices } = pack;
-    
-    // Check if vertex graph is available (required for isoline rendering)
-    if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
-      // Return empty isolines to trigger polygon fallback
-      return {};
-    }
-    
-    // Additional safety check: verify cells.v contains vertex indices (numbers), not polygon coordinates
-    if (cells.v && cells.v.length > 0) {
-      const firstCellV = cells.v[0];
-      if (firstCellV && Array.isArray(firstCellV) && firstCellV.length > 0) {
-        // Check if first element is a coordinate array (polygon) or a number (vertex index)
-        if (Array.isArray(firstCellV[0])) {
-          // This is polygon coordinates, not vertex indices - can't do isoline rendering
-          // This should not happen with full vertex graph, but keep for backward compatibility
-          return {};
-        }
-      }
-    }
-    
-    // Verify that vertices.c is properly populated (not sparse)
-    // Sample check: verify at least some entries exist
-    let validEntries = 0;
-    const sampleSize = Math.min(100, vertices.c.length);
-    for (let i = 0; i < sampleSize; i++) {
-      if (vertices.c[i] && Array.isArray(vertices.c[i]) && vertices.c[i].length > 0) {
-        validEntries++;
-      }
-    }
-    // If less than 50% of sample entries are valid, assume sparse array and fall back
-    if (validEntries < sampleSize * 0.5) {
-      console.warn('getIsolines: vertices.c appears to be sparse, using polygon fallback');
-      return {};
-    }
-    
+  const { cells, vertices } = pack;
+  
+  // Check if vertex graph is available (required for isoline rendering)
+  // Only return empty if vertex graph is truly missing
+  if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
+    return {};
+  }
+  
   const isolines = {};
 
   // Define addIsoline function inside the try block so it can access isolines
@@ -130,55 +101,29 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     const feature = pack.features?.[cells.f?.[onborderCell]];
     if (feature?.type === 'lake' && feature.shoreline?.every(ofSameType)) continue;
 
-    // cells.v[cellId] should contain vertex indices for isoline rendering
-    const cellVertices = cells.v[cellId];
-    if (!cellVertices || !Array.isArray(cellVertices) || cellVertices.length === 0) continue;
-    
-    // Safety check: filter out invalid vertex indices first
-    const validVertices = cellVertices.filter((v) => {
-      if (typeof v !== 'number' || v < 0 || v >= vertices.c.length) return false;
-      const vertexCells = vertices.c[v];
-      return vertexCells && Array.isArray(vertexCells) && vertexCells.length > 0;
-    });
-    
-    if (validVertices.length === 0) continue;
-    
-    // Find starting vertex with different type neighbor
-    // Double-check that vertices.c[v] exists before accessing
-    const startingVertex = validVertices.find((v) => {
-      if (v < 0 || v >= vertices.c.length || !vertices.c[v] || !Array.isArray(vertices.c[v])) {
-        return false;
-      }
-      const vertexCells = vertices.c[v];
-      return vertexCells.some(ofDifferentType);
-    });
-    
+    // Find starting vertex with different type neighbor (match original logic)
+    const startingVertex = cells.v[cellId]?.find(v => vertices.c[v]?.some(ofDifferentType));
     if (startingVertex === undefined) continue;
 
     try {
-    const vertexChain = connectVertices({
-      vertices,
-      startingVertex,
-      ofSameType,
-      addToChecked,
-      closeRing: true,
-    });
-    if (vertexChain.length < 3) continue;
+      const vertexChain = connectVertices({
+        vertices,
+        startingVertex,
+        ofSameType,
+        addToChecked,
+        closeRing: true,
+      });
+      if (vertexChain.length < 3) continue;
 
-    addIsoline(type, vertices, vertexChain);
+      addIsoline(type, vertices, vertexChain);
     } catch (error) {
-      // Skip this isoline if connection fails
+      // Skip this isoline if connection fails, but continue processing others
       console.warn(`Failed to connect vertices for cell ${cellId}:`, error.message);
       continue;
     }
   }
 
   return isolines;
-  } catch (error) {
-    // If anything goes wrong with isoline rendering, return empty to trigger fallback
-    console.warn('getIsolines error:', error.message);
-    return {};
-  }
 }
 
 /**
