@@ -263,14 +263,14 @@ export function generateHeightmap({ grid, options, rng, template = null }) {
     throw new Error('RNG instance is required');
   }
 
-  const templateId = template || options.template || 'continent';
+  const templateId = template || options.template || 'Continents';
   
-  // Get template string
-  const templateString = getTemplate(templateId);
+  // Get template object
+  const selectedTemplate = getTemplate(templateId);
   
-  if (templateString) {
+  if (selectedTemplate && selectedTemplate.template) {
     // Use template system
-    return generateFromTemplate(grid, options, rng, templateString, templateId);
+    return generateFromTemplate(grid, options, rng, selectedTemplate.template, selectedTemplate.name || templateId);
   }
 
   // Fallback to basic generation if template not found
