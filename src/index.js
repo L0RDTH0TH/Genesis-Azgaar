@@ -24,3 +24,6 @@ export { RNG } from './utils/rng.js';
 
 // Re-export core modules for advanced usage
 export * from './core/index.js';
+
+// Template utilities
+export { getTemplate, listTemplates } from './core/heightmap-templates.js';

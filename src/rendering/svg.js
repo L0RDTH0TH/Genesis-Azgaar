@@ -46,23 +46,23 @@ const ERROR = true;
  * @returns {Object} Isolines object keyed by type
  */
 function getIsolines(pack, getType, options = { fill: false, waterGap: false, halo: false }) {
-  const { cells, vertices } = pack;
-  
-  // Check if vertex graph is available (required for isoline rendering)
+    const { cells, vertices } = pack;
+    
+    // Check if vertex graph is available (required for isoline rendering)
   // Only return empty if vertex graph is truly missing
-  if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
+    if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
     if (typeof console !== 'undefined' && console.log) {
       console.warn('[getIsolines] Vertex graph not available, returning empty isolines');
     }
-    return {};
-  }
+          return {};
+        }
   
   // Diagnostic: Check vertex structure
   let verticesWith3Adj = 0;
   let verticesWithMoreAdj = 0;
   let verticesWithLessAdj = 0;
   const sampleSize = Math.min(100, vertices.v.length);
-  for (let i = 0; i < sampleSize; i++) {
+    for (let i = 0; i < sampleSize; i++) {
     if (vertices.v[i] && Array.isArray(vertices.v[i])) {
       const count = vertices.v[i].length;
       if (count === 3) verticesWith3Adj++;
@@ -80,8 +80,8 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
       verticesWithLessAdj,
       threeAdjPercent: ((verticesWith3Adj / sampleSize) * 100).toFixed(1) + '%',
     });
-  }
-  
+    }
+    
   const isolines = {};
   let connectVerticesErrors = 0;
   let isolineCount = 0;
@@ -139,19 +139,19 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     if (startingVertex === undefined) continue;
 
     try {
-      const vertexChain = connectVertices({
-        vertices,
-        startingVertex,
-        ofSameType,
-        addToChecked,
-        closeRing: true,
-      });
+    const vertexChain = connectVertices({
+      vertices,
+      startingVertex,
+      ofSameType,
+      addToChecked,
+      closeRing: true,
+    });
       if (vertexChain.length < 3) {
         skippedCount++;
         continue;
       }
 
-      addIsoline(type, vertices, vertexChain);
+    addIsoline(type, vertices, vertexChain);
       isolineCount++;
     } catch (error) {
       // Skip this isoline if connection fails, but continue processing others
@@ -315,27 +315,27 @@ export function drawBiomesSVG(pack, biomesData) {
     
     // Use isoline rendering if available (NO polygon fallback when isolines exist)
     if (hasVertexGraph && hasVertexIndices) {
-      const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
-        fill: true,
-        waterGap: true,
-      });
-      
-      const hasIsolines = Object.keys(isolines).length > 0;
-      if (hasIsolines) {
+        const isolines = getIsolines(pack, (cellId) => cells.biome[cellId], {
+          fill: true,
+          waterGap: true,
+        });
+        
+        const hasIsolines = Object.keys(isolines).length > 0;
+        if (hasIsolines) {
         // Process ALL isolines - ensure every type gets a path (even if empty)
         // Match original behavior: process all entries from getIsolines, no fallback
-        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-          const biomeIndex = parseInt(index);
-          if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
-            const color = biomesData.color[biomeIndex];
+          Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+            const biomeIndex = parseInt(index);
+            if (biomeIndex >= 0 && biomeIndex < biomesData.color.length) {
+              const color = biomesData.color[biomeIndex];
             const pathStr = getGappedFillPaths('biome', fill, waterGap, color, biomeIndex);
             // Always add path (even if empty) to ensure all types are processed
             bodyPaths.push(pathStr || '');
-          }
-        });
-        
+            }
+          });
+          
         // Return isolines - NO polygon fallback (match original drawBiomes)
-        return bodyPaths.join('');
+            return bodyPaths.join('');
       }
     }
     
@@ -435,27 +435,27 @@ export function drawStatesSVG(pack) {
     
     // Use isoline rendering if available (NO polygon fallback when isolines exist)
     if (hasVertexGraph && hasVertexIndices) {
-      const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
-        fill: true,
-        waterGap: true,
-      });
-      
-      const hasIsolines = Object.keys(isolines).length > 0;
-      if (hasIsolines) {
+        const isolines = getIsolines(pack, (cellId) => cells.state[cellId], {
+          fill: true,
+          waterGap: true,
+        });
+        
+        const hasIsolines = Object.keys(isolines).length > 0;
+        if (hasIsolines) {
         // Process ALL isolines - ensure every state gets a path (even if empty)
         // Match original behavior: process all entries from getIsolines, no fallback
-        Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
-          const stateIndex = parseInt(index);
-          if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
-            const color = states[stateIndex].color || '#cccccc';
+          Object.entries(isolines).forEach(([index, { fill, waterGap }]) => {
+            const stateIndex = parseInt(index);
+            if (stateIndex > 0 && stateIndex < states.length && states[stateIndex]) {
+              const color = states[stateIndex].color || '#cccccc';
             const pathStr = getGappedFillPaths('state', fill, waterGap, color, stateIndex);
             // Always add path (even if empty) to ensure all states are processed
             bodyPaths.push(pathStr || '');
-          }
-        });
-        
+            }
+          });
+          
         // Return isolines - NO polygon fallback (match original drawStates)
-        return bodyPaths.join('');
+            return bodyPaths.join('');
       }
     }
     
@@ -1367,7 +1367,7 @@ export function renderMapSVG(data, options = {}) {
 
   // Add relief icon symbol definitions
   const defs = getReliefIconDefs();
-  
+
   // Combine into complete SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
 ${defs}

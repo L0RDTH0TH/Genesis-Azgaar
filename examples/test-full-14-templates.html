@@ -62,19 +62,19 @@
     .results {
       margin-top: 20px;
     }
-    .map-container {
-      margin: 30px 0;
+    .map-result {
+      margin: 20px 0;
       padding: 20px;
       background: #2a2a2a;
       border-radius: 8px;
       border-left: 4px solid #4a9eff;
       page-break-inside: avoid;
     }
-    .map-container h2 {
+    .map-result h3 {
       color: #4a9eff;
       margin-top: 0;
     }
-    .map-container img {
+    .map-result img {
       max-width: 100%;
       border: 2px solid #4a9eff;
       border-radius: 5px;
@@ -95,305 +95,246 @@
     .metric strong {
       color: #4a9eff;
     }
+    .progress {
+      margin: 10px 0;
+      padding: 10px;
+      background: #333;
+      border-radius: 5px;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 20px;
+      background: #555;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #4a9eff;
+      transition: width 0.3s;
+    }
   </style>
 </head>
 <body>
   <h1>Azgaar Genesis - Full 14-Template Validation Suite</h1>
+  
   <div class="controls">
     <button id="runBtn">Run Full Suite (14 Templates × 3 Seeds = 42 Maps)</button>
     <span id="status" class="status"></span>
+    <div class="progress" id="progress" style="display: none;">
+      <div>Progress: <span id="progressText">0/42</span></div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+    </div>
   </div>
-  <div id="results" class="results"></div>
+  
+  <div class="results" id="results"></div>
 
   <script type="module">
-    import { initGenerator, loadOptions, generateMap, renderMapSVG } from '../dist/azgaar-genesis.esm.js';
-    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.0/+esm';
+    import { generateMap } from '../dist/azgaar-genesis.esm.js';
 
-    const templates = [
-      'Volcano', 'High Island', 'Low Island', 'Continents', 'Archipelago', 'Atoll',
-      'Mediterranean', 'Peninsula', 'Pangea', 'Isthmus', 'Shattered', 'Taklamakan',
-      'Old World', 'Fractious'
+    const runBtn = document.getElementById('runBtn');
+    const status = document.getElementById('status');
+    const results = document.getElementById('results');
+    const progress = document.getElementById('progress');
+    const progressText = document.getElementById('progressText');
+    const progressFill = document.getElementById('progressFill');
+
+    // All 14 templates in order
+    const allTemplates = [
+      'Volcano', 'High Island', 'Low Island', 'Continents', 'Archipelago', 
+      'Atoll', 'Mediterranean', 'Peninsula', 'Pangea', 'Isthmus', 
+      'Shattered', 'Taklamakan', 'Old World', 'Fractious'
     ];
 
-    const fixedSeeds = [42];
-    const resultsContainer = document.getElementById('results');
-    const statusEl = document.getElementById('status');
-    const runBtn = document.getElementById('runBtn');
+    // Seeds: fixed 42 + 2 random
+    const seeds = [42, Date.now(), Date.now() + 1000];
 
-    let allResults = [];
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    let currentMap = 0;
+    const totalMaps = allTemplates.length * seeds.length;
+    const testResults = [];
 
-    async function generateMapWithDiagnostics(template, seed, options) {
-      const startTime = performance.now();
-      
+    async function generateAndSaveMap(templateName, seed) {
+      const options = {
+        seed: seed.toString(),
+        statesNumber: 18,
+        template: templateName,
+        showLabels: true,
+        showRelief: true,
+        fullRendering: true,
+        enforceLandPercentage: false
+      };
+
       try {
-        // Load options for this specific map
-        loadOptions({
-          ...options,
-          seed: seed.toString(),
-          template: template
-        });
+        const mapData = await generateMap(options);
         
-        // Generate map
-        const data = generateMap(Delaunator);
-        
-        // Render to SVG
-        const svg = renderMapSVG(data, {
-          ...options,
-          showLabels: true,
-          showRelief: true,
-          fullRendering: true
-        });
-        
-        const result = {
-          ...data,
-          svg
-        };
-
-        const endTime = performance.now();
-        const generationTime = ((endTime - startTime) / 1000).toFixed(2);
-
         // Calculate diagnostics
-        const pack = result.pack;
+        const pack = mapData.pack;
         const landCells = pack.cells.i.filter(i => pack.cells.h[i] >= 20);
         const landPercentage = ((landCells.length / pack.cells.i.length) * 100).toFixed(1);
-        const features = pack.features || [];
-        const landFeatures = features.filter(f => f && f.land);
+        const landFeatures = (pack.features || []).filter(f => f && f.land);
         const clusters = landFeatures.length;
         
         // Count isolines (approximate from SVG)
-        const svg = result.svg || '';
-        const isolinePaths = (svg.match(/<path[^>]*d="[^"]*"[^>]*>/g) || []).length;
-        const polygonPaths = (svg.match(/<polygon[^>]*>/g) || []).length;
-        const totalPaths = isolinePaths + polygonPaths;
+        const svg = mapData.svg;
+        const isolinePaths = (svg.match(/<path[^>]*class="[^"]*isoline[^"]*"/g) || []).length;
+        const totalPaths = (svg.match(/<path[^>]*class="[^"]*state[^"]*"/g) || []).length;
         const isolinePercentage = totalPaths > 0 ? ((isolinePaths / totalPaths) * 100).toFixed(1) : '0.0';
         
         // Count relief icons
-        const reliefMatches = svg.match(/<use[^>]*href="#relief[^"]*"/g) || [];
-        const reliefCount = reliefMatches.length;
+        const reliefCount = (svg.match(/<use[^>]*href="#relief[^"]*"/g) || []).length;
 
-        return {
-          template,
-          seed,
-          svg,
+        // Create result object
+        const result = {
+          template: templateName,
+          seed: seed,
           diagnostics: {
             landPercentage: parseFloat(landPercentage),
-            clusters,
+            clusters: clusters,
             isolinePercentage: parseFloat(isolinePercentage),
-            reliefCount,
-            generationTime: parseFloat(generationTime)
+            reliefIcons: reliefCount
           },
-          result
+          svg: svg
         };
+
+        // Create DOM element for this map
+        const mapDiv = document.createElement('div');
+        mapDiv.className = 'map-result';
+        mapDiv.id = `map-${templateName}-${seed}`;
+        
+        const img = document.createElement('img');
+        img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+        img.alt = `${templateName} - Seed ${seed}`;
+        img.style.maxWidth = '800px';
+        
+        mapDiv.innerHTML = `
+          <h3>${templateName} - Seed ${seed}</h3>
+          <div class="metrics">
+            <div class="metric"><strong>Land %:</strong> ${landPercentage}%</div>
+            <div class="metric"><strong>Clusters:</strong> ${clusters}</div>
+            <div class="metric"><strong>Isolines:</strong> ${isolinePercentage}%</div>
+            <div class="metric"><strong>Relief Icons:</strong> ${reliefCount}</div>
+          </div>
+        `;
+        mapDiv.appendChild(img);
+        
+        // Append to results (scrolls downward)
+        results.appendChild(mapDiv);
+        
+        // Scroll to bottom to show latest result
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+
+        return result;
       } catch (error) {
-        console.error(`Error generating ${template} / Seed ${seed}:`, error);
+        console.error(`Error generating ${templateName} / Seed ${seed}:`, error);
         return {
-          template,
-          seed,
+          template: templateName,
+          seed: seed,
           error: error.message,
           diagnostics: null
         };
       }
     }
 
-    async function takeScreenshot(element, filename) {
-      return new Promise((resolve) => {
-        // Create canvas from SVG
-        const svgData = element.querySelector('svg')?.outerHTML || '';
-        if (!svgData) {
-          resolve(null);
-          return;
-        }
-
-        const img = new Image();
-        const svgBlob = new Blob([svgData], { type: 'image/svg+xml' });
-        const url = URL.createObjectURL(svgBlob);
-
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width || 1200;
-          canvas.height = img.height || 800;
-          const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#1a1a1a';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0);
-
-          canvas.toBlob((blob) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const base64 = reader.result;
-              // Save via download (browser will handle)
-              const a = document.createElement('a');
-              a.href = base64;
-              a.download = filename;
-              a.click();
-              URL.revokeObjectURL(url);
-              resolve(base64);
-            };
-            reader.readAsDataURL(blob);
-          }, 'image/png');
-        };
-
-        img.onerror = () => {
-          URL.revokeObjectURL(url);
-          resolve(null);
-        };
-
-        img.src = url;
-      });
-    }
-
-    function createMapContainer(template, seed, diagnostics, svg) {
-      const container = document.createElement('div');
-      container.className = 'map-container';
-      container.id = `map-${template}-${seed}`;
-
-      const title = document.createElement('h2');
-      title.textContent = `${template} - Seed ${seed}`;
-      container.appendChild(title);
-
-      const metricsDiv = document.createElement('div');
-      metricsDiv.className = 'metrics';
-      
-      if (diagnostics) {
-        metricsDiv.innerHTML = `
-          <div class="metric"><strong>Land %:</strong> ${diagnostics.landPercentage}%</div>
-          <div class="metric"><strong>Clusters:</strong> ${diagnostics.clusters}</div>
-          <div class="metric"><strong>Isolines:</strong> ${diagnostics.isolinePercentage}%</div>
-          <div class="metric"><strong>Relief:</strong> ${diagnostics.reliefCount}</div>
-          <div class="metric"><strong>Time:</strong> ${diagnostics.generationTime}s</div>
-        `;
-      } else {
-        metricsDiv.innerHTML = '<div class="metric"><strong>Error:</strong> Generation failed</div>';
-      }
-      
-      container.appendChild(metricsDiv);
-
-      if (svg) {
-        const svgContainer = document.createElement('div');
-        svgContainer.innerHTML = svg;
-        container.appendChild(svgContainer);
-      }
-
-      return container;
-    }
-
     async function runFullSuite() {
       runBtn.disabled = true;
-      statusEl.textContent = 'Running...';
-      statusEl.className = 'status running';
-      resultsContainer.innerHTML = '';
-      allResults = [];
+      status.textContent = 'Running...';
+      status.className = 'status running';
+      progress.style.display = 'block';
+      results.innerHTML = '';
+      testResults.length = 0;
+      currentMap = 0;
 
-      const allSeeds = [...fixedSeeds];
-      // Add 2 random seeds
-      const baseTime = Date.now();
-      allSeeds.push(Math.floor(baseTime / 1000));
-      allSeeds.push(Math.floor((baseTime + 1000) / 1000));
+      for (const template of allTemplates) {
+        for (const seed of seeds) {
+          currentMap++;
+          const progressPercent = (currentMap / totalMaps) * 100;
+          progressText.textContent = `${currentMap}/${totalMaps}`;
+          progressFill.style.width = `${progressPercent}%`;
+          status.textContent = `Generating ${template} / Seed ${seed}... (${currentMap}/${totalMaps})`;
 
-      let mapIndex = 0;
-      const totalMaps = templates.length * allSeeds.length;
+          const result = await generateAndSaveMap(template, seed);
+          testResults.push(result);
 
-      for (const template of templates) {
-        for (const seed of allSeeds) {
-          mapIndex++;
-          statusEl.textContent = `Generating ${template} / Seed ${seed}... (${mapIndex}/${totalMaps})`;
-
-          const result = await generateMapWithDiagnostics(template, seed, {
-            statesNumber: 18,
-            showLabels: true,
-            showRelief: true,
-            fullRendering: true,
-            enforceLandPercentage: false
-          });
-
-          allResults.push(result);
-
-          // Create and append container
-          const container = createMapContainer(
-            result.template,
-            result.seed,
-            result.diagnostics,
-            result.svg
-          );
-          resultsContainer.appendChild(container);
-
-          // Scroll to new map
-          container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-          // Take screenshot (save as base64 for now, will download)
-          if (result.svg && !result.error) {
-            const filename = `${result.seed}_${result.template.replace(/\s+/g, '_')}.png`;
-            await takeScreenshot(container, filename);
-          }
-
-          // Small delay to prevent browser freeze
+          // Small delay to allow UI to update
           await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
 
-      statusEl.textContent = `Complete! All ${totalMaps} maps generated.`;
-      statusEl.className = 'status complete';
+      status.textContent = 'Complete! All 42 maps generated.';
+      status.className = 'status complete';
       runBtn.disabled = false;
+      progress.style.display = 'none';
 
-      // Generate report
-      generateReport();
+      // Compile summary
+      compileSummary();
     }
 
-    function generateReport() {
-      const report = {
-        timestamp,
-        totalMaps: allResults.length,
-        templates: {},
-        summary: {}
-      };
-
+    function compileSummary() {
       // Group by template
-      for (const result of allResults) {
-        if (!result.diagnostics) continue;
-        
-        const template = result.template;
-        if (!report.templates[template]) {
-          report.templates[template] = {
-            results: [],
-            averages: {}
-          };
+      const byTemplate = {};
+      testResults.forEach(r => {
+        if (!r.error && r.diagnostics) {
+          if (!byTemplate[r.template]) {
+            byTemplate[r.template] = [];
+          }
+          byTemplate[r.template].push(r.diagnostics);
         }
-        report.templates[template].results.push({
-          seed: result.seed,
-          ...result.diagnostics
-        });
-      }
+      });
 
       // Calculate averages per template
-      for (const [template, data] of Object.entries(report.templates)) {
-        const results = data.results;
-        if (results.length === 0) continue;
+      const summary = Object.entries(byTemplate).map(([template, diags]) => {
+        const avgLand = (diags.reduce((s, d) => s + d.landPercentage, 0) / diags.length).toFixed(1);
+        const avgClusters = (diags.reduce((s, d) => s + d.clusters, 0) / diags.length).toFixed(1);
+        const minClusters = Math.min(...diags.map(d => d.clusters));
+        const maxClusters = Math.max(...diags.map(d => d.clusters));
+        const avgIsolines = (diags.reduce((s, d) => s + d.isolinePercentage, 0) / diags.length).toFixed(1);
+        const avgRelief = (diags.reduce((s, d) => s + d.reliefIcons, 0) / diags.length).toFixed(0);
 
-        data.averages = {
-          landPercentage: (results.reduce((sum, r) => sum + r.landPercentage, 0) / results.length).toFixed(1),
-          clusters: (results.reduce((sum, r) => sum + r.clusters, 0) / results.length).toFixed(1),
-          isolinePercentage: (results.reduce((sum, r) => sum + r.isolinePercentage, 0) / results.length).toFixed(1),
-          reliefCount: (results.reduce((sum, r) => sum + r.reliefCount, 0) / results.length).toFixed(0),
-          generationTime: (results.reduce((sum, r) => sum + r.generationTime, 0) / results.length).toFixed(2)
+        return {
+          template,
+          avgLand: parseFloat(avgLand),
+          avgClusters: parseFloat(avgClusters),
+          minClusters,
+          maxClusters,
+          avgIsolines: parseFloat(avgIsolines),
+          avgRelief: parseFloat(avgRelief)
         };
-      }
+      });
 
-      // Overall summary
-      const allDiagnostics = allResults.filter(r => r.diagnostics).map(r => r.diagnostics);
-      if (allDiagnostics.length > 0) {
-        report.summary = {
-          avgLandPercentage: (allDiagnostics.reduce((sum, d) => sum + d.landPercentage, 0) / allDiagnostics.length).toFixed(1),
-          avgClusters: (allDiagnostics.reduce((sum, d) => sum + d.clusters, 0) / allDiagnostics.length).toFixed(1),
-          avgIsolinePercentage: (allDiagnostics.reduce((sum, d) => sum + d.isolinePercentage, 0) / allDiagnostics.length).toFixed(1),
-          avgReliefCount: (allDiagnostics.reduce((sum, d) => sum + d.reliefCount, 0) / allDiagnostics.length).toFixed(0),
-          avgGenerationTime: (allDiagnostics.reduce((sum, d) => sum + d.generationTime, 0) / allDiagnostics.length).toFixed(2)
-        };
-      }
-
-      // Store report in global for download
-      window.testReport = report;
-      console.log('Test Report Generated:', report);
+      // Create summary section
+      const summaryDiv = document.createElement('div');
+      summaryDiv.className = 'map-result';
+      summaryDiv.style.background = '#1a3a5a';
+      summaryDiv.innerHTML = `
+        <h2>Summary Statistics</h2>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+          <thead>
+            <tr style="background: #2a4a6a;">
+              <th style="padding: 8px; text-align: left; border: 1px solid #4a9eff;">Template</th>
+              <th style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">Avg Land %</th>
+              <th style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">Avg Clusters</th>
+              <th style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">Min/Max Clusters</th>
+              <th style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">Avg Isolines %</th>
+              <th style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">Avg Relief</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${summary.map(s => `
+              <tr>
+                <td style="padding: 8px; border: 1px solid #4a9eff;"><strong>${s.template}</strong></td>
+                <td style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">${s.avgLand}%</td>
+                <td style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">${s.avgClusters}</td>
+                <td style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">${s.minClusters}/${s.maxClusters}</td>
+                <td style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">${s.avgIsolines}%</td>
+                <td style="padding: 8px; text-align: center; border: 1px solid #4a9eff;">${s.avgRelief}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      results.insertBefore(summaryDiv, results.firstChild);
     }
 
     runBtn.addEventListener('click', runFullSuite);
