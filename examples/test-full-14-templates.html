@@ -132,7 +132,7 @@
   <div class="results" id="results"></div>
 
   <script type="module">
-    import { generateMap } from '../dist/azgaar-genesis.esm.js';
+    import { initGenerator, generateMap } from '../dist/azgaar-genesis.esm.js';
 
     const runBtn = document.getElementById('runBtn');
     const status = document.getElementById('status');
@@ -140,6 +140,9 @@
     const progress = document.getElementById('progress');
     const progressText = document.getElementById('progressText');
     const progressFill = document.getElementById('progressFill');
+
+    // Initialize generator first
+    initGenerator();
 
     // All 14 templates in order
     const allTemplates = [
