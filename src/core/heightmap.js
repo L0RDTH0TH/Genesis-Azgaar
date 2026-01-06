@@ -328,7 +328,8 @@ function generateFromTemplate(grid, options, rng, templateString, templateId) {
   const heights = template.getHeights();
   
   // Post-template adjustment: Enforce landPercentage option (if enabled)
-  const enforceLandPercentage = options.enforceLandPercentage !== false; // Default true for backward compat
+  // If enforceLandPercentage is explicitly false, skip adjustment to allow template-native land %
+  const enforceLandPercentage = options.enforceLandPercentage !== false && options.enforceLandPercentage !== undefined ? options.enforceLandPercentage : (options.enforceLandPercentage === false ? false : true);
   const targetLandPercentage = options.landPercentage || 40;
   
   if (enforceLandPercentage) {

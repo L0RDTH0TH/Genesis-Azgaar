@@ -250,6 +250,46 @@ export function expandStates({ pack, options, biomesData: providedBiomesData = n
       }
     });
   }
+  
+  // Ensure all land cells are claimed by a state (fill any unclaimed land cells)
+  // This prevents "floating" biome fills without state borders
+  const unclaimedLandCells = [];
+  for (const cellId of cells.i) {
+    if (cells.h[cellId] >= 20 && (!cells.state[cellId] || cells.state[cellId] === 0)) {
+      unclaimedLandCells.push(cellId);
+    }
+  }
+  
+  if (unclaimedLandCells.length > 0) {
+    // Assign unclaimed land cells to nearest state
+    for (const cellId of unclaimedLandCells) {
+      let nearestState = 0;
+      let nearestDistance = Infinity;
+      
+      // Find nearest state center
+      for (const state of states) {
+        if (!state.i || state.removed || !state.center) continue;
+        const dx = cells.p[cellId][0] - cells.p[state.center][0];
+        const dy = cells.p[cellId][1] - cells.p[state.center][1];
+        const distance = dx * dx + dy * dy;
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestState = state.i;
+        }
+      }
+      
+      if (nearestState > 0) {
+        cells.state[cellId] = nearestState;
+      }
+    }
+    
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[expandStates] Claimed unclaimed land cells:', {
+        unclaimedCount: unclaimedLandCells.length,
+        totalLandCells: cells.i.filter(i => cells.h[i] >= 20).length
+      });
+    }
+  }
 
   // Assign state to burgs
   if (burgs && cells.burg) {

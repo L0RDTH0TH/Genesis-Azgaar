@@ -304,14 +304,20 @@ function generateMapInternal(options, DelaunatorClass) {
   markupPack({ pack });
   
   // Phase 10.25: Post-processing cluster merging (connect nearby land features)
-  // Enhanced iterative merging to aggressively reduce fragmentation
+  // Template-aware merging: aggressive for cohesion styles, minimal for fragmented styles
+  const templateId = options.template || 'continent';
+  const isCohesionStyle = templateId === 'continent' || templateId === 'pangea';
+  const isFragmentedStyle = templateId === 'archipelago' || templateId === 'shattered';
+  
   const initialClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
-  if (initialClusters > 5) {
-    // Enhanced merging with iterative passes and more aggressive parameters
+  
+  // Only merge for cohesion styles OR if fragmentation is extreme (even for fragmented styles, allow some merging if >20 clusters)
+  if (isCohesionStyle && initialClusters > 5) {
+    // Aggressive merging for cohesion styles (continent, pangea)
     const mergesPerformed = mergeNearbyClusters(pack, {
-      mergeDistance: 6, // Increased from 3 to 6 cells (more aggressive)
-      maxMergeDistance: 8, // Maximum distance to consider
-      minClusterSize: 5, // Reduced from 10 to 5 (include smaller isles)
+      mergeDistance: 6, // Aggressive: merge features up to 6 cells apart
+      maxMergeDistance: 10, // Maximum distance to consider
+      minClusterSize: 5, // Include smaller isles
       maxIterations: 10, // Allow up to 10 iterations for convergence
       maxClusterSize: pack.cells.i.length * 0.6 // Prevent supercontinents (60% of cells)
     });
@@ -323,18 +329,48 @@ function generateMapInternal(options, DelaunatorClass) {
       
       const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
       if (typeof console !== 'undefined' && console.log) {
-        console.log('[cluster-merge] Enhanced iterative merge:', {
+        console.log('[cluster-merge] Template-aware merge:', {
+          template: templateId,
+          style: isCohesionStyle ? 'cohesion' : 'fragmented',
           initialClusters,
           mergesPerformed,
           finalClusters,
-          reduction: initialClusters - finalClusters,
-          iterations: mergesPerformed > 0 ? 'multiple' : 0
+          reduction: initialClusters - finalClusters
+        });
+      }
+    } else {
+      specifyFeatures({ pack, grid, options });
+    }
+  } else if (isFragmentedStyle && initialClusters > 20) {
+    // Minimal merging for fragmented styles (archipelago, shattered) - only if extremely fragmented (>20 clusters)
+    // Use very conservative parameters to preserve fragmentation
+    const mergesPerformed = mergeNearbyClusters(pack, {
+      mergeDistance: 1, // Very conservative: only merge features 1 cell apart
+      maxMergeDistance: 2, // Maximum distance to consider
+      minClusterSize: 20, // Only merge larger clusters (preserve small islands)
+      maxIterations: 1, // Single pass only (no iteration)
+      maxClusterSize: pack.cells.i.length * 0.3 // Prevent large landmasses (30% max)
+    });
+    
+    if (mergesPerformed > 0) {
+      markupPack({ pack });
+      specifyFeatures({ pack, grid, options });
+      
+      const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[cluster-merge] Minimal merge (fragmented style):', {
+          template: templateId,
+          initialClusters,
+          mergesPerformed,
+          finalClusters,
+          reduction: initialClusters - finalClusters
         });
       }
     } else {
       specifyFeatures({ pack, grid, options });
     }
   } else {
+    // No merging needed (fragmented style with acceptable fragmentation, or cohesion style with ≤5 clusters)
     specifyFeatures({ pack, grid, options });
   }
 
