@@ -157,20 +157,33 @@
       renderPreviewSVG = lib.renderPreviewSVG;
       renderToSVG = lib.renderToSVG;
       
-      // Try to get renderConfig functions from bundle, fallback to direct import if not available
-      if (lib.getDefaultRenderConfig && lib.getOriginalRenderConfig) {
-        getDefaultRenderConfig = lib.getDefaultRenderConfig;
-        getOriginalRenderConfig = lib.getOriginalRenderConfig;
-      } else {
-        // Import directly from config file (if bundle doesn't export them)
-        try {
-          const configModule = await import('../src/rendering/config.js');
-          getDefaultRenderConfig = configModule.getDefaultRenderConfig;
-          getOriginalRenderConfig = configModule.getOriginalRenderConfig;
-          console.log('Render config functions imported from source file');
-        } catch (configError) {
-          console.warn('Could not import render config functions:', configError);
-          // Fallback: create simple config objects
+      // Always import renderConfig from source to ensure latest parchment defaults
+      // (bundle may not have these exports or may have outdated config)
+      try {
+        const configModule = await import('../src/rendering/config.js');
+        getDefaultRenderConfig = configModule.getDefaultRenderConfig;
+        getOriginalRenderConfig = configModule.getOriginalRenderConfig;
+        console.log('Render config functions imported from source file (ensuring latest parchment defaults)');
+        
+        // Verify parchment config is correct
+        const testConfig = getDefaultRenderConfig();
+        console.log('Parchment config verification:', {
+          textureEnabled: testConfig.effects?.parchment?.enabled,
+          textureUrl: testConfig.effects?.parchment?.textureUrl,
+          pseudo3DEnabled: testConfig.effects?.pseudo3D?.enabled,
+          coastEnabled: testConfig.layers?.coast?.enabled,
+          colorScheme: testConfig.colorScheme,
+          oceanColor: testConfig.colors?.oceanBase
+        });
+      } catch (configError) {
+        console.warn('Could not import render config functions from source:', configError);
+        // Try bundle as fallback
+        if (lib.getDefaultRenderConfig && lib.getOriginalRenderConfig) {
+          getDefaultRenderConfig = lib.getDefaultRenderConfig;
+          getOriginalRenderConfig = lib.getOriginalRenderConfig;
+          console.log('Using render config functions from bundle (fallback)');
+        } else {
+          // Final fallback: create simple config objects
           getDefaultRenderConfig = () => ({
             colorScheme: 'parchment',
             colors: {
