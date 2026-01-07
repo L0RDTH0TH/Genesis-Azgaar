@@ -206,13 +206,13 @@
           });
         } catch (configError) {
           console.error('Could not import render config functions from source:', configError);
-        // Try bundle as fallback
-        if (lib.getDefaultRenderConfig && lib.getOriginalRenderConfig) {
-          getDefaultRenderConfig = lib.getDefaultRenderConfig;
-          getOriginalRenderConfig = lib.getOriginalRenderConfig;
-          console.log('Using render config functions from bundle (fallback)');
-        } else {
-          // Final fallback: create simple config objects
+          // Try bundle as fallback
+          if (lib.getDefaultRenderConfig && lib.getOriginalRenderConfig) {
+            getDefaultRenderConfig = lib.getDefaultRenderConfig;
+            getOriginalRenderConfig = lib.getOriginalRenderConfig;
+            console.log('Using render config functions from bundle (fallback)');
+          } else {
+            // Final fallback: create simple config objects
           getDefaultRenderConfig = () => ({
             colorScheme: 'parchment',
             colors: {
