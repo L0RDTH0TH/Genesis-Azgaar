@@ -609,6 +609,69 @@ export function drawStatesSVG(pack, renderConfig = null) {
 }
 
 /**
+ * Draw coast outline with white glowing effect (Skyrim-style)
+ * Creates a dual-layer white stroke: wider outer glow + main outline for vintage map aesthetic
+ * @param {Object} pack - Pack object with cells and vertices
+ * @param {Object} renderConfig - Render configuration (optional, for coast styles)
+ * @param {Object} renderConfig.layers.coast - Coast layer configuration
+ * @param {boolean} renderConfig.layers.coast.enabled - Enable/disable coast outline (default: true)
+ * @param {string} renderConfig.layers.coast.stroke - Stroke color (default: '#ffffff')
+ * @param {number} renderConfig.layers.coast.width - Main stroke width (default: 2)
+ * @param {number} renderConfig.layers.coast.opacity - Stroke opacity (default: 0.8)
+ * @param {number} renderConfig.layers.coast.glowWidth - Outer glow width (default: 3)
+ * @returns {string} SVG paths for coast outline (dual-layer glow effect)
+ */
+export function drawCoastOutlineSVG(pack, renderConfig = null) {
+  if (!pack.cells || !pack.cells.h) return '';
+  
+  const coastConfig = renderConfig?.layers?.coast || {};
+  if (coastConfig.enabled === false) return '';
+  
+  const isLand = (cellId) => pack.cells.h[cellId] >= MIN_LAND_HEIGHT;
+  const { cells, vertices } = pack;
+  
+  if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
+    return ''; // No vertex graph available
+  }
+  
+  const coastPaths = [];
+  const checked = {};
+  
+  // Find all land cells adjacent to water (coastline)
+  for (let cellId = 0; cellId < cells.i.length; cellId++) {
+    if (!isLand(cellId)) continue;
+    
+    // Check if cell has water neighbors
+    const hasWaterNeighbor = cells.c && cells.c[cellId] && cells.c[cellId].some((neibId) => {
+      return neibId >= 0 && neibId < cells.i.length && !isLand(neibId);
+    });
+    
+    if (hasWaterNeighbor) {
+      // Get coastline border for this cell
+      const coastlineBorder = getCoastlineBorder(cellId, cells, vertices, isLand);
+      if (coastlineBorder && !checked[`coast-${cellId}`]) {
+        coastPaths.push(coastlineBorder);
+        checked[`coast-${cellId}`] = true;
+      }
+    }
+  }
+  
+  if (coastPaths.length === 0) return '';
+  
+  const stroke = coastConfig.stroke || '#ffffff';
+  const width = coastConfig.width ?? 2;
+  const opacity = coastConfig.opacity ?? 0.8;
+  const glowWidth = coastConfig.glowWidth ?? 3;
+  
+  // Create white glowing outline: wider outer stroke + main stroke
+  const coastPath = coastPaths.join(' ');
+  return `
+    <path d="${coastPath}" stroke="${stroke}" stroke-width="${glowWidth}" opacity="${opacity * 0.6}" fill="none" class="coast-glow" />
+    <path d="${coastPath}" stroke="${stroke}" stroke-width="${width}" opacity="${opacity}" fill="none" class="coast-outline" />
+  `;
+}
+
+/**
  * Draw borders (state and province) as SVG paths
  * @param {Object} pack - Pack object
  * @param {Object} renderConfig - Render configuration (optional, for border styles)
@@ -1769,10 +1832,15 @@ export function renderMapSVG(data, options = {}) {
   
   // 0. Parchment texture overlay (background layer, before ocean/land)
   // Applied early so it affects all subsequent layers with blend mode
+  // Skyrim-style aged paper grain effect
   const parchmentEffect = renderConfig.effects?.parchment;
   if (parchmentEffect?.enabled && parchmentEffect?.textureUrl) {
+    // Ensure mix-blend-mode is multiply for parchment effect
+    const blendMode = parchmentEffect.blendMode || 'multiply';
+    // Use primary texture URL (Azgaar's pergamena) with fallback handling
+    // Note: Browser will handle CORS/loading errors gracefully
     layers.push(
-      `<image id="texture-overlay" xlink:href="${parchmentEffect.textureUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${parchmentEffect.opacity ?? 0.7}" style="mix-blend-mode: ${parchmentEffect.blendMode || 'multiply'};" />`
+      `<image id="texture-overlay" xlink:href="${parchmentEffect.textureUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${parchmentEffect.opacity ?? 0.65}" style="mix-blend-mode: ${blendMode};" />`
     );
   }
 
@@ -1834,6 +1902,12 @@ export function renderMapSVG(data, options = {}) {
     layers.push(`<g id="rivers">${riversSVG}</g>`);
   }
 
+  // 6.5. Coast outline (white glowing effect - Skyrim-style)
+  const coastOutlineSVG = drawCoastOutlineSVG(pack, renderConfig);
+  if (coastOutlineSVG) {
+    layers.push(`<g id="coast-outline" class="coast-layer">${coastOutlineSVG}</g>`);
+  }
+
   // 7. Borders
   const borders = drawBordersSVG(pack, renderConfig);
   if (borders.stateBorders || borders.provinceBorders) {
@@ -1849,11 +1923,12 @@ export function renderMapSVG(data, options = {}) {
   // 8. Relief icons (with SVG symbols and pseudo-3D effects)
   let reliefSVG = '';
   try {
-    // Use original relief icon rendering with SVG symbols (density 0.3 for ~200-300 icons)
+    // Use original relief icon rendering with SVG symbols
+    // Density multiplier applied in drawReliefIconsSVG (default 1.2 for dense mountains)
     const reliefOptions = { 
-      density: renderConfig.layers?.relief?.density ?? 0.3, 
+      density: 0.3, // Base density (multiplied by config.layers.relief.density in function)
       size: renderConfig.layers?.relief?.size ?? 1,
-      renderConfig: renderConfig // Pass config for pseudo3D effects
+      renderConfig: renderConfig // Pass config for pseudo3D effects and density multiplier
     };
     reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, reliefOptions);
   } catch (error) {
@@ -1886,21 +1961,25 @@ export function renderMapSVG(data, options = {}) {
   // Add relief icon symbol definitions and filters for pseudo-3D effects
   let defs = getReliefIconDefs();
   
-  // Add drop shadow filter definition for pseudo-3D relief icons
+  // Add drop shadow filter definition for pseudo-3D relief icons (enhanced)
   const pseudo3D = renderConfig.effects?.pseudo3D || {};
   if (pseudo3D.enabled !== false) {
-    const shadowBlur = pseudo3D.shadowBlur ?? 3;
-    const shadowOpacity = pseudo3D.shadowOpacity ?? 0.4;
+    const shadowBlur = pseudo3D.shadowBlur ?? 4;
+    const shadowOpacity = pseudo3D.shadowOpacity ?? 0.5;
+    const shadowOffsetX = pseudo3D.shadowOffsetX ?? 2;
+    const shadowOffsetY = pseudo3D.shadowOffsetY ?? 3;
+    
+    // Enhanced drop shadow with bevel-like effect via feComponentTransfer
     defs += `
   <defs>
     <filter id="dropShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="${shadowBlur}"/>
-      <feOffset dx="${pseudo3D.shadowOffsetX ?? 1.5}" dy="${pseudo3D.shadowOffsetY ?? 2}" result="offsetblur"/>
-      <feComponentTransfer>
-        <feFuncA type="linear" slope="${shadowOpacity}"/>
+      <feGaussianBlur in="SourceAlpha" stdDeviation="${shadowBlur}" result="blur"/>
+      <feOffset dx="${shadowOffsetX}" dy="${shadowOffsetY}" in="blur" result="offsetblur"/>
+      <feComponentTransfer in="offsetblur" result="shadow">
+        <feFuncA type="linear" slope="${shadowOpacity}" intercept="0"/>
       </feComponentTransfer>
       <feMerge>
-        <feMergeNode/>
+        <feMergeNode in="shadow"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>

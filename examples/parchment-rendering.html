@@ -88,13 +88,15 @@
   </style>
 </head>
 <body>
-  <h1>Azgaar Genesis - Parchment Style Rendering Test</h1>
-  <p>This example demonstrates configurable rendering with parchment-style defaults:</p>
+  <h1>Azgaar Genesis - Final Parchment Style Rendering (Skyrim-Style)</h1>
+  <p>This example demonstrates the final polished parchment-style rendering with Skyrim-style aesthetic:</p>
   <ul>
-    <li><strong>Parchment texture overlay</strong> (aged paper grain from transparenttextures.com)</li>
-    <li><strong>Pseudo-3D effects</strong> (drop shadows on relief icons for depth)</li>
-    <li><strong>Sepia tones</strong> (muted earth colors, low saturation)</li>
-    <li><strong>CSS classes</strong> added to elements for future styling (biome-*, relief-mountain, etc.)</li>
+    <li><strong>Parchment texture overlay</strong> (Azgaar's classic pergamena texture with strong grain)</li>
+    <li><strong>Enhanced pseudo-3D effects</strong> (stronger drop shadows: offset 2/3, blur 4, opacity 0.5)</li>
+    <li><strong>Dense relief icons</strong> (1.2x density multiplier, height-based scaling for mountains)</li>
+    <li><strong>White glowing coast outline</strong> (dual-layer white stroke for Skyrim-style coast glow)</li>
+    <li><strong>Sepia tones</strong> (muted earth colors, low saturation, vintage map aesthetic)</li>
+    <li><strong>CSS classes</strong> added to elements for future styling (biome-*, relief-mountain, coast-outline, etc.)</li>
   </ul>
   <p><strong>Seed 42</strong> is used for both maps to ensure fidelity comparison.</p>
   
@@ -106,14 +108,22 @@
 
   <div class="comparison">
     <div class="map-container">
-      <h3>Parchment Style (Textured + Pseudo-3D)</h3>
+      <h3>Final Parchment Style (Skyrim-Style)</h3>
       <div id="svgContainerParchment"></div>
-      <div class="info" id="infoParchment">Click "Generate & Render" to create parchment-style map with texture overlay and drop shadows</div>
+      <div class="info" id="infoParchment">Click "Generate & Render" to create final parchment-style map:<br/>
+        • Dense shaded mountains with strong drop shadows<br/>
+        • Strong parchment grain texture (Azgaar's pergamena)<br/>
+        • White glowing coast outline<br/>
+        • Height-scaled relief icons</div>
     </div>
     <div class="map-container">
-      <h3>Original Style (Bright Colors, No Texture)</h3>
+      <h3>Original Style (Bright Colors, No Effects)</h3>
       <div id="svgContainerOriginal"></div>
-      <div class="info" id="infoOriginal">Click "Generate & Render" to create original-style map without texture</div>
+      <div class="info" id="infoOriginal">Click "Generate & Render" to create original-style map:<br/>
+        • No texture overlay<br/>
+        • No pseudo-3D shadows<br/>
+        • Standard relief density<br/>
+        • Vibrant colors</div>
     </div>
   </div>
   
@@ -194,7 +204,13 @@
         const parchmentTime = performance.now() - renderStart;
         parchmentSVG = renderPreviewSVG({ width: 960, height: 540 }); // Get SVG string
         
-        infoParchment.textContent = `Rendered in ${parchmentTime.toFixed(2)}ms (parchment style - texture overlay, pseudo-3D shadows, sepia tones)`;
+        infoParchment.innerHTML = `Rendered in ${parchmentTime.toFixed(2)}ms<br/>
+          <strong>Final parchment style:</strong><br/>
+          • Texture: Azgaar's pergamena (opacity 0.65)<br/>
+          • Pseudo-3D: Strong shadows (offset 2/3, blur 4, opacity 0.5)<br/>
+          • Relief: 1.2x density, height-scaled<br/>
+          • Coast: White glowing outline (2px + 3px glow)<br/>
+          • Colors: Sepia tones, muted palette`;
         
         // Render with original config
         const renderStart2 = performance.now();
@@ -207,7 +223,13 @@
         const originalTime = performance.now() - renderStart2;
         originalSVG = renderPreviewSVG({ width: 960, height: 540 }); // Get SVG string
         
-        infoOriginal.textContent = `Rendered in ${originalTime.toFixed(2)}ms (original style - vibrant colors, no texture, no shadows)`;
+        infoOriginal.innerHTML = `Rendered in ${originalTime.toFixed(2)}ms<br/>
+          <strong>Original style:</strong><br/>
+          • No texture overlay<br/>
+          • No pseudo-3D effects<br/>
+          • Standard relief density (0.3)<br/>
+          • No coast outline<br/>
+          • Vibrant colors (bright scheme)`;
         
         exportParchmentBtn.disabled = false;
         exportOriginalBtn.disabled = false;

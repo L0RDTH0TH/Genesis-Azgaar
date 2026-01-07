@@ -140,9 +140,15 @@ export function getReliefIconDefs() {
 export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) {
   if (!pack.cells || !pack.cells.h || !pack.cells.biome) return '';
   
-  const density = options.density || 0.4;
+  const renderConfig = options.renderConfig || {};
+  const reliefConfig = renderConfig.layers?.relief || {};
+  const baseDensity = options.density || 0.3;
+  // Apply density multiplier from config (default 1.2 for increased density)
+  const densityMultiplier = reliefConfig.density || 1.0;
+  const density = baseDensity * densityMultiplier;
   const size = 2 * (options.size || 1);
   const mod = 0.2 * size; // size modifier
+  const heightScaling = reliefConfig.heightScaling !== false; // Default to true
   const relief = [];
   const cells = pack.cells;
   
@@ -211,10 +217,18 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
       const radius = 2 / density;
       const [icon, h] = getReliefIcon(i, height, grid, pack, mod);
       
+      // Height-based scaling: taller mountains get larger icons
+      let iconSize = h * 2;
+      if (heightScaling) {
+        // Scale icon size based on height (50-100 range)
+        const heightFactor = (height - 50) / 50; // 0 to 1 for heights 50-100
+        iconSize = h * 2 * (1 + heightFactor * 0.5); // 1.0x to 1.5x scaling
+      }
+      
       // Place relief icons using Poisson sampling (matches original behavior)
       for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
         if (!pointInPolygon([cx, cy], polygon)) continue;
-        relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
+        relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(iconSize, 2)});
       }
     }
   }

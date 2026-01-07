@@ -52,9 +52,17 @@ export const defaultRenderConfig = {
       showLabels: true,
     },
     relief: {
-      density: 0.3,
+      density: 1.2,                // Increased density for dense shaded mountains (multiplier)
       size: 1,
       shadow: true,                 // Enable shadows for depth
+      heightScaling: true,          // Scale relief icons based on height
+    },
+    coast: {
+      enabled: true,                // Enable white glowing coast outline
+      stroke: '#ffffff',            // White stroke for glow
+      width: 2,                     // Stroke width
+      opacity: 0.8,                 // Stroke opacity
+      glowWidth: 3,                 // Outer glow width (wider behind main border)
     },
     labels: {
       stateLabelColor: '#5c4a3a',   // Dark brown for text
@@ -65,20 +73,22 @@ export const defaultRenderConfig = {
   
   effects: {
     parchment: {
-      enabled: true,                // Enabled by default with CORS-friendly texture
-      // Using transparenttextures.com for seamless old paper texture (CORS-friendly)
-      textureUrl: 'https://www.transparenttextures.com/patterns/old-paper.png',
-      opacity: 0.7,                 // Lower opacity for subtle texture
-      blendMode: 'multiply',        // SVG blend mode
-      // Note: If texture URL fails, set textureUrl to null and provide local asset later
+      enabled: true,                // Enabled by default with parchment texture
+      // Try Azgaar's classic pergamena texture (fallback to transparenttextures if CORS issues)
+      textureUrl: 'https://i2.wp.com/azgaar.files.wordpress.com/2019/07/pergamena-small.jpg',
+      opacity: 0.65,                // Slightly lower opacity for stronger parchment grain
+      blendMode: 'multiply',        // SVG blend mode (ensures multiply for parchment effect)
+      // Fallback texture URL (used if primary URL fails to load)
+      fallbackTextureUrl: 'https://www.transparenttextures.com/patterns/old-paper.png',
+      // Note: If both URLs fail, set textureUrl to null and provide local asset later
     },
     pseudo3D: {
       enabled: true,                // Enabled by default for depth effect
       heightExaggeration: 1.0,
-      shadowOffsetX: 1.5,           // Shadow offset X
-      shadowOffsetY: 2,             // Shadow offset Y
-      shadowBlur: 3,                // Shadow blur radius
-      shadowOpacity: 0.4,           // Shadow opacity
+      shadowOffsetX: 2,             // Stronger shadow offset X (increased from 1.5)
+      shadowOffsetY: 3,             // Stronger shadow offset Y (increased from 2)
+      shadowBlur: 4,                // Stronger shadow blur (increased from 3)
+      shadowOpacity: 0.5,           // Stronger shadow opacity (increased from 0.4)
     },
     sepia: {
       enabled: true,                // Enable sepia tone filter by default
