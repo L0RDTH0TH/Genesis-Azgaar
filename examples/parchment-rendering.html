@@ -153,9 +153,15 @@
     // Use path appropriate for dev vs production
     // Note: For dev mode, we use source files which require d3 dependencies
     // The import map in <head> will resolve these automatically
-    const libraryPath = isDev 
+    // If import maps aren't supported, use the bundled version instead
+    const supportsImportMaps = 'noModule' in HTMLScriptElement.prototype;
+    const libraryPath = (isDev && supportsImportMaps)
       ? '../src/index.js' 
       : '../dist/azgaar-genesis.esm.js';
+    
+    if (isDev && !supportsImportMaps) {
+      console.warn('Import maps not supported, using bundled version instead');
+    }
     
     // Import library functions
     console.log('Loading library from:', libraryPath);
