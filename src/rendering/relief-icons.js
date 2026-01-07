@@ -129,13 +129,19 @@ export function getReliefIconDefs() {
 }
 
 /**
- * Draw relief icons using SVG symbols (ported from original)
- * @param {Object} pack - Pack object
+ * Draw relief icons using SVG symbols with enhanced density and height-based scaling
+ * Supports pseudo-3D drop shadows and configurable density multiplier for dense mountain ranges
+ * @param {Object} pack - Pack object with cells and vertices
  * @param {Object} biomesData - Biome data with icons information
- * @param {Object} grid - Grid object (for temperature)
- * @param {Object} options - Rendering options {density, size, renderConfig}
- * @param {Object} options.renderConfig - Render configuration for pseudo3D effects
- * @returns {string} SVG elements for relief icons
+ * @param {Object} grid - Grid object (for temperature, optional)
+ * @param {Object} options - Rendering options
+ * @param {number} options.density - Base density (default: 0.4, multiplied by config.layers.relief.density)
+ * @param {number} options.size - Icon size multiplier (default: 1)
+ * @param {Object} options.renderConfig - Render configuration for pseudo3D effects and density
+ * @param {number} options.renderConfig.layers.relief.density - Density multiplier (default: 1.2 for dense mountains)
+ * @param {boolean} options.renderConfig.layers.relief.heightScaling - Enable height-based icon scaling (default: true)
+ * @param {Object} options.renderConfig.effects.pseudo3D - Pseudo-3D shadow configuration
+ * @returns {string} SVG elements for relief icons (with optional drop shadows)
  */
 export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) {
   if (!pack.cells || !pack.cells.h || !pack.cells.biome) return '';

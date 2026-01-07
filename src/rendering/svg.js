@@ -609,69 +609,6 @@ export function drawStatesSVG(pack, renderConfig = null) {
 }
 
 /**
- * Draw coast outline with white glowing effect (Skyrim-style)
- * Creates a dual-layer white stroke: wider outer glow + main outline for vintage map aesthetic
- * @param {Object} pack - Pack object with cells and vertices
- * @param {Object} renderConfig - Render configuration (optional, for coast styles)
- * @param {Object} renderConfig.layers.coast - Coast layer configuration
- * @param {boolean} renderConfig.layers.coast.enabled - Enable/disable coast outline (default: true)
- * @param {string} renderConfig.layers.coast.stroke - Stroke color (default: '#ffffff')
- * @param {number} renderConfig.layers.coast.width - Main stroke width (default: 2)
- * @param {number} renderConfig.layers.coast.opacity - Stroke opacity (default: 0.8)
- * @param {number} renderConfig.layers.coast.glowWidth - Outer glow width (default: 3)
- * @returns {string} SVG paths for coast outline (dual-layer glow effect)
- */
-export function drawCoastOutlineSVG(pack, renderConfig = null) {
-  if (!pack.cells || !pack.cells.h) return '';
-  
-  const coastConfig = renderConfig?.layers?.coast || {};
-  if (coastConfig.enabled === false) return '';
-  
-  const isLand = (cellId) => pack.cells.h[cellId] >= MIN_LAND_HEIGHT;
-  const { cells, vertices } = pack;
-  
-  if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
-    return ''; // No vertex graph available
-  }
-  
-  const coastPaths = [];
-  const checked = {};
-  
-  // Find all land cells adjacent to water (coastline)
-  for (let cellId = 0; cellId < cells.i.length; cellId++) {
-    if (!isLand(cellId)) continue;
-    
-    // Check if cell has water neighbors
-    const hasWaterNeighbor = cells.c && cells.c[cellId] && cells.c[cellId].some((neibId) => {
-      return neibId >= 0 && neibId < cells.i.length && !isLand(neibId);
-    });
-    
-    if (hasWaterNeighbor) {
-      // Get coastline border for this cell
-      const coastlineBorder = getCoastlineBorder(cellId, cells, vertices, isLand);
-      if (coastlineBorder && !checked[`coast-${cellId}`]) {
-        coastPaths.push(coastlineBorder);
-        checked[`coast-${cellId}`] = true;
-      }
-    }
-  }
-  
-  if (coastPaths.length === 0) return '';
-  
-  const stroke = coastConfig.stroke || '#ffffff';
-  const width = coastConfig.width ?? 2;
-  const opacity = coastConfig.opacity ?? 0.8;
-  const glowWidth = coastConfig.glowWidth ?? 3;
-  
-  // Create white glowing outline: wider outer stroke + main stroke
-  const coastPath = coastPaths.join(' ');
-  return `
-    <path d="${coastPath}" stroke="${stroke}" stroke-width="${glowWidth}" opacity="${opacity * 0.6}" fill="none" class="coast-glow" />
-    <path d="${coastPath}" stroke="${stroke}" stroke-width="${width}" opacity="${opacity}" fill="none" class="coast-outline" />
-  `;
-}
-
-/**
  * Draw borders (state and province) as SVG paths
  * @param {Object} pack - Pack object
  * @param {Object} renderConfig - Render configuration (optional, for border styles)
@@ -950,6 +887,63 @@ function getCoastlineBorder(cellId, cells, vertices, isLand) {
   if (points.length < 2) return null;
   
   return 'M' + points.map(([x, y]) => `${rn(x, 2)},${rn(y, 2)}`).join(' ');
+}
+
+/**
+ * Draw coast outline with white glowing effect (Skyrim-style)
+ * Creates a dual-layer white stroke: wider outer glow + main outline for vintage map aesthetic
+ * @param {Object} pack - Pack object with cells and vertices
+ * @param {Object} renderConfig - Render configuration (optional, for coast styles)
+ * @returns {string} SVG paths for coast outline (dual-layer glow effect)
+ */
+export function drawCoastOutlineSVG(pack, renderConfig = null) {
+  if (!pack.cells || !pack.cells.h) return '';
+  
+  const coastConfig = renderConfig?.layers?.coast || {};
+  if (coastConfig.enabled === false) return '';
+  
+  const isLand = (cellId) => pack.cells.h[cellId] >= MIN_LAND_HEIGHT;
+  const { cells, vertices } = pack;
+  
+  if (!vertices || !vertices.c || !Array.isArray(vertices.c) || vertices.c.length === 0) {
+    return ''; // No vertex graph available
+  }
+  
+  const coastPaths = [];
+  const checked = {};
+  
+  // Find all land cells adjacent to water (coastline)
+  for (let cellId = 0; cellId < cells.i.length; cellId++) {
+    if (!isLand(cellId)) continue;
+    
+    // Check if cell has water neighbors
+    const hasWaterNeighbor = cells.c && cells.c[cellId] && cells.c[cellId].some((neibId) => {
+      return neibId >= 0 && neibId < cells.i.length && !isLand(neibId);
+    });
+    
+    if (hasWaterNeighbor) {
+      // Get coastline border for this cell
+      const coastlineBorder = getCoastlineBorder(cellId, cells, vertices, isLand);
+      if (coastlineBorder && !checked[`coast-${cellId}`]) {
+        coastPaths.push(coastlineBorder);
+        checked[`coast-${cellId}`] = true;
+      }
+    }
+  }
+  
+  if (coastPaths.length === 0) return '';
+  
+  const stroke = coastConfig.stroke || '#ffffff';
+  const width = coastConfig.width ?? 2;
+  const opacity = coastConfig.opacity ?? 0.8;
+  const glowWidth = coastConfig.glowWidth ?? 3;
+  
+  // Create white glowing outline: wider outer stroke + main stroke
+  const coastPath = coastPaths.join(' ');
+  return `
+    <path d="${coastPath}" stroke="${stroke}" stroke-width="${glowWidth}" opacity="${opacity * 0.6}" fill="none" class="coast-glow" />
+    <path d="${coastPath}" stroke="${stroke}" stroke-width="${width}" opacity="${opacity}" fill="none" class="coast-outline" />
+  `;
 }
 
 /**

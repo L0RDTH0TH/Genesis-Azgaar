@@ -52,7 +52,7 @@ export const defaultRenderConfig = {
       showLabels: true,
     },
     relief: {
-      density: 1.2,                // Increased density for dense shaded mountains (multiplier)
+      density: 1.2,                // Increased density multiplier for dense shaded mountains
       size: 1,
       shadow: true,                 // Enable shadows for depth
       heightScaling: true,          // Scale relief icons based on height
