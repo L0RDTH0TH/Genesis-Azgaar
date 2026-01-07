@@ -86,6 +86,17 @@
       border-radius: 4px;
     }
   </style>
+  <!-- Import map for d3 dependencies - must be before any module scripts -->
+  <script type="importmap">
+  {
+    "imports": {
+      "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm",
+      "d3-shape": "https://cdn.jsdelivr.net/npm/d3-shape@3/+esm",
+      "d3-scale": "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm",
+      "d3-interpolate": "https://cdn.jsdelivr.net/npm/d3-interpolate@3/+esm"
+    }
+  }
+  </script>
 </head>
 <body>
   <h1>Azgaar Genesis - Final Parchment Style Rendering (Skyrim-Style)</h1>
@@ -140,6 +151,8 @@
                   window.location.protocol === 'file:';
     
     // Use path appropriate for dev vs production
+    // Note: For dev mode, we use source files which require d3 dependencies
+    // The import map in <head> will resolve these automatically
     const libraryPath = isDev 
       ? '../src/index.js' 
       : '../dist/azgaar-genesis.esm.js';
