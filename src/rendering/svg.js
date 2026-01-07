@@ -1815,6 +1815,18 @@ export function renderMapSVG(data, options = {}) {
   // CRITICAL: If a full renderConfig is passed (not partial), use it directly
   // Otherwise merge with defaults to allow partial overrides
   let renderConfig;
+  
+  // Always log what we're receiving for debugging
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[renderMapSVG] Config check:', {
+      hasRenderConfig: !!options.renderConfig,
+      hasColors: !!(options.renderConfig && options.renderConfig.colors),
+      hasLayers: !!(options.renderConfig && options.renderConfig.layers),
+      hasEffects: !!(options.renderConfig && options.renderConfig.effects),
+      oceanColor: options.renderConfig?.colors?.oceanBase
+    });
+  }
+  
   if (options.renderConfig && 
       options.renderConfig.colors && 
       options.renderConfig.layers && 
@@ -1822,13 +1834,19 @@ export function renderMapSVG(data, options = {}) {
     // Full config object provided - use directly (prevents bundle merge issues)
     renderConfig = options.renderConfig;
     if (typeof console !== 'undefined' && console.log) {
-      console.log('[renderMapSVG] Using full renderConfig directly (bypassing merge)');
+      console.log('[renderMapSVG] Using full renderConfig directly (bypassing merge)', {
+        oceanColor: renderConfig.colors?.oceanBase,
+        parchmentEnabled: renderConfig.effects?.parchment?.enabled
+      });
     }
   } else {
     // Partial config - merge with defaults
     renderConfig = mergeRenderConfig(options.renderConfig || {});
     if (typeof console !== 'undefined' && console.log) {
-      console.log('[renderMapSVG] Merged partial renderConfig with defaults');
+      console.log('[renderMapSVG] Merged partial renderConfig with defaults', {
+        oceanColor: renderConfig.colors?.oceanBase,
+        parchmentEnabled: renderConfig.effects?.parchment?.enabled
+      });
     }
   }
   

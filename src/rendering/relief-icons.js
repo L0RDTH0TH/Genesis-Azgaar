@@ -242,8 +242,7 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
   // Sort relief icons by y+size (bottom to top) for proper rendering order
   relief.sort((a, b) => (a.y + a.s) - (b.y + b.s));
   
-  // Get pseudo3D config
-  const renderConfig = options.renderConfig || {};
+  // Get pseudo3D config (renderConfig already declared above)
   const pseudo3D = renderConfig.effects?.pseudo3D || {};
   const pseudo3DEnabled = pseudo3D.enabled !== false; // Default to enabled if not specified
   
