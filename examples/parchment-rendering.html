@@ -157,26 +157,55 @@
       renderPreviewSVG = lib.renderPreviewSVG;
       renderToSVG = lib.renderToSVG;
       
-      // Always import renderConfig from source to ensure latest parchment defaults
-      // (bundle may not have these exports or may have outdated config)
-      try {
-        const configModule = await import('../src/rendering/config.js');
-        getDefaultRenderConfig = configModule.getDefaultRenderConfig;
-        getOriginalRenderConfig = configModule.getOriginalRenderConfig;
-        console.log('Render config functions imported from source file (ensuring latest parchment defaults)');
+      // Try to import render config functions from bundle first (preferred)
+      // Bundle exports should have latest config if bundle was rebuilt
+      if (lib.getDefaultRenderConfig && lib.mergeRenderConfig && lib.getOriginalRenderConfig) {
+        getDefaultRenderConfig = lib.getDefaultRenderConfig;
+        getOriginalRenderConfig = lib.getOriginalRenderConfig;
+        mergeRenderConfig = lib.mergeRenderConfig;
+        console.log('Render config functions imported from bundle (preferred)');
         
-        // Verify parchment config is correct
+        // Verify parchment config is correct from bundle
         const testConfig = getDefaultRenderConfig();
-        console.log('Parchment config verification:', {
+        console.log('Bundle parchment config verification:', {
           textureEnabled: testConfig.effects?.parchment?.enabled,
           textureUrl: testConfig.effects?.parchment?.textureUrl,
           pseudo3DEnabled: testConfig.effects?.pseudo3D?.enabled,
           coastEnabled: testConfig.layers?.coast?.enabled,
           colorScheme: testConfig.colorScheme,
-          oceanColor: testConfig.colors?.oceanBase
+          oceanColor: testConfig.colors?.oceanBase,
+          reliefDensity: testConfig.layers?.relief?.density
         });
-      } catch (configError) {
-        console.warn('Could not import render config functions from source:', configError);
+        
+        // Warn if config looks outdated (check for parchment defaults)
+        if (testConfig.colors?.oceanBase !== '#d2b48c') {
+          console.warn('⚠️ Bundle config may be outdated! Expected oceanBase: #d2b48c, got:', testConfig.colors?.oceanBase);
+        }
+      } else {
+        console.warn('Bundle does not export render config functions, falling back to source');
+      }
+      
+      // Fallback to source import only if bundle doesn't have exports
+      if (!getDefaultRenderConfig) {
+        try {
+          const configModule = await import('../src/rendering/config.js');
+          getDefaultRenderConfig = configModule.getDefaultRenderConfig;
+          getOriginalRenderConfig = configModule.getOriginalRenderConfig;
+          mergeRenderConfig = configModule.mergeRenderConfig;
+          console.log('Render config functions imported from source file (fallback)');
+          
+          // Verify parchment config is correct
+          const testConfig = getDefaultRenderConfig();
+          console.log('Source parchment config verification:', {
+            textureEnabled: testConfig.effects?.parchment?.enabled,
+            textureUrl: testConfig.effects?.parchment?.textureUrl,
+            pseudo3DEnabled: testConfig.effects?.pseudo3D?.enabled,
+            coastEnabled: testConfig.layers?.coast?.enabled,
+            colorScheme: testConfig.colorScheme,
+            oceanColor: testConfig.colors?.oceanBase
+          });
+        } catch (configError) {
+          console.error('Could not import render config functions from source:', configError);
         // Try bundle as fallback
         if (lib.getDefaultRenderConfig && lib.getOriginalRenderConfig) {
           getDefaultRenderConfig = lib.getDefaultRenderConfig;
