@@ -176,11 +176,26 @@ export const originalRenderConfig = {
 
 /**
  * Merge user render configuration with defaults
- * @param {Object} userConfig - Partial render configuration
+ * @param {Object} userConfig - Partial render configuration (or full config to use directly)
  * @param {Object} baseConfig - Base configuration (defaults to parchment)
  * @returns {Object} Merged configuration
  */
 export function mergeRenderConfig(userConfig = {}, baseConfig = defaultRenderConfig) {
+  // If userConfig is already a full config object (has colors, layers, effects),
+  // return it directly to avoid overriding with stale bundle defaults
+  if (userConfig && 
+      typeof userConfig === 'object' &&
+      userConfig.colors && 
+      typeof userConfig.colors === 'object' &&
+      userConfig.layers && 
+      typeof userConfig.layers === 'object' &&
+      userConfig.effects && 
+      typeof userConfig.effects === 'object') {
+    // Full config provided - use directly (prevents bundle default override)
+    return deepCopy(userConfig);
+  }
+  
+  // Partial config - merge with defaults
   const merged = deepCopy(baseConfig);
   
   // Deep merge user config

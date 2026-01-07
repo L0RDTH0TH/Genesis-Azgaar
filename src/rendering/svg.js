@@ -1812,7 +1812,39 @@ export function renderMapSVG(data, options = {}) {
   const height = options.height || mapHeight || 600;
   
   // Get render configuration (merge user config with defaults)
-  const renderConfig = mergeRenderConfig(options.renderConfig || {});
+  // CRITICAL: If a full renderConfig is passed (not partial), use it directly
+  // Otherwise merge with defaults to allow partial overrides
+  let renderConfig;
+  if (options.renderConfig && 
+      options.renderConfig.colors && 
+      options.renderConfig.layers && 
+      options.renderConfig.effects) {
+    // Full config object provided - use directly (prevents bundle merge issues)
+    renderConfig = options.renderConfig;
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[renderMapSVG] Using full renderConfig directly (bypassing merge)');
+    }
+  } else {
+    // Partial config - merge with defaults
+    renderConfig = mergeRenderConfig(options.renderConfig || {});
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[renderMapSVG] Merged partial renderConfig with defaults');
+    }
+  }
+  
+  // Diagnostic logging for parchment rendering verification
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[renderMapSVG] Render config applied:', {
+      colorScheme: renderConfig.colorScheme,
+      oceanColor: renderConfig.colors?.oceanBase,
+      parchmentEnabled: renderConfig.effects?.parchment?.enabled,
+      parchmentUrl: renderConfig.effects?.parchment?.textureUrl,
+      pseudo3DEnabled: renderConfig.effects?.pseudo3D?.enabled,
+      reliefDensity: renderConfig.layers?.relief?.density,
+      coastEnabled: renderConfig.layers?.coast?.enabled,
+      biomeOpacity: renderConfig.layers?.biomes?.opacity
+    });
+  }
   
   // Get color scheme from renderConfig (defaults to parchment)
   const colorSchemeName = options.colorScheme || renderConfig.colorScheme || 'parchment';
@@ -1835,9 +1867,20 @@ export function renderMapSVG(data, options = {}) {
     // Note: If primary URL fails to load, browser will show broken image icon
     // In production, handle fallback via onerror handler or pre-check texture URL
     const textureUrl = parchmentEffect.textureUrl;
+    const textureOpacity = parchmentEffect.opacity ?? 0.65;
     layers.push(
-      `<image id="texture-overlay" xlink:href="${textureUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${parchmentEffect.opacity ?? 0.65}" style="mix-blend-mode: ${blendMode};" />`
+      `<image id="texture-overlay" xlink:href="${textureUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${textureOpacity}" style="mix-blend-mode: ${blendMode};" />`
     );
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[renderMapSVG] Parchment texture overlay added:', { textureUrl, opacity: textureOpacity, blendMode });
+    }
+  } else {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('[renderMapSVG] Parchment texture NOT added:', { 
+        enabled: parchmentEffect?.enabled, 
+        textureUrl: parchmentEffect?.textureUrl 
+      });
+    }
   }
 
   // 1. Ocean base - fill entire map with ocean color first
@@ -1921,11 +1964,17 @@ export function renderMapSVG(data, options = {}) {
   try {
     // Use original relief icon rendering with SVG symbols
     // Density multiplier applied in drawReliefIconsSVG (default 1.2 for dense mountains)
+    const baseDensity = 0.3;
+    const densityMultiplier = renderConfig.layers?.relief?.density ?? 1.0;
+    const finalDensity = baseDensity * densityMultiplier;
     const reliefOptions = { 
-      density: 0.3, // Base density (multiplied by config.layers.relief.density in function)
+      density: baseDensity, // Base density (multiplied by config.layers.relief.density in function)
       size: renderConfig.layers?.relief?.size ?? 1,
       renderConfig: renderConfig // Pass config for pseudo3D effects and density multiplier
     };
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[renderMapSVG] Relief rendering:', { baseDensity, densityMultiplier, finalDensity, pseudo3D: renderConfig.effects?.pseudo3D?.enabled });
+    }
     reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, reliefOptions);
   } catch (error) {
     console.warn('Relief rendering failed:', error.message);
