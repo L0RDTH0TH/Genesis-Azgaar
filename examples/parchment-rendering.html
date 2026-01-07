@@ -89,7 +89,13 @@
 </head>
 <body>
   <h1>Azgaar Genesis - Parchment Style Rendering Test</h1>
-  <p>This example demonstrates configurable rendering with parchment-style defaults (sepia tones, low saturation, vintage map aesthetic).</p>
+  <p>This example demonstrates configurable rendering with parchment-style defaults:</p>
+  <ul>
+    <li><strong>Parchment texture overlay</strong> (aged paper grain from transparenttextures.com)</li>
+    <li><strong>Pseudo-3D effects</strong> (drop shadows on relief icons for depth)</li>
+    <li><strong>Sepia tones</strong> (muted earth colors, low saturation)</li>
+    <li><strong>CSS classes</strong> added to elements for future styling (biome-*, relief-mountain, etc.)</li>
+  </ul>
   <p><strong>Seed 42</strong> is used for both maps to ensure fidelity comparison.</p>
   
   <div class="controls">
@@ -100,14 +106,14 @@
 
   <div class="comparison">
     <div class="map-container">
-      <h3>Parchment Style (Default)</h3>
+      <h3>Parchment Style (Textured + Pseudo-3D)</h3>
       <div id="svgContainerParchment"></div>
-      <div class="info" id="infoParchment">Click "Generate & Render" to create parchment-style map</div>
+      <div class="info" id="infoParchment">Click "Generate & Render" to create parchment-style map with texture overlay and drop shadows</div>
     </div>
     <div class="map-container">
-      <h3>Original Style (Bright Colors)</h3>
+      <h3>Original Style (Bright Colors, No Texture)</h3>
       <div id="svgContainerOriginal"></div>
-      <div class="info" id="infoOriginal">Click "Generate & Render" to create original-style map</div>
+      <div class="info" id="infoOriginal">Click "Generate & Render" to create original-style map without texture</div>
     </div>
   </div>
   
@@ -188,7 +194,7 @@
         const parchmentTime = performance.now() - renderStart;
         parchmentSVG = renderPreviewSVG({ width: 960, height: 540 }); // Get SVG string
         
-        infoParchment.textContent = `Rendered in ${parchmentTime.toFixed(2)}ms (parchment style - sepia tones, muted colors)`;
+        infoParchment.textContent = `Rendered in ${parchmentTime.toFixed(2)}ms (parchment style - texture overlay, pseudo-3D shadows, sepia tones)`;
         
         // Render with original config
         const renderStart2 = performance.now();
@@ -196,12 +202,12 @@
           width: 960,
           height: 540,
           container: originalContainer,
-          renderConfig: getOriginalRenderConfig(), // Original bright colors
+          renderConfig: getOriginalRenderConfig(), // Original bright colors, no texture
         });
         const originalTime = performance.now() - renderStart2;
         originalSVG = renderPreviewSVG({ width: 960, height: 540 }); // Get SVG string
         
-        infoOriginal.textContent = `Rendered in ${originalTime.toFixed(2)}ms (original style - vibrant colors)`;
+        infoOriginal.textContent = `Rendered in ${originalTime.toFixed(2)}ms (original style - vibrant colors, no texture, no shadows)`;
         
         exportParchmentBtn.disabled = false;
         exportOriginalBtn.disabled = false;

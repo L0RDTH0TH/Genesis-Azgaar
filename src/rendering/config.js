@@ -18,8 +18,8 @@ export const defaultRenderConfig = {
     landBase: '#f5f5dc',            // Beige for land
     lakeFreshwater: '#d4a574',      // Muted tan for freshwater
     lakeSaltwater: '#c9a671',       // Slightly darker tan for saltwater
-    stateBorderStroke: '#8b4513',   // Saddle brown for borders
-    provinceBorderStroke: '#8b4513', // Same for provinces
+    stateBorderStroke: '#654321',   // Dark brown ink for borders (parchment-style)
+    provinceBorderStroke: '#654321', // Same for provinces
     riverStroke: '#a0826d',         // Muted brown for rivers
     riverFill: '#d4a574',           // Light tan for river fill
     burgCapitalColor: '#5c4a3a',    // Dark brown for capitals
@@ -34,7 +34,7 @@ export const defaultRenderConfig = {
       showShadows: true,            // Enable relief shadows
     },
     states: {
-      opacity: 0.5,                 // Semi-transparent states
+      opacity: 0.4,                 // Lower opacity for parchment look (reduced from 0.5)
     },
     borders: {
       stateWidth: 1,
@@ -65,14 +65,20 @@ export const defaultRenderConfig = {
   
   effects: {
     parchment: {
-      enabled: false,               // Disabled by default (requires texture URL)
-      textureUrl: null,             // Path to parchment texture (e.g., 'textures/pergamena-small.jpg')
-      opacity: 0.8,
+      enabled: true,                // Enabled by default with CORS-friendly texture
+      // Using transparenttextures.com for seamless old paper texture (CORS-friendly)
+      textureUrl: 'https://www.transparenttextures.com/patterns/old-paper.png',
+      opacity: 0.7,                 // Lower opacity for subtle texture
       blendMode: 'multiply',        // SVG blend mode
+      // Note: If texture URL fails, set textureUrl to null and provide local asset later
     },
     pseudo3D: {
-      enabled: false,
+      enabled: true,                // Enabled by default for depth effect
       heightExaggeration: 1.0,
+      shadowOffsetX: 1.5,           // Shadow offset X
+      shadowOffsetY: 2,             // Shadow offset Y
+      shadowBlur: 3,                // Shadow blur radius
+      shadowOpacity: 0.4,           // Shadow opacity
     },
     sepia: {
       enabled: true,                // Enable sepia tone filter by default

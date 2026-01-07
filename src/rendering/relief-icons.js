@@ -4,6 +4,7 @@
  */
 
 import { getCellPolygonPath, pointInPolygon, poissonDiscSampler } from './utils.js';
+import { minmax } from '../utils/math.js';
 
 /**
  * Get relief icon symbol ID based on type
@@ -71,7 +72,7 @@ function getReliefIcon(cellIndex, height, grid, pack, mod) {
     type = 'hill';
   }
   
-  size = height > 70 ? (height - 45) * mod : Math.max(Math.min((height - 40) * mod, 6), 3);
+  size = height > 70 ? (height - 45) * mod : minmax((height - 40) * mod, 3, 6);
   
   return [getIcon(type), size];
 }
@@ -132,7 +133,8 @@ export function getReliefIconDefs() {
  * @param {Object} pack - Pack object
  * @param {Object} biomesData - Biome data with icons information
  * @param {Object} grid - Grid object (for temperature)
- * @param {Object} options - Rendering options {density, size}
+ * @param {Object} options - Rendering options {density, size, renderConfig}
+ * @param {Object} options.renderConfig - Render configuration for pseudo3D effects
  * @returns {string} SVG elements for relief icons
  */
 export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) {
@@ -171,15 +173,6 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
     if (cells.r && cells.r[i]) continue; // no icons on rivers
     const biome = cells.biome[i];
     
-    // For height < 50, ONLY place icons on forests/swamps (high-density biomes) with height 20-50
-    if (height < 50) {
-      if (!highDensityBiomes.has(biome)) continue; // Skip non-forest/swamp biomes
-      if (biomesData.iconsDensity[biome] === 0) continue;
-    } else {
-      // Relief icons (height >= 50) - skip for now to reduce density further
-      continue;
-    }
-    
     const polygon = getCellPolygonPath(i, pack);
     if (!polygon || polygon.length < 3) continue;
     
@@ -190,42 +183,67 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
     const minY = Math.min(...ys);
     const maxY = Math.max(...ys);
     
-    // Biome icons (forests/swamps only, height 20-50) - further reduced for ~200-300 total
+    // Place biome icons (height < 50) OR relief icons (height >= 50)
+    if (height < 50) {
+      // Biome icons only on high-density biomes
+      if (!highDensityBiomes.has(biome)) continue;
+      if (biomesData.iconsDensity[biome] === 0) continue;
+      
+      // Use original density calculation (matches original)
       const iconsDensity = biomesData.iconsDensity[biome] / 100;
-      // Use radius based on cellSize*0.5, increased for sparser distribution (4-6px equivalent)
-      const radius = radiusBase * 1.5; // 4-6px equivalent for sparse distribution
-      // Reduced probability to 0.1 for ~200 sparse icons (down from 0.15)
-      const probability = 0.1; // Fixed 0.1 probability for sparse distribution
-      if (Math.random() > probability) continue;
-    
-    const iconTypes = biomesData.icons[biome] || [];
-    if (iconTypes.length === 0) continue;
-    
-    // Limit to 1 icon per cell for sparsity
-    let sampled = 0;
-    for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
-      if (sampled >= 1) break; // Only 1 icon per cell
-      if (!pointInPolygon([cx, cy], polygon)) continue;
-      let h = (4 + Math.random()) * size;
-      const icon = getBiomeIcon(i, iconTypes, grid, pack);
-      if (!icon) continue;
-      if (icon === "#relief-grass-1") h *= 1.2;
-      relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
-      sampled++;
+      const radius = 2 / iconsDensity / density;
+      if (Math.random() > iconsDensity * 10) continue;
+      
+      const iconTypes = biomesData.icons[biome] || [];
+      if (iconTypes.length === 0) continue;
+      
+      // Place biome icons
+      for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (!pointInPolygon([cx, cy], polygon)) continue;
+        let h = (4 + Math.random()) * size;
+        const icon = getBiomeIcon(i, iconTypes, grid, pack);
+        if (!icon) continue;
+        if (icon === "#relief-grass-1") h *= 1.2;
+        relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
+      }
+    } else {
+      // Relief icons (mount/hill) for height >= 50 (ENABLED - Phase 1 fix)
+      const radius = 2 / density;
+      const [icon, h] = getReliefIcon(i, height, grid, pack, mod);
+      
+      // Place relief icons using Poisson sampling (matches original behavior)
+      for (const [cx, cy] of poissonDiscSampler(minX, minY, maxX, maxY, radius)) {
+        if (!pointInPolygon([cx, cy], polygon)) continue;
+        relief.push({i: icon, x: rn(cx - h, 2), y: rn(cy - h, 2), s: rn(h * 2, 2)});
+      }
     }
   }
   
   // Sort relief icons by y+size (bottom to top) for proper rendering order
   relief.sort((a, b) => (a.y + a.s) - (b.y + b.s));
   
-  // Generate SVG <use> elements
-  const reliefHTML = relief.map(r => 
-    `<use href="${r.i}" x="${r.x}" y="${r.y}" width="${r.s}" height="${r.s}"/>`
-  );
+  // Get pseudo3D config
+  const renderConfig = options.renderConfig || {};
+  const pseudo3D = renderConfig.effects?.pseudo3D || {};
+  const pseudo3DEnabled = pseudo3D.enabled !== false; // Default to enabled if not specified
+  
+  // Generate SVG elements with pseudo-3D shadows if enabled
+  const reliefHTML = relief.map(r => {
+    // Add CSS class for styling (e.g., relief-mountain, relief-hill)
+    const iconType = r.i.includes('mountain') ? 'relief-mountain' : (r.i.includes('hill') ? 'relief-hill' : 'relief-icon');
+    
+    if (pseudo3DEnabled) {
+      // Apply drop shadow filter for pseudo-3D effect
+      const iconElement = `<use href="${r.i}" x="${r.x}" y="${r.y}" width="${r.s}" height="${r.s}" class="${iconType}" filter="url(#dropShadow)"/>`;
+      return iconElement;
+    }
+    
+    return `<use href="${r.i}" x="${r.x}" y="${r.y}" width="${r.s}" height="${r.s}" class="${iconType}"/>`;
+  });
   
   // Debug logging
   if (typeof console !== 'undefined' && console.log && reliefHTML.length > 0) {
-    console.log(`[drawReliefIconsSVG] Generated ${reliefHTML.length} relief icons`);
+    console.log(`[drawReliefIconsSVG] Generated ${reliefHTML.length} relief icons${pseudo3DEnabled ? ' with pseudo-3D shadows' : ''}`);
   }
   
   return reliefHTML.join('');

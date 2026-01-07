@@ -284,10 +284,11 @@ function getBorderPath(vertices, vertexChain, discontinue) {
 function getGappedFillPaths(elementName, fill, waterGap, color, index) {
   let html = '';
   if (fill) {
-    html += `<path d="${fill}" fill="${color}" id="${elementName}${index}" />`;
+    // Add CSS class for styling (e.g., biome-0, state-1)
+    html += `<path d="${fill}" fill="${color}" id="${elementName}${index}" class="${elementName}-${index}" />`;
   }
   if (waterGap) {
-    html += `<path d="${waterGap}" fill="none" stroke="${color}" stroke-width="3" id="${elementName}-gap${index}" />`;
+    html += `<path d="${waterGap}" fill="none" stroke="${color}" stroke-width="3" id="${elementName}-gap${index}" class="${elementName}-gap-${index}" />`;
   }
   return html;
 }
@@ -486,9 +487,9 @@ export function drawBiomesSVG(pack, biomesData, colorScheme = null, renderConfig
       }
     }
     
-    // Combine all paths for each biome
+    // Combine all paths for each biome (add CSS class for styling)
     Object.entries(biomeGroups).forEach(([biomeId, paths]) => {
-      bodyPaths.push(`<g id="biome-${biomeId}">${paths.join('')}</g>`);
+      bodyPaths.push(`<g id="biome-${biomeId}" class="biome-${biomeId}">${paths.join('')}</g>`);
     });
 
     return bodyPaths.join('');
@@ -1765,6 +1766,15 @@ export function renderMapSVG(data, options = {}) {
 
   // Build SVG layers
   const layers = [];
+  
+  // 0. Parchment texture overlay (background layer, before ocean/land)
+  // Applied early so it affects all subsequent layers with blend mode
+  const parchmentEffect = renderConfig.effects?.parchment;
+  if (parchmentEffect?.enabled && parchmentEffect?.textureUrl) {
+    layers.push(
+      `<image id="texture-overlay" xlink:href="${parchmentEffect.textureUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${parchmentEffect.opacity ?? 0.7}" style="mix-blend-mode: ${parchmentEffect.blendMode || 'multiply'};" />`
+    );
+  }
 
   // 1. Ocean base - fill entire map with ocean color first
   layers.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${renderConfig.colors.oceanBase}" />`);
@@ -1808,13 +1818,14 @@ export function renderMapSVG(data, options = {}) {
   }
   // Always add biomes layer (even if empty) to maintain SVG structure
   const biomeOpacity = renderConfig.layers?.biomes?.opacity ?? 0.7;
-  layers.push(`<g id="biomes" opacity="${biomeOpacity}">${biomesSVG}</g>`);
+  // Add CSS class for biome styling (biome-* classes added in drawBiomesSVG)
+  layers.push(`<g id="biomes" class="biomes-layer" opacity="${biomeOpacity}">${biomesSVG}</g>`);
 
   // 5. States
   const statesSVG = drawStatesSVG(pack, renderConfig);
   if (statesSVG) {
-    const stateOpacity = renderConfig.layers?.states?.opacity ?? 0.5;
-    layers.push(`<g id="states" opacity="${stateOpacity}">${statesSVG}</g>`);
+    const stateOpacity = renderConfig.layers?.states?.opacity ?? 0.4;
+    layers.push(`<g id="states" class="states-layer" opacity="${stateOpacity}">${statesSVG}</g>`);
   }
 
   // 6. Rivers
@@ -1835,16 +1846,22 @@ export function renderMapSVG(data, options = {}) {
     layers.push(`<g id="routes">${routesSVG}</g>`);
   }
 
-  // 8. Relief icons (with SVG symbols)
+  // 8. Relief icons (with SVG symbols and pseudo-3D effects)
   let reliefSVG = '';
   try {
     // Use original relief icon rendering with SVG symbols (density 0.3 for ~200-300 icons)
-    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, { density: 0.3, size: 1 });
+    const reliefOptions = { 
+      density: renderConfig.layers?.relief?.density ?? 0.3, 
+      size: renderConfig.layers?.relief?.size ?? 1,
+      renderConfig: renderConfig // Pass config for pseudo3D effects
+    };
+    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, reliefOptions);
   } catch (error) {
     console.warn('Relief rendering failed:', error.message);
   }
   if (reliefSVG) {
-    layers.push(`<g id="relief">${reliefSVG}</g>`);
+    // Add CSS class for relief styling
+    layers.push(`<g id="relief" class="relief-layer">${reliefSVG}</g>`);
   }
 
   // 9. Burgs
@@ -1865,16 +1882,30 @@ export function renderMapSVG(data, options = {}) {
     layers.push(`<g id="markers">${markersSVG}</g>`);
   }
 
-  // 12. Parchment texture overlay (if enabled)
-  const parchmentEffect = renderConfig.effects?.parchment;
-  if (parchmentEffect?.enabled && parchmentEffect?.textureUrl) {
-    layers.push(
-      `<image id="texture-overlay" xlink:href="${parchmentEffect.textureUrl}" x="0" y="0" width="${width}" height="${height}" opacity="${parchmentEffect.opacity ?? 0.8}" style="mix-blend-mode: ${parchmentEffect.blendMode || 'multiply'};" />`
-    );
-  }
 
-  // Add relief icon symbol definitions
-  const defs = getReliefIconDefs();
+  // Add relief icon symbol definitions and filters for pseudo-3D effects
+  let defs = getReliefIconDefs();
+  
+  // Add drop shadow filter definition for pseudo-3D relief icons
+  const pseudo3D = renderConfig.effects?.pseudo3D || {};
+  if (pseudo3D.enabled !== false) {
+    const shadowBlur = pseudo3D.shadowBlur ?? 3;
+    const shadowOpacity = pseudo3D.shadowOpacity ?? 0.4;
+    defs += `
+  <defs>
+    <filter id="dropShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="${shadowBlur}"/>
+      <feOffset dx="${pseudo3D.shadowOffsetX ?? 1.5}" dy="${pseudo3D.shadowOffsetY ?? 2}" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="${shadowOpacity}"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>`;
+  }
 
   // Combine into complete SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
