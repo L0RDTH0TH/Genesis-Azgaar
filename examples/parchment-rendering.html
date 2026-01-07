@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Parchment Style Rendering Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #2a2a2a;
+      color: #fff;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button.secondary {
+      background: #2196F3;
+    }
+    button.secondary:hover {
+      background: #0b7dda;
+    }
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .map-container {
+      border: 2px solid #444;
+      background: #1a1a1a;
+      padding: 10px;
+    }
+    .map-container h3 {
+      margin-top: 0;
+      text-align: center;
+    }
+    #svgContainerParchment, #svgContainerOriginal {
+      border: 1px solid #666;
+      background: #000;
+      display: block;
+      margin: 0 auto;
+      width: 960px;
+      height: 540px;
+    }
+    #svgContainerParchment svg, #svgContainerOriginal svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+    }
+    .error {
+      color: #f44;
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a1a1a;
+      border-radius: 4px;
+    }
+    .success {
+      color: #4f4;
+      margin-top: 10px;
+      padding: 10px;
+      background: #1a2a1a;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Parchment Style Rendering Test</h1>
+  <p>This example demonstrates configurable rendering with parchment-style defaults (sepia tones, low saturation, vintage map aesthetic).</p>
+  <p><strong>Seed 42</strong> is used for both maps to ensure fidelity comparison.</p>
+  
+  <div class="controls">
+    <button id="generateBtn">Generate & Render Both Styles</button>
+    <button id="exportParchmentBtn" class="secondary" disabled>Export Parchment SVG</button>
+    <button id="exportOriginalBtn" class="secondary" disabled>Export Original SVG</button>
+  </div>
+
+  <div class="comparison">
+    <div class="map-container">
+      <h3>Parchment Style (Default)</h3>
+      <div id="svgContainerParchment"></div>
+      <div class="info" id="infoParchment">Click "Generate & Render" to create parchment-style map</div>
+    </div>
+    <div class="map-container">
+      <h3>Original Style (Bright Colors)</h3>
+      <div id="svgContainerOriginal"></div>
+      <div class="info" id="infoOriginal">Click "Generate & Render" to create original-style map</div>
+    </div>
+  </div>
+  
+  <div id="message"></div>
+
+  <script type="module">
+    // Import Delaunator (peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-genesis.esm.js';
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      renderPreviewSVG,
+      getDefaultRenderConfig,
+      getOriginalRenderConfig,
+    } from libraryPath;
+
+    const parchmentContainer = document.getElementById('svgContainerParchment');
+    const originalContainer = document.getElementById('svgContainerOriginal');
+    const generateBtn = document.getElementById('generateBtn');
+    const exportParchmentBtn = document.getElementById('exportParchmentBtn');
+    const exportOriginalBtn = document.getElementById('exportOriginalBtn');
+    const messageDiv = document.getElementById('message');
+    const infoParchment = document.getElementById('infoParchment');
+    const infoOriginal = document.getElementById('infoOriginal');
+
+    let parchmentSVG = null;
+    let originalSVG = null;
+
+    function showMessage(message, type = 'info') {
+      messageDiv.innerHTML = message;
+      messageDiv.className = type;
+    }
+
+    function clearMessage() {
+      messageDiv.innerHTML = '';
+      messageDiv.className = '';
+    }
+
+    // Generate and render both styles
+    generateBtn.addEventListener('click', () => {
+      try {
+        clearMessage();
+        showMessage('Generating map with seed 42...', 'info');
+        
+        // Initialize generators for both styles
+        initGenerator({ container: parchmentContainer });
+        
+        // Load options with seed 42
+        loadOptions({
+          seed: '42',
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000,
+          statesNumber: 18,
+          cultures: 12,
+          fullRendering: true,
+        });
+        
+        // Generate map once (same data for both)
+        const data = generateMap(Delaunator);
+        
+        // Render with parchment config (default)
+        const renderStart = performance.now();
+        renderPreviewSVG({
+          width: 960,
+          height: 540,
+          container: parchmentContainer,
+          renderConfig: getDefaultRenderConfig(), // Parchment style
+        });
+        const parchmentTime = performance.now() - renderStart;
+        parchmentSVG = renderPreviewSVG({ width: 960, height: 540 }); // Get SVG string
+        
+        infoParchment.textContent = `Rendered in ${parchmentTime.toFixed(2)}ms (parchment style - sepia tones, muted colors)`;
+        
+        // Render with original config
+        const renderStart2 = performance.now();
+        renderPreviewSVG({
+          width: 960,
+          height: 540,
+          container: originalContainer,
+          renderConfig: getOriginalRenderConfig(), // Original bright colors
+        });
+        const originalTime = performance.now() - renderStart2;
+        originalSVG = renderPreviewSVG({ width: 960, height: 540 }); // Get SVG string
+        
+        infoOriginal.textContent = `Rendered in ${originalTime.toFixed(2)}ms (original style - vibrant colors)`;
+        
+        exportParchmentBtn.disabled = false;
+        exportOriginalBtn.disabled = false;
+        
+        showMessage(
+          `Both maps rendered successfully! Parchment: ${parchmentTime.toFixed(2)}ms, Original: ${originalTime.toFixed(2)}ms`,
+          'success'
+        );
+        
+        console.log('Map data:', {
+          seed: data.seed,
+          gridCells: data.grid.cells.i.length,
+          packCells: data.pack.cells.i.length,
+        });
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Generation/rendering error:', error);
+      }
+    });
+
+    // Export parchment SVG
+    exportParchmentBtn.addEventListener('click', () => {
+      if (!parchmentSVG) {
+        showMessage('Please generate the map first', 'error');
+        return;
+      }
+      const blob = new Blob([parchmentSVG], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `azgaar-parchment-seed42-${Date.now()}.svg`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showMessage('Parchment SVG exported successfully', 'success');
+    });
+
+    // Export original SVG
+    exportOriginalBtn.addEventListener('click', () => {
+      if (!originalSVG) {
+        showMessage('Please generate the map first', 'error');
+        return;
+      }
+      const blob = new Blob([originalSVG], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `azgaar-original-seed42-${Date.now()}.svg`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showMessage('Original SVG exported successfully', 'success');
+    });
+  </script>
+</body>
+</html>

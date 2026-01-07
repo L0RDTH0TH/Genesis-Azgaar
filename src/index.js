@@ -22,6 +22,13 @@ export {
 export { getDefaultOptions, mergeOptions } from './options.js';
 export { RNG } from './utils/rng.js';
 
+// Render configuration exports
+export { 
+  getDefaultRenderConfig, 
+  getOriginalRenderConfig, 
+  mergeRenderConfig 
+} from './rendering/config.js';
+
 // Re-export core modules for advanced usage
 export * from './core/index.js';
 

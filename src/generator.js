@@ -721,7 +721,15 @@ export function renderPreviewSVG(options = {}) {
       height = height || state.data.options.mapHeight || 600;
     }
 
-    const svgString = renderMapSVG(state.data, { width, height });
+    // Pass renderConfig from options to renderMapSVG
+    const svgString = renderMapSVG(state.data, { 
+      width, 
+      height,
+      renderConfig: options.renderConfig,
+      colorScheme: options.colorScheme,
+      showOceanLayers: options.showOceanLayers,
+      oceanLayers: options.oceanLayers
+    });
 
     if (container) {
       // Append or replace SVG in container
