@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Parchment Test - Direct Source Imports</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #2a2a2a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 10px 5px;
+    }
+    button:hover {
+      background: #357abd;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    #svgContainer {
+      border: 2px solid #555;
+      background: #1a1a1a;
+      margin-top: 20px;
+      display: block;
+      width: 100%;
+      max-width: 1200px;
+    }
+    #status {
+      margin: 10px 0;
+      padding: 10px;
+      background: #333;
+      border-radius: 4px;
+      min-height: 60px;
+    }
+    .log {
+      font-family: monospace;
+      font-size: 12px;
+      color: #0f0;
+      margin: 2px 0;
+    }
+    .error {
+      color: #f00;
+    }
+    .warning {
+      color: #ff0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Simple Parchment Test - Direct Source Imports</h1>
+    <p>This test bypasses the bundle and uses direct source imports to verify parchment rendering.</p>
+    
+    <button id="generateBtn">Generate & Render Parchment Map (Seed 42)</button>
+    <button id="clearBtn">Clear</button>
+    
+    <div id="status"></div>
+    
+    <div id="svgContainer"></div>
+  </div>
+
+  <!-- Import map for bare module specifiers (delaunator, d3) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm",
+      "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm",
+      "d3-shape": "https://cdn.jsdelivr.net/npm/d3-shape@3/+esm",
+      "d3-color": "https://cdn.jsdelivr.net/npm/d3-color@3/+esm",
+      "d3-interpolate": "https://cdn.jsdelivr.net/npm/d3-interpolate@3/+esm",
+      "d3-scale": "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm"
+    }
+  }
+  </script>
+  <script type="module">
+    const statusEl = document.getElementById('status');
+    const containerEl = document.getElementById('svgContainer');
+    const generateBtn = document.getElementById('generateBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    
+    function log(message, type = 'log') {
+      const logEl = document.createElement('div');
+      logEl.className = `log ${type}`;
+      logEl.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      statusEl.appendChild(logEl);
+      console.log(message);
+      statusEl.scrollTop = statusEl.scrollHeight;
+    }
+    
+    function clearStatus() {
+      statusEl.innerHTML = '';
+      containerEl.innerHTML = '';
+    }
+    
+    clearBtn.addEventListener('click', clearStatus);
+    
+    // Direct source imports to bypass bundle
+    let MapGenerator, renderMapSVG, getDefaultRenderConfig;
+    
+    async function loadModules() {
+      try {
+        log('Loading modules from source...');
+        
+        // Import main library from source
+        const mainModule = await import('../src/index.js');
+        MapGenerator = mainModule.MapGenerator;
+        renderMapSVG = mainModule.renderMapSVG;
+        
+        // Import config directly from source
+        const configModule = await import('../src/rendering/config.js');
+        getDefaultRenderConfig = configModule.getDefaultRenderConfig;
+        
+        log('Modules loaded successfully!', 'log');
+        log(`MapGenerator: ${!!MapGenerator}`, 'log');
+        log(`renderMapSVG: ${!!renderMapSVG}`, 'log');
+        log(`getDefaultRenderConfig: ${!!getDefaultRenderConfig}`, 'log');
+        
+        return true;
+      } catch (error) {
+        log(`Failed to load modules: ${error.message}`, 'error');
+        console.error('Import error:', error);
+        return false;
+      }
+    }
+    
+    generateBtn.addEventListener('click', async () => {
+      if (!MapGenerator || !renderMapSVG || !getDefaultRenderConfig) {
+        log('Modules not loaded yet. Loading...', 'warning');
+        const loaded = await loadModules();
+        if (!loaded) {
+          log('Failed to load modules. Check console for errors.', 'error');
+          return;
+        }
+      }
+      
+      try {
+        generateBtn.disabled = true;
+        clearStatus();
+        log('Starting map generation (Seed 42)...');
+        
+        const generator = new MapGenerator({
+          seed: 42,
+          template: 'continents',
+          width: 960,
+          height: 540,
+          statesNumber: 18,
+          distanceFunction: 'manhattan'
+        });
+        
+        log('Generator created, generating map...');
+        const startTime = performance.now();
+        await generator.generateMap();
+        const genTime = performance.now() - startTime;
+        log(`Map generated in ${genTime.toFixed(2)}ms`);
+        
+        const data = generator.getMapData();
+        log(`Map data retrieved: ${data.pack ? 'pack exists' : 'no pack'}`);
+        
+        // Get default parchment config and explicitly enable all layers
+        const parchmentConfig = getDefaultRenderConfig();
+        log('Default config retrieved');
+        
+        // FORCE ENABLE ALL LAYERS
+        parchmentConfig.layers.relief = parchmentConfig.layers.relief || {};
+        parchmentConfig.layers.relief.enabled = true;
+        parchmentConfig.layers.relief.density = 1.5; // Increased density
+        
+        parchmentConfig.layers.rivers = parchmentConfig.layers.rivers || {};
+        parchmentConfig.layers.rivers.enabled = true;
+        parchmentConfig.layers.rivers.opacity = 1.0;
+        
+        parchmentConfig.layers.forests = parchmentConfig.layers.forests || {};
+        parchmentConfig.layers.forests.enabled = true;
+        
+        parchmentConfig.layers.coast = parchmentConfig.layers.coast || {};
+        parchmentConfig.layers.coast.enabled = true;
+        
+        parchmentConfig.effects.parchment = parchmentConfig.effects.parchment || {};
+        parchmentConfig.effects.parchment.enabled = true;
+        
+        parchmentConfig.effects.pseudo3D = parchmentConfig.effects.pseudo3D || {};
+        parchmentConfig.effects.pseudo3D.enabled = true;
+        
+        // Log config values
+        log('Parchment config applied:', 'log');
+        log(`  Ocean color: ${parchmentConfig.colors?.oceanBase}`, 'log');
+        log(`  Color scheme: ${parchmentConfig.colorScheme}`, 'log');
+        log(`  Parchment enabled: ${parchmentConfig.effects?.parchment?.enabled}`, 'log');
+        log(`  Parchment URL: ${parchmentConfig.effects?.parchment?.textureUrl}`, 'log');
+        log(`  Pseudo3D enabled: ${parchmentConfig.effects?.pseudo3D?.enabled}`, 'log');
+        log(`  Relief enabled: ${parchmentConfig.layers?.relief?.enabled}`, 'log');
+        log(`  Relief density: ${parchmentConfig.layers?.relief?.density}`, 'log');
+        log(`  Rivers enabled: ${parchmentConfig.layers?.rivers?.enabled}`, 'log');
+        log(`  Rivers opacity: ${parchmentConfig.layers?.rivers?.opacity}`, 'log');
+        log(`  Coast enabled: ${parchmentConfig.layers?.coast?.enabled}`, 'log');
+        
+        log('Rendering SVG...');
+        const renderStart = performance.now();
+        
+        const svgString = renderMapSVG(data, {
+          width: 960,
+          height: 540,
+          renderConfig: parchmentConfig
+        });
+        
+        const renderTime = performance.now() - renderStart;
+        log(`SVG rendered in ${renderTime.toFixed(2)}ms`);
+        
+        containerEl.innerHTML = svgString;
+        log('SVG injected into container');
+        
+        // Verify rendered SVG
+        const svg = containerEl.querySelector('svg');
+        if (svg) {
+          const oceanRect = svg.querySelector('rect[fill]');
+          const oceanColor = oceanRect ? oceanRect.getAttribute('fill') : 'not found';
+          const texture = svg.querySelector('image');
+          const reliefIcons = svg.querySelectorAll('#relief use, use[href*="relief"]');
+          const rivers = svg.querySelectorAll('#rivers path, path[class*="river"]');
+          const dropShadow = svg.querySelector('filter[id="dropShadow"], filter#dropShadow');
+          
+          log('SVG Verification:', 'log');
+          log(`  Ocean color: ${oceanColor} (expected: #d2b48c)`, oceanColor === '#d2b48c' ? 'log' : 'error');
+          log(`  Texture overlay: ${texture ? 'YES' : 'NO'}`, texture ? 'log' : 'error');
+          log(`  Relief icons: ${reliefIcons.length}`, reliefIcons.length > 0 ? 'log' : 'warning');
+          log(`  Rivers: ${rivers.length}`, rivers.length > 0 ? 'log' : 'warning');
+          log(`  Drop shadow filter: ${dropShadow ? 'YES' : 'NO'}`, dropShadow ? 'log' : 'error');
+          
+          if (texture) {
+            log(`  Texture URL: ${texture.getAttribute('xlink:href') || texture.getAttribute('href')}`, 'log');
+          }
+        } else {
+          log('ERROR: SVG not found in container!', 'error');
+        }
+        
+        log('✅ Rendering complete!', 'log');
+        
+      } catch (error) {
+        log(`ERROR: ${error.message}`, 'error');
+        console.error('Generation error:', error);
+        console.error(error.stack);
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+    
+    // Pre-load modules on page load
+    loadModules();
+  </script>
+</body>
+</html>

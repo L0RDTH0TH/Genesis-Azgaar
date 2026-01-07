@@ -1902,7 +1902,11 @@ export function renderMapSVG(data, options = {}) {
   }
 
   // 1. Ocean base - fill entire map with ocean color first
-  layers.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${renderConfig.colors.oceanBase}" />`);
+  const oceanColor = renderConfig.colors.oceanBase;
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[renderMapSVG] Using ocean color:', oceanColor);
+  }
+  layers.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${oceanColor}" />`);
 
   // 1.5. Ocean layers (fog/atmosphere) - with clipping and size options (Phase 2)
   if (options.showOceanLayers !== false) {
@@ -1954,15 +1958,59 @@ export function renderMapSVG(data, options = {}) {
   }
 
   // 6. Rivers
-  const riversSVG = drawRiversSVG(pack, renderConfig);
-  if (riversSVG) {
-    layers.push(`<g id="rivers">${riversSVG}</g>`);
+  const riversEnabled = renderConfig.layers?.rivers?.enabled !== false;
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[renderMapSVG] Rivers config:', { 
+      enabled: riversEnabled, 
+      opacity: renderConfig.layers?.rivers?.opacity,
+      strokeWidth: renderConfig.layers?.rivers?.strokeWidth,
+      strokeColor: renderConfig.colors?.riverStroke
+    });
+  }
+  if (riversEnabled) {
+    const riversSVG = drawRiversSVG(pack, renderConfig);
+    if (riversSVG) {
+      layers.push(`<g id="rivers">${riversSVG}</g>`);
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[renderMapSVG] Rivers SVG added (length: ' + riversSVG.length + ')');
+      }
+    } else {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[renderMapSVG] Rivers enabled but no SVG generated');
+      }
+    }
+  } else {
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[renderMapSVG] Rivers disabled by config');
+    }
   }
   
   // 6.5. Coast outline (white glowing effect - Skyrim-style)
-  const coastOutlineSVG = drawCoastOutlineSVG(pack, renderConfig);
-  if (coastOutlineSVG) {
-    layers.push(`<g id="coast-outline" class="coast-layer">${coastOutlineSVG}</g>`);
+  const coastEnabled = renderConfig.layers?.coast?.enabled !== false;
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[renderMapSVG] Coast outline config:', { 
+      enabled: coastEnabled, 
+      stroke: renderConfig.layers?.coast?.stroke,
+      width: renderConfig.layers?.coast?.width,
+      opacity: renderConfig.layers?.coast?.opacity
+    });
+  }
+  if (coastEnabled) {
+    const coastOutlineSVG = drawCoastOutlineSVG(pack, renderConfig);
+    if (coastOutlineSVG) {
+      layers.push(`<g id="coast-outline" class="coast-layer">${coastOutlineSVG}</g>`);
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[renderMapSVG] Coast outline SVG added (length: ' + coastOutlineSVG.length + ')');
+      }
+    } else {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[renderMapSVG] Coast outline enabled but no SVG generated');
+      }
+    }
+  } else {
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[renderMapSVG] Coast outline disabled by config');
+    }
   }
 
   // 7. Borders
@@ -1979,27 +2027,56 @@ export function renderMapSVG(data, options = {}) {
 
   // 8. Relief icons (with SVG symbols and pseudo-3D effects)
   let reliefSVG = '';
-  try {
-    // Use original relief icon rendering with SVG symbols
-    // Density multiplier applied in drawReliefIconsSVG (default 1.2 for dense mountains)
-    const baseDensity = 0.3;
-    const densityMultiplier = renderConfig.layers?.relief?.density ?? 1.0;
-    const finalDensity = baseDensity * densityMultiplier;
-    const reliefOptions = { 
-      density: baseDensity, // Base density (multiplied by config.layers.relief.density in function)
-      size: renderConfig.layers?.relief?.size ?? 1,
-      renderConfig: renderConfig // Pass config for pseudo3D effects and density multiplier
-    };
-    if (typeof console !== 'undefined' && console.log) {
-      console.log('[renderMapSVG] Relief rendering:', { baseDensity, densityMultiplier, finalDensity, pseudo3D: renderConfig.effects?.pseudo3D?.enabled });
-    }
-    reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, reliefOptions);
-  } catch (error) {
-    console.warn('Relief rendering failed:', error.message);
+  const reliefEnabled = renderConfig.layers?.relief?.enabled !== false;
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[renderMapSVG] Relief config:', { 
+      enabled: reliefEnabled,
+      density: renderConfig.layers?.relief?.density,
+      size: renderConfig.layers?.relief?.size,
+      heightScaling: renderConfig.layers?.relief?.heightScaling,
+      pseudo3D: renderConfig.effects?.pseudo3D?.enabled,
+      shadowOffsetX: renderConfig.effects?.pseudo3D?.shadowOffsetX,
+      shadowOffsetY: renderConfig.effects?.pseudo3D?.shadowOffsetY,
+      shadowBlur: renderConfig.effects?.pseudo3D?.shadowBlur
+    });
   }
-  if (reliefSVG) {
-    // Add CSS class for relief styling
-    layers.push(`<g id="relief" class="relief-layer">${reliefSVG}</g>`);
+  if (reliefEnabled) {
+    try {
+      // Use original relief icon rendering with SVG symbols
+      // Density multiplier applied in drawReliefIconsSVG (default 1.2 for dense mountains)
+      const baseDensity = 0.3;
+      const densityMultiplier = renderConfig.layers?.relief?.density ?? 1.0;
+      const finalDensity = baseDensity * densityMultiplier;
+      const reliefOptions = { 
+        density: baseDensity, // Base density (multiplied by config.layers.relief.density in function)
+        size: renderConfig.layers?.relief?.size ?? 1,
+        renderConfig: renderConfig // Pass config for pseudo3D effects and density multiplier
+      };
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[renderMapSVG] Relief rendering options:', { baseDensity, densityMultiplier, finalDensity, pseudo3D: renderConfig.effects?.pseudo3D?.enabled });
+      }
+      reliefSVG = drawReliefIconsSVG(pack, biomesData, data.grid || null, reliefOptions);
+      if (typeof console !== 'undefined' && console.log && reliefSVG) {
+        console.log('[renderMapSVG] Relief SVG generated (length: ' + reliefSVG.length + ')');
+      }
+    } catch (error) {
+      console.warn('Relief rendering failed:', error.message);
+    }
+    if (reliefSVG) {
+      // Add CSS class for relief styling
+      layers.push(`<g id="relief" class="relief-layer">${reliefSVG}</g>`);
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[renderMapSVG] Relief layer added to SVG');
+      }
+    } else {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[renderMapSVG] Relief enabled but no SVG generated');
+      }
+    }
+  } else {
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[renderMapSVG] Relief disabled by config');
+    }
   }
 
   // 9. Burgs

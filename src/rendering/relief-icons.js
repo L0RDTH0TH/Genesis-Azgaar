@@ -153,6 +153,18 @@ export function drawReliefIconsSVG(pack, biomesData, grid = null, options = {}) 
   const densityMultiplier = reliefConfig.density || 1.0;
   const density = baseDensity * densityMultiplier;
   const size = 2 * (options.size || 1);
+  
+  // Log config values being used
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[drawReliefIconsSVG] Config values:', {
+      baseDensity,
+      densityMultiplier,
+      finalDensity: density,
+      size,
+      heightScaling: reliefConfig.heightScaling,
+      pseudo3DEnabled: renderConfig.effects?.pseudo3D?.enabled
+    });
+  }
   const mod = 0.2 * size; // size modifier
   const heightScaling = reliefConfig.heightScaling !== false; // Default to true
   const relief = [];
