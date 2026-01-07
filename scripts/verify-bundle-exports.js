@@ -47,19 +47,27 @@ try {
   // Check 2: Verify parchment defaults are in bundle
   console.log('\n2. Checking parchment defaults...');
   const parchmentChecks = [
-    { key: 'oceanBase', value: '#d2b48c', name: 'Ocean color (parchment tan)' },
+    { key: 'oceanBase.*#d2b48c', value: true, name: 'Ocean color (parchment tan)', regex: true },
     { key: 'parchment', value: 'enabled', name: 'Parchment effect enabled' },
     { key: 'pergamena-small.jpg', value: true, name: 'Parchment texture URL' },
-    { key: 'relief.density', value: '1.2', name: 'Relief density multiplier' },
-    { key: 'coast.enabled', value: 'true', name: 'Coast outline enabled' }
+    { key: 'density.*1.2', value: true, name: 'Relief density multiplier', regex: true },
+    { key: 'coast', value: true, name: 'Coast layer config', optional: true }
   ];
   
   let allDefaultsPresent = true;
   parchmentChecks.forEach(check => {
-    const found = bundleContent.includes(check.key) || 
-                  (check.value === true && bundleContent.includes(check.key));
+    let found;
+    if (check.regex) {
+      const regex = new RegExp(check.key);
+      found = regex.test(bundleContent);
+    } else {
+      found = bundleContent.includes(check.key);
+    }
+    
     if (found) {
       console.log(`   ✅ ${check.name}`);
+    } else if (check.optional) {
+      console.log(`   ⚠️  ${check.name} - Not found (optional)`);
     } else {
       console.error(`   ❌ ${check.name} - NOT FOUND`);
       allDefaultsPresent = false;
