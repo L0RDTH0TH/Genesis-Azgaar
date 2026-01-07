@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Azgaar Genesis - Parchment Style Rendering Test</title>
+  <!-- Import map for bare module specifiers (delaunator) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm"
+    }
+  }
+  </script>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -133,11 +141,9 @@
     // Import Delaunator (peer dependency)
     import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
     
-    // Import the library (using dynamic import for dev vs production paths)
-    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const libraryPath = isDev 
-      ? '../src/index.js'  // Relative path from examples/ directory
-      : '../dist/azgaar-genesis.esm.js';
+    // Import the library (using bundled version which has all dependencies resolved)
+    // Note: Source files require import maps for d3 dependencies, so we use the bundled version
+    const libraryPath = '../dist/azgaar-genesis.esm.js';
     
     // Dynamic import is required for variable paths
     let initGenerator, loadOptions, generateMap, renderPreviewSVG, renderToSVG;
@@ -150,8 +156,85 @@
       generateMap = lib.generateMap;
       renderPreviewSVG = lib.renderPreviewSVG;
       renderToSVG = lib.renderToSVG;
-      getDefaultRenderConfig = lib.getDefaultRenderConfig;
-      getOriginalRenderConfig = lib.getOriginalRenderConfig;
+      
+      // Try to get renderConfig functions from bundle, fallback to direct import if not available
+      if (lib.getDefaultRenderConfig && lib.getOriginalRenderConfig) {
+        getDefaultRenderConfig = lib.getDefaultRenderConfig;
+        getOriginalRenderConfig = lib.getOriginalRenderConfig;
+      } else {
+        // Import directly from config file (if bundle doesn't export them)
+        try {
+          const configModule = await import('../src/rendering/config.js');
+          getDefaultRenderConfig = configModule.getDefaultRenderConfig;
+          getOriginalRenderConfig = configModule.getOriginalRenderConfig;
+          console.log('Render config functions imported from source file');
+        } catch (configError) {
+          console.warn('Could not import render config functions:', configError);
+          // Fallback: create simple config objects
+          getDefaultRenderConfig = () => ({
+            colorScheme: 'parchment',
+            colors: {
+              oceanBase: '#d2b48c',
+              landBase: '#f5f5dc',
+              lakeFreshwater: '#d4a574',
+              lakeSaltwater: '#c9a671',
+              stateBorderStroke: '#654321',
+              provinceBorderStroke: '#654321',
+              riverStroke: '#a0826d',
+              riverFill: '#d4a574',
+              burgCapitalColor: '#5c4a3a',
+              burgTownColor: '#7d6b5a',
+              routeStroke: '#8b7355',
+            },
+            layers: {
+              biomes: { opacity: 0.6, showShadows: true },
+              states: { opacity: 0.4 },
+              borders: { stateWidth: 1, stateDashArray: '2', provinceWidth: 0.5, provinceDashArray: '0 2' },
+              rivers: { strokeWidth: 0.5, showLabels: false },
+              burgs: { capitalSize: 1, townSize: 0.5, showLabels: true },
+              relief: { density: 1.2, size: 1, shadow: true, heightScaling: true },
+              coast: { enabled: true, stroke: '#ffffff', width: 2, opacity: 0.8, glowWidth: 3 },
+              labels: { stateLabelColor: '#5c4a3a', stateLabelStroke: '#f5f5dc', stateLabelStrokeWidth: 0.3 },
+            },
+            effects: {
+              parchment: { enabled: true, textureUrl: 'https://i2.wp.com/azgaar.files.wordpress.com/2019/07/pergamena-small.jpg', opacity: 0.65, blendMode: 'multiply' },
+              pseudo3D: { enabled: true, heightExaggeration: 1.0, shadowOffsetX: 2, shadowOffsetY: 3, shadowBlur: 4, shadowOpacity: 0.5 },
+              sepia: { enabled: true, amount: 0.4 },
+            },
+          });
+          getOriginalRenderConfig = () => ({
+            colorScheme: 'bright',
+            colors: {
+              oceanBase: '#b4d2f3',
+              landBase: '#eef6fb',
+              lakeFreshwater: '#a8c8e0',
+              lakeSaltwater: '#9bb5d1',
+              stateBorderStroke: '#56566d',
+              provinceBorderStroke: '#56566d',
+              riverStroke: '#6b93d6',
+              riverFill: '#a8c8e0',
+              burgCapitalColor: '#333',
+              burgTownColor: '#666',
+              routeStroke: '#8b7355',
+            },
+            layers: {
+              biomes: { opacity: 0.7, showShadows: false },
+              states: { opacity: 0.5 },
+              borders: { stateWidth: 1, stateDashArray: '2', provinceWidth: 0.5, provinceDashArray: '0 2' },
+              rivers: { strokeWidth: 0.5, showLabels: false },
+              burgs: { capitalSize: 1, townSize: 0.5, showLabels: true },
+              relief: { density: 0.3, size: 1, shadow: false },
+              coast: { enabled: false },
+              labels: { stateLabelColor: '#000000', stateLabelStroke: '#ffffff', stateLabelStrokeWidth: 0.3 },
+            },
+            effects: {
+              parchment: { enabled: false, textureUrl: null, opacity: 0.8, blendMode: 'multiply' },
+              pseudo3D: { enabled: false, heightExaggeration: 1.0 },
+              sepia: { enabled: false, amount: 0.4 },
+            },
+          });
+        }
+      }
       
       if (!initGenerator || !loadOptions || !generateMap || !renderPreviewSVG) {
         throw new Error('Required functions not found in library module');
