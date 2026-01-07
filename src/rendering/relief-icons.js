@@ -131,7 +131,7 @@ export function getReliefIconDefs() {
 /**
  * Draw relief icons using SVG symbols with enhanced density and height-based scaling
  * Supports pseudo-3D drop shadows and configurable density multiplier for dense mountain ranges
- * @param {Object} pack - Pack object with cells and vertices
+ * @param {Object} pack - Pack object
  * @param {Object} biomesData - Biome data with icons information
  * @param {Object} grid - Grid object (for temperature, optional)
  * @param {Object} options - Rendering options

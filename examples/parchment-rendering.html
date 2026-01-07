@@ -86,17 +86,6 @@
       border-radius: 4px;
     }
   </style>
-  <!-- Import map for d3 dependencies - must be before any module scripts -->
-  <script type="importmap">
-  {
-    "imports": {
-      "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm",
-      "d3-shape": "https://cdn.jsdelivr.net/npm/d3-shape@3/+esm",
-      "d3-scale": "https://cdn.jsdelivr.net/npm/d3-scale@4/+esm",
-      "d3-interpolate": "https://cdn.jsdelivr.net/npm/d3-interpolate@3/+esm"
-    }
-  }
-  </script>
 </head>
 <body>
   <h1>Azgaar Genesis - Final Parchment Style Rendering (Skyrim-Style)</h1>
@@ -145,55 +134,19 @@
     import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
     
     // Import the library
-    // Check if we're in dev mode (served from file:// or localhost)
-    const isDev = window.location.hostname === 'localhost' || 
-                  window.location.hostname === '127.0.0.1' ||
-                  window.location.protocol === 'file:';
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-genesis.esm.js';
     
-    // Use path appropriate for dev vs production
-    // Note: For dev mode, we use source files which require d3 dependencies
-    // The import map in <head> will resolve these automatically
-    // If import maps aren't supported, use the bundled version instead
-    const supportsImportMaps = 'noModule' in HTMLScriptElement.prototype;
-    const libraryPath = (isDev && supportsImportMaps)
-      ? '../src/index.js' 
-      : '../dist/azgaar-genesis.esm.js';
-    
-    if (isDev && !supportsImportMaps) {
-      console.warn('Import maps not supported, using bundled version instead');
-    }
-    
-    // Import library functions
-    console.log('Loading library from:', libraryPath);
-    let initGenerator, loadOptions, generateMap, renderPreviewSVG, renderToSVG, getDefaultRenderConfig, getOriginalRenderConfig;
-    
-    try {
-      const lib = await import(libraryPath);
-      initGenerator = lib.initGenerator;
-      loadOptions = lib.loadOptions;
-      generateMap = lib.generateMap;
-      renderPreviewSVG = lib.renderPreviewSVG;
-      renderToSVG = lib.renderToSVG;
-      getDefaultRenderConfig = lib.getDefaultRenderConfig;
-      getOriginalRenderConfig = lib.getOriginalRenderConfig;
-      console.log('Library loaded successfully', { 
-        hasInitGenerator: !!initGenerator,
-        hasRenderPreviewSVG: !!renderPreviewSVG,
-        hasRenderToSVG: !!renderToSVG
-      });
-    } catch (importError) {
-      console.error('Failed to import library from:', libraryPath, importError);
-      const messageDiv = document.getElementById('message');
-      if (messageDiv) {
-        messageDiv.innerHTML = `<div class="error">
-          <strong>Import Error:</strong> Failed to load library from ${libraryPath}<br/>
-          Error: ${importError.message}<br/>
-          <small>Make sure you're running this from a web server (not file://). 
-          Try: <code>python -m http.server</code> or <code>npx serve</code> from the azgaar-genesis-fork directory.</small>
-        </div>`;
-      }
-      throw importError;
-    }
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      renderPreviewSVG,
+      getDefaultRenderConfig,
+      getOriginalRenderConfig,
+    } from libraryPath;
 
     const parchmentContainer = document.getElementById('svgContainerParchment');
     const originalContainer = document.getElementById('svgContainerOriginal');
@@ -218,15 +171,13 @@
     }
 
     // Generate and render both styles
-    generateBtn.addEventListener('click', async () => {
+    generateBtn.addEventListener('click', () => {
       try {
         clearMessage();
         showMessage('Generating map with seed 42...', 'info');
-        console.log('Starting map generation...');
         
         // Initialize generators for both styles
         initGenerator({ container: parchmentContainer });
-        console.log('Generator initialized');
         
         // Load options with seed 42
         loadOptions({
@@ -238,83 +189,59 @@
           cultures: 12,
           fullRendering: true,
         });
-        console.log('Options loaded');
         
         // Generate map once (same data for both)
-        const startTime = performance.now();
         const data = generateMap(Delaunator);
-        const genTime = performance.now() - startTime;
-        console.log(`Map generated in ${genTime.toFixed(2)}ms`, { seed: data.seed, cells: data.pack?.cells?.i?.length });
         
         // Render with parchment config (default)
-        console.log('Rendering parchment style...');
         const parchmentConfig = getDefaultRenderConfig();
         const renderStart = performance.now();
-        // Render to container
-        try {
-          renderPreviewSVG({
-            width: 960,
-            height: 540,
-            container: parchmentContainer,
-            renderConfig: parchmentConfig, // Parchment style
-          });
-          const parchmentTime = performance.now() - renderStart;
-          console.log(`Parchment rendered to container in ${parchmentTime.toFixed(2)}ms`);
-          
-          // Get SVG string for export (must pass same renderConfig!)
-          parchmentSVG = renderToSVG({ 
-            width: 960, 
-            height: 540,
-            renderConfig: parchmentConfig 
-          });
-          console.log('Parchment SVG string captured for export', { length: parchmentSVG?.length });
-          
-          infoParchment.innerHTML = `Rendered in ${parchmentTime.toFixed(2)}ms<br/>
-            <strong>Final parchment style:</strong><br/>
-            • Texture: Azgaar's pergamena (opacity 0.65)<br/>
-            • Pseudo-3D: Strong shadows (offset 2/3, blur 4, opacity 0.5)<br/>
-            • Relief: 1.2x density, height-scaled<br/>
-            • Coast: White glowing outline (2px + 3px glow)<br/>
-            • Colors: Sepia tones, muted palette`;
-        } catch (renderError) {
-          console.error('Parchment rendering error:', renderError);
-          throw renderError;
-        }
+        renderPreviewSVG({
+          width: 960,
+          height: 540,
+          container: parchmentContainer,
+          renderConfig: parchmentConfig, // Parchment style
+        });
+        const parchmentTime = performance.now() - renderStart;
+        // Get SVG string with same config for export
+        parchmentSVG = renderPreviewSVG({ 
+          width: 960, 
+          height: 540,
+          renderConfig: parchmentConfig 
+        });
+        
+        infoParchment.innerHTML = `Rendered in ${parchmentTime.toFixed(2)}ms<br/>
+          <strong>Final parchment style:</strong><br/>
+          • Texture: Azgaar's pergamena (opacity 0.65)<br/>
+          • Pseudo-3D: Strong shadows (offset 2/3, blur 4, opacity 0.5)<br/>
+          • Relief: 1.2x density, height-scaled<br/>
+          • Coast: White glowing outline (2px + 3px glow)<br/>
+          • Colors: Sepia tones, muted palette`;
         
         // Render with original config
-        console.log('Rendering original style...');
         const originalConfig = getOriginalRenderConfig();
         const renderStart2 = performance.now();
-        // Render to container
-        try {
-          renderPreviewSVG({
-            width: 960,
-            height: 540,
-            container: originalContainer,
-            renderConfig: originalConfig, // Original bright colors, no texture
-          });
-          const originalTime = performance.now() - renderStart2;
-          console.log(`Original rendered to container in ${originalTime.toFixed(2)}ms`);
-          
-          // Get SVG string for export (must pass same renderConfig!)
-          originalSVG = renderToSVG({ 
-            width: 960, 
-            height: 540,
-            renderConfig: originalConfig 
-          });
-          console.log('Original SVG string captured for export', { length: originalSVG?.length });
-          
-          infoOriginal.innerHTML = `Rendered in ${originalTime.toFixed(2)}ms<br/>
-            <strong>Original style:</strong><br/>
-            • No texture overlay<br/>
-            • No pseudo-3D effects<br/>
-            • Standard relief density (0.3)<br/>
-            • No coast outline<br/>
-            • Vibrant colors (bright scheme)`;
-        } catch (renderError) {
-          console.error('Original rendering error:', renderError);
-          throw renderError;
-        }
+        renderPreviewSVG({
+          width: 960,
+          height: 540,
+          container: originalContainer,
+          renderConfig: originalConfig, // Original bright colors, no texture
+        });
+        const originalTime = performance.now() - renderStart2;
+        // Get SVG string with same config for export
+        originalSVG = renderPreviewSVG({ 
+          width: 960, 
+          height: 540,
+          renderConfig: originalConfig 
+        });
+        
+        infoOriginal.innerHTML = `Rendered in ${originalTime.toFixed(2)}ms<br/>
+          <strong>Original style:</strong><br/>
+          • No texture overlay<br/>
+          • No pseudo-3D effects<br/>
+          • Standard relief density (0.3)<br/>
+          • No coast outline<br/>
+          • Vibrant colors (bright scheme)`;
         
         exportParchmentBtn.disabled = false;
         exportOriginalBtn.disabled = false;
@@ -330,16 +257,8 @@
           packCells: data.pack.cells.i.length,
         });
       } catch (error) {
-        const errorMsg = error.message || String(error);
-        const errorStack = error.stack || 'No stack trace available';
-        showMessage(`Error: ${errorMsg}<br/><small>Check browser console for details</small>`, 'error');
+        showMessage(`Error: ${error.message}`, 'error');
         console.error('Generation/rendering error:', error);
-        console.error('Error stack:', errorStack);
-        console.error('Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        });
       }
     });
 

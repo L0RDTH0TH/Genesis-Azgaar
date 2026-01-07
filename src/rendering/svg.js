@@ -921,7 +921,7 @@ export function drawCoastOutlineSVG(pack, renderConfig = null) {
       return neibId >= 0 && neibId < cells.i.length && !isLand(neibId);
     });
     
-    if (hasWaterNeighbor) {
+    if (hasWaterNeighbor && !checked[`coast-${cellId}`]) {
       // Get coastline border for this cell
       const coastlineBorder = getCoastlineBorder(cellId, cells, vertices, isLand);
       if (coastlineBorder && !checked[`coast-${cellId}`]) {
@@ -1831,10 +1831,12 @@ export function renderMapSVG(data, options = {}) {
   if (parchmentEffect?.enabled && parchmentEffect?.textureUrl) {
     // Ensure mix-blend-mode is multiply for parchment effect
     const blendMode = parchmentEffect.blendMode || 'multiply';
-    // Use primary texture URL (Azgaar's pergamena) with fallback handling
-    // Note: Browser will handle CORS/loading errors gracefully
+    // Use primary texture URL (Azgaar's pergamena)
+    // Note: If primary URL fails to load, browser will show broken image icon
+    // In production, handle fallback via onerror handler or pre-check texture URL
+    const textureUrl = parchmentEffect.textureUrl;
     layers.push(
-      `<image id="texture-overlay" xlink:href="${parchmentEffect.textureUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${parchmentEffect.opacity ?? 0.65}" style="mix-blend-mode: ${blendMode};" />`
+      `<image id="texture-overlay" xlink:href="${textureUrl}" x="0" y="0" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice" opacity="${parchmentEffect.opacity ?? 0.65}" style="mix-blend-mode: ${blendMode};" />`
     );
   }
 
@@ -1895,7 +1897,7 @@ export function renderMapSVG(data, options = {}) {
   if (riversSVG) {
     layers.push(`<g id="rivers">${riversSVG}</g>`);
   }
-
+  
   // 6.5. Coast outline (white glowing effect - Skyrim-style)
   const coastOutlineSVG = drawCoastOutlineSVG(pack, renderConfig);
   if (coastOutlineSVG) {
