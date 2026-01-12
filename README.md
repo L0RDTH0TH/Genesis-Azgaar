@@ -1187,6 +1187,39 @@ console.log('Terrain match:', dataDiff.gridCellsMatch);
 - Changing `mapWidth`, `mapHeight`, `cellsDesired`, `points`, or `template` invalidates all cached phases
 - This ensures cache consistency - cached data from one map configuration cannot be incorrectly used with a different configuration
 
+**Unit Testing:**
+
+Automated unit tests are available for partial generation logic:
+
+```bash
+# Run all tests
+npm test
+
+# Run only partial generation tests
+npm test -- tests/partials.test.js
+
+# Run with coverage
+npm run test:coverage
+
+# Watch mode for development
+npm run test:watch
+```
+
+**Test Coverage:**
+
+The `tests/partials.test.js` test suite covers:
+- **Dependency Validation**: Tests RANK_CELLS hard requirement for political phases, standard dependency checks
+- **Cache Management**: Tests cache eviction (FIFO), typed array preservation, cache size limits
+- **Deep Merge**: Tests nested object merging, typed array preservation, array index merging, primitive overrides
+- **Fallbacks**: Tests fallback data generation for skipped phases (heights, temperatures, precipitation, rivers, biomes)
+- **Phase Seed Generation**: Tests consistent seed generation for reproducibility
+
+**Coverage Notes:**
+- Tests use Jest with ES module support (`--experimental-vm-modules`)
+- Tests are located in `tests/` directory
+- Coverage reports are generated in `coverage/` directory
+- See `jest.config.js` for configuration details
+
 **Cache Size Management:**
 
 The library automatically manages cache size to prevent unbounded memory growth during long sessions (e.g., iterative tweaking in World Builder):
