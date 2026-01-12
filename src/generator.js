@@ -44,6 +44,13 @@ import { createPackFromGrid } from './core/regraph.js';
 // import { renderMap } from './rendering/canvas.js'; // DEPRECATED
 import { renderMapSVG } from './rendering/svg.js';
 import { PHASES } from './utils/constants.js';
+import {
+  getPhaseSeed,
+  efficientDeepCopyOfRelevantData,
+  getFallbackForPhase,
+  restorePhaseData,
+} from './partials.js';
+import { DependencyError } from './utils/errors.js';
 
 // Re-export PHASES for convenience
 export { PHASES };
@@ -120,9 +127,13 @@ function createSimplifiedPack(grid, options) {
  * @returns {Object} Generated map data {grid, pack, options, seed}
  */
 function generateMapInternal(options, DelaunatorClass) {
-  // Initialize RNG with seed
+  // Initialize main seed
   const seed = options.seed || String(Date.now());
-  const rng = new RNG(seed);
+  const skipPhases = options.skipPhases || [];
+  
+  // Initialize data structure
+  let grid = null;
+  let mapCoordinates = null;
 
   // Phase 1: Voronoi diagram generation
   // Delaunator is required as a peer dependency
@@ -132,33 +143,194 @@ function generateMapInternal(options, DelaunatorClass) {
     );
   }
   
-  const grid = createVoronoiDiagram(
-    {
-      mapWidth: options.mapWidth,
-      mapHeight: options.mapHeight,
-      cellsDesired: options.cellsDesired,
-    },
-    rng,
-    DelaunatorClass
-  );
+  if (!skipPhases.includes(PHASES.VORONOI)) {
+    // Run Voronoi phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.VORONOI);
+    const rng = new RNG(phaseSeed);
+    
+    grid = createVoronoiDiagram(
+      {
+        mapWidth: options.mapWidth,
+        mapHeight: options.mapHeight,
+        cellsDesired: options.cellsDesired,
+      },
+      rng,
+      DelaunatorClass
+    );
+    
+    // Cache Voronoi data
+    state.cached[PHASES.VORONOI] = efficientDeepCopyOfRelevantData(PHASES.VORONOI, { grid });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.VORONOI]) {
+      // Initialize minimal grid structure for restoration
+      grid = {
+        cells: { i: [], h: [], c: [] },
+        points: [],
+        vertices: {},
+        features: [],
+      };
+      restorePhaseData(PHASES.VORONOI, state.cached[PHASES.VORONOI], { grid });
+    } else {
+      // Voronoi is foundational - cannot skip without cache
+      throw new DependencyError(
+        PHASES.VORONOI,
+        PHASES.VORONOI,
+        `Cannot skip ${PHASES.VORONOI} phase without cached data. Voronoi diagram is required for all subsequent phases.`
+      );
+    }
+  }
 
   // Phase 2: Heightmap generation
-  const heights = generateHeightmap({ grid, options, rng, template: options.template });
-  grid.cells.h = heights;
+  if (!skipPhases.includes(PHASES.HEIGHTMAP)) {
+    // Run heightmap phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.HEIGHTMAP);
+    const rng = new RNG(phaseSeed);
+    
+    const heights = generateHeightmap({ grid, options, rng, template: options.template });
+    grid.cells.h = heights;
+    
+    // Cache heightmap data
+    state.cached[PHASES.HEIGHTMAP] = efficientDeepCopyOfRelevantData(PHASES.HEIGHTMAP, { grid });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.HEIGHTMAP]) {
+      restorePhaseData(PHASES.HEIGHTMAP, state.cached[PHASES.HEIGHTMAP], { grid });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.HEIGHTMAP, { grid, options });
+      if (fallback && fallback.grid?.cells?.h) {
+        grid.cells.h = fallback.grid.cells.h;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.HEIGHTMAP} phase`);
+        }
+      } else {
+        throw new DependencyError(
+          PHASES.HEIGHTMAP,
+          PHASES.HEIGHTMAP,
+          `Cannot skip ${PHASES.HEIGHTMAP} phase without cached data or valid fallback.`
+        );
+      }
+    }
+  }
 
   // Phase 3: Grid-level feature detection
-  markupGrid({ grid });
+  if (!skipPhases.includes(PHASES.GRID_MARKUP)) {
+    // Run grid markup phase
+    markupGrid({ grid });
+    
+    // Cache grid markup data
+    state.cached[PHASES.GRID_MARKUP] = efficientDeepCopyOfRelevantData(PHASES.GRID_MARKUP, { grid });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.GRID_MARKUP]) {
+      restorePhaseData(PHASES.GRID_MARKUP, state.cached[PHASES.GRID_MARKUP], { grid });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.GRID_MARKUP, { grid, options });
+      if (fallback && fallback.grid) {
+        if (fallback.grid.cells) {
+          if (fallback.grid.cells.f) grid.cells.f = fallback.grid.cells.f;
+          if (fallback.grid.cells.b) grid.cells.b = fallback.grid.cells.b;
+          if (fallback.grid.cells.t) grid.cells.t = fallback.grid.cells.t;
+        }
+        if (fallback.grid.features) grid.features = fallback.grid.features;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.GRID_MARKUP} phase`);
+        }
+      } else {
+        // Grid markup is not critical, continue with empty features
+        if (!grid.cells.f) grid.cells.f = createTypedArray({ maxValue: 65535, length: grid.cells.i.length });
+        if (!grid.cells.b) grid.cells.b = new Uint8Array(grid.cells.i.length);
+        if (!grid.cells.t) grid.cells.t = new Int8Array(grid.cells.i.length);
+        if (!grid.features) grid.features = [];
+      }
+    }
+  }
 
   // Phase 4: Calculate map coordinates
-  const mapCoordinates = calculateMapCoordinates(options, options.mapWidth, options.mapHeight);
+  if (!skipPhases.includes(PHASES.MAP_COORDINATES)) {
+    // Run map coordinates phase
+    mapCoordinates = calculateMapCoordinates(options, options.mapWidth, options.mapHeight);
+    
+    // Cache map coordinates
+    state.cached[PHASES.MAP_COORDINATES] = efficientDeepCopyOfRelevantData(PHASES.MAP_COORDINATES, { mapCoordinates });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.MAP_COORDINATES]) {
+      restorePhaseData(PHASES.MAP_COORDINATES, state.cached[PHASES.MAP_COORDINATES], { mapCoordinates: null });
+      mapCoordinates = state.cached[PHASES.MAP_COORDINATES].mapCoordinates;
+    } else {
+      // Try fallback (recalculate)
+      mapCoordinates = calculateMapCoordinates(options, options.mapWidth, options.mapHeight);
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`Recalculating ${PHASES.MAP_COORDINATES} phase (no cache available)`);
+      }
+    }
+  }
 
   // Phase 5: Temperature calculation
-  const temperatures = calculateTemperatures({ grid, options, mapCoordinates });
-  grid.cells.temp = temperatures;
+  if (!skipPhases.includes(PHASES.TEMPERATURES)) {
+    // Run temperature phase
+    const temperatures = calculateTemperatures({ grid, options, mapCoordinates });
+    grid.cells.temp = temperatures;
+    
+    // Cache temperature data
+    state.cached[PHASES.TEMPERATURES] = efficientDeepCopyOfRelevantData(PHASES.TEMPERATURES, { grid });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.TEMPERATURES]) {
+      restorePhaseData(PHASES.TEMPERATURES, state.cached[PHASES.TEMPERATURES], { grid });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.TEMPERATURES, { grid, options });
+      if (fallback && fallback.grid?.cells?.temp) {
+        grid.cells.temp = fallback.grid.cells.temp;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.TEMPERATURES} phase`);
+        }
+      } else {
+        throw new DependencyError(
+          PHASES.TEMPERATURES,
+          PHASES.TEMPERATURES,
+          `Cannot skip ${PHASES.TEMPERATURES} phase without cached data or valid fallback.`
+        );
+      }
+    }
+  }
 
   // Phase 6: Precipitation generation
-  const precipitation = generatePrecipitation({ grid, options, rng, mapCoordinates });
-  grid.cells.prec = precipitation;
+  if (!skipPhases.includes(PHASES.PRECIPITATION)) {
+    // Run precipitation phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.PRECIPITATION);
+    const rng = new RNG(phaseSeed);
+    
+    const precipitation = generatePrecipitation({ grid, options, rng, mapCoordinates });
+    grid.cells.prec = precipitation;
+    
+    // Cache precipitation data
+    state.cached[PHASES.PRECIPITATION] = efficientDeepCopyOfRelevantData(PHASES.PRECIPITATION, { grid });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.PRECIPITATION]) {
+      restorePhaseData(PHASES.PRECIPITATION, state.cached[PHASES.PRECIPITATION], { grid });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.PRECIPITATION, { grid, options });
+      if (fallback && fallback.grid?.cells?.prec) {
+        grid.cells.prec = fallback.grid.cells.prec;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.PRECIPITATION} phase`);
+        }
+      } else {
+        throw new DependencyError(
+          PHASES.PRECIPITATION,
+          PHASES.PRECIPITATION,
+          `Cannot skip ${PHASES.PRECIPITATION} phase without cached data or valid fallback.`
+        );
+      }
+    }
+  }
 
   // Phase 7: Create pack from grid
   // Use full Voronoi pack if fullRendering is enabled or container (SVG) is provided

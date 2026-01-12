@@ -64,3 +64,14 @@ export class NoCanvasError extends GeneratorError {
     super(message);
   }
 }
+
+/**
+ * Thrown when a phase dependency is missing (e.g., skipping Voronoi without cache)
+ */
+export class DependencyError extends GeneratorError {
+  constructor(phaseName, dependency, message) {
+    super(message || `Cannot execute ${phaseName}: required dependency ${dependency} is missing. Either run ${dependency} first or provide cached data.`);
+    this.phaseName = phaseName;
+    this.dependency = dependency;
+  }
+}
