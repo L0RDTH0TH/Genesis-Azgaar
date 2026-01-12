@@ -956,3 +956,46 @@ export function restorePhaseData(phaseName, cachedData, currentData) {
       console.warn(`No restore logic defined for phase: ${phaseName}`);
   }
 }
+
+/**
+ * Manage cache size by evicting oldest entries when limit is exceeded.
+ * Uses insertion order (Object.keys maintains insertion order in modern JS).
+ * 
+ * @param {Object} cached - Cached phases object (state.cached)
+ * @param {number} maxPhases - Maximum number of phases to cache
+ * @returns {number} Number of phases evicted (0 if none)
+ */
+export function manageCacheSize(cached, maxPhases) {
+  if (!cached || typeof cached !== 'object') {
+    return 0;
+  }
+  
+  const cachedPhases = Object.keys(cached);
+  const currentSize = cachedPhases.length;
+  
+  if (currentSize <= maxPhases) {
+    return 0; // No eviction needed
+  }
+  
+  // Calculate how many to evict
+  const toEvict = currentSize - maxPhases;
+  
+  // Evict oldest entries (first in insertion order)
+  // Object.keys maintains insertion order in modern JavaScript
+  const phasesToEvict = cachedPhases.slice(0, toEvict);
+  
+  for (const phase of phasesToEvict) {
+    delete cached[phase];
+  }
+  
+  // Warn if eviction happened
+  if (typeof console !== 'undefined' && console.warn) {
+    console.warn(
+      `Cache evicted ${toEvict} oldest phase(s) (${phasesToEvict.join(', ')}) ` +
+      `to stay under maxCachedPhases limit (${maxPhases}). ` +
+      `Current cache size: ${currentSize - toEvict}/${maxPhases}`
+    );
+  }
+  
+  return toEvict;
+}

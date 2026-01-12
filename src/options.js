@@ -80,6 +80,7 @@ const DEFAULT_OPTIONS = {
 
   // Partial generation support (Iteration 2)
   skipPhases: [], // Array of phase names to skip (e.g., ['terrain', 'politics'])
+  maxCachedPhases: 8, // Maximum number of phases to cache (prevents unbounded memory growth)
 };
 
 /**
@@ -202,6 +203,8 @@ function validateOption(key, value) {
       return value === '°C' || value === '°F' ? value : DEFAULT_OPTIONS.temperatureScale;
     case 'fullRendering':
       return value === true || value === false ? value : DEFAULT_OPTIONS.fullRendering;
+    case 'maxCachedPhases':
+      return minmax(Math.round(value), 3, 20);
     default:
       return value;
   }

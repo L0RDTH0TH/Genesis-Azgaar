@@ -1187,6 +1187,30 @@ console.log('Terrain match:', dataDiff.gridCellsMatch);
 - Changing `mapWidth`, `mapHeight`, `cellsDesired`, `points`, or `template` invalidates all cached phases
 - This ensures cache consistency - cached data from one map configuration cannot be incorrectly used with a different configuration
 
+**Cache Size Management:**
+
+The library automatically manages cache size to prevent unbounded memory growth during long sessions (e.g., iterative tweaking in World Builder):
+
+- **`maxCachedPhases` option** (default: 8): Maximum number of phases to cache
+  - When the cache exceeds this limit, the oldest cached phases are evicted (FIFO)
+  - Default of 8 allows ~8 full generation runs worth of phases without memory issues
+  - Adjustable via `loadOptions({ maxCachedPhases: 12 })` (range: 3-20)
+  
+- **Automatic eviction**: Cache size is checked after each phase that caches data
+  - If cache exceeds `maxCachedPhases`, oldest entries are removed
+  - A console warning is logged when eviction occurs (for debugging)
+  
+- **Use cases**: Useful for long sessions where you repeatedly generate partial maps:
+  ```javascript
+  // Iterative tweaking scenario
+  for (let i = 0; i < 20; i++) {
+    generatePartial([PHASES.STATES]); // Only regenerate states
+    // Cache automatically evicts oldest phases to stay under limit
+  }
+  ```
+
+**Note:** Cache eviction uses insertion order (oldest first). This ensures that recently cached phases are preserved, which is optimal for iterative workflows.
+
 ## Testing Recommendations
 
 ### Testing Partial Generation

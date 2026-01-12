@@ -51,6 +51,7 @@ import {
   restorePhaseData,
   validatePhaseDependencies,
   deepMerge,
+  manageCacheSize,
 } from './partials.js';
 import { DependencyError } from './utils/errors.js';
 
@@ -162,6 +163,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache Voronoi data
     state.cached[PHASES.VORONOI] = efficientDeepCopyOfRelevantData(PHASES.VORONOI, { grid });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.VORONOI]) {
@@ -194,6 +196,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache heightmap data
     state.cached[PHASES.HEIGHTMAP] = efficientDeepCopyOfRelevantData(PHASES.HEIGHTMAP, { grid });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.HEIGHTMAP]) {
@@ -223,6 +226,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache grid markup data
     state.cached[PHASES.GRID_MARKUP] = efficientDeepCopyOfRelevantData(PHASES.GRID_MARKUP, { grid });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.GRID_MARKUP]) {
@@ -257,6 +261,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache map coordinates
     state.cached[PHASES.MAP_COORDINATES] = efficientDeepCopyOfRelevantData(PHASES.MAP_COORDINATES, { mapCoordinates });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.MAP_COORDINATES]) {
@@ -279,6 +284,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache temperature data
     state.cached[PHASES.TEMPERATURES] = efficientDeepCopyOfRelevantData(PHASES.TEMPERATURES, { grid });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.TEMPERATURES]) {
@@ -312,6 +318,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache precipitation data
     state.cached[PHASES.PRECIPITATION] = efficientDeepCopyOfRelevantData(PHASES.PRECIPITATION, { grid });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.PRECIPITATION]) {
@@ -470,6 +477,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache pack creation data
     state.cached[PHASES.PACK_CREATION] = efficientDeepCopyOfRelevantData(PHASES.PACK_CREATION, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Simplified pack (faster, for headless/data-only use)
     pack = createSimplifiedPack(grid, options);
@@ -511,6 +519,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache rivers data
     state.cached[PHASES.RIVERS] = efficientDeepCopyOfRelevantData(PHASES.RIVERS, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.RIVERS]) {
@@ -539,6 +548,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache biomes data
     state.cached[PHASES.BIOMES] = efficientDeepCopyOfRelevantData(PHASES.BIOMES, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.BIOMES]) {
@@ -566,6 +576,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache pack markup data
     state.cached[PHASES.PACK_MARKUP] = efficientDeepCopyOfRelevantData(PHASES.PACK_MARKUP, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.PACK_MARKUP]) {
@@ -660,6 +671,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache cluster merge data
     state.cached[PHASES.CLUSTER_MERGE] = efficientDeepCopyOfRelevantData(PHASES.CLUSTER_MERGE, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.CLUSTER_MERGE]) {
@@ -683,6 +695,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache rank cells data (mainly for dependency tracking)
     state.cached[PHASES.RANK_CELLS] = efficientDeepCopyOfRelevantData(PHASES.RANK_CELLS, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Rank cells modifies existing data, no restoration needed but validate dependencies
     if (typeof console !== 'undefined' && console.warn) {
@@ -704,6 +717,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache cultures data
     state.cached[PHASES.CULTURES] = efficientDeepCopyOfRelevantData(PHASES.CULTURES, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.CULTURES]) {
@@ -738,6 +752,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache burgs data
     state.cached[PHASES.BURGS] = efficientDeepCopyOfRelevantData(PHASES.BURGS, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.BURGS]) {
@@ -768,6 +783,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache states data
     state.cached[PHASES.STATES] = efficientDeepCopyOfRelevantData(PHASES.STATES, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.STATES]) {
@@ -804,6 +820,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache provinces data
     state.cached[PHASES.PROVINCES] = efficientDeepCopyOfRelevantData(PHASES.PROVINCES, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.PROVINCES]) {
@@ -845,6 +862,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache religions data
     state.cached[PHASES.RELIGIONS] = efficientDeepCopyOfRelevantData(PHASES.RELIGIONS, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.RELIGIONS]) {
@@ -884,6 +902,7 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Cache emblems data (stored in states/cultures)
     state.cached[PHASES.EMBLEMS] = efficientDeepCopyOfRelevantData(PHASES.EMBLEMS, { grid, pack });
+    manageCacheSize(state.cached, options.maxCachedPhases || 8);
   } else {
     // Try to restore from cache
     if (state.cached[PHASES.EMBLEMS]) {
@@ -1034,6 +1053,11 @@ export function loadOptions(curatedParams = {}) {
     
     // Merge with defaults and validate
     const merged = mergeOptions(curatedParams);
+    
+    // Enforce cache size limit (after merge to get maxCachedPhases value)
+    if (!structuralOptionsChanged) {
+      manageCacheSize(state.cached, merged.maxCachedPhases || 8);
+    }
     
     // Validate key options that might cause issues
     if (merged.mapWidth <= 0 || merged.mapHeight <= 0) {
@@ -1195,6 +1219,9 @@ export function generatePartial(phasesToRun, DelaunatorClass = null) {
     } else {
       state.data = data;
     }
+    
+    // Enforce cache size limit after partial generation
+    manageCacheSize(state.cached, state.options.maxCachedPhases || 8);
     
     return state.data;
   } catch (error) {
