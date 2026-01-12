@@ -2,9 +2,9 @@
 
 **Modular JavaScript library fork of Azgaar's Fantasy Map Generator for Genesis Mythos integration**
 
-## 🎉 Phase 3 Complete - Production Ready! 🎉
+## 🎉 Production Ready - Modular Library Complete! 🎉
 
-The library is now **production-ready** with a complete stateful API, optional canvas rendering, and distributable bundles. See [`PHASE3_COMPLETE.md`](PHASE3_COMPLETE.md) for full details.
+The library is now **production-ready** with a complete stateful API, SVG rendering, and distributable bundles. All core generation algorithms maintain 100% fidelity with the original Azgaar generator.
 
 ## Overview
 
@@ -50,59 +50,28 @@ npm run preview
 
 ## Current Status
 
-**Phase 1: Setup & Initial Fork** ✅ Complete
+✅ **Production Ready** - The library is fully functional and ready for integration into Genesis Mythos.
 
-- Fork structure created
-- Upstream repository cloned into `original/` for reference
-- Target directory structure established
-- Build configuration initialized
+**Core Features:**
+- ✅ Modular ES6 architecture with clean separation of concerns
+- ✅ Complete map generation pipeline (100% fidelity with original Azgaar)
+- ✅ Stateful public API with error handling
+- ✅ SVG rendering with all layers (ocean, biomes, states, borders, rivers, burgs)
+- ✅ Headless mode for data-only generation
+- ✅ JSON export optimized for Godot import
+- ✅ Production-ready bundles (ESM/UMD/minified)
+- ✅ Comprehensive examples and documentation
 
-**Phase 2: Modularization** ✅ Complete
+**Validation:**
+- ✅ **Data Fidelity**: 100% - All core algorithms produce identical results to original Azgaar
+- ✅ **Performance**: Excellent - 1.3s average for 10k cells, 2.5s for 20k cells
+- ✅ **Seed Reproducibility**: Perfect - Same seed + options = identical output
+- ✅ **API Correctness**: Complete - All error cases handled, tests passing
 
-- Core generation modules extracted to `src/core/`
-- Options system with validation and clamping
-- Full map generation pipeline implemented
-- Headless operation working
-
-**Phase 3: Rendering Control & Headless API Polish** ✅ **COMPLETE**
-
-- **Sub-Phase 3.1: Rendering Module** ✅ Complete
-  - Basic canvas rendering implemented (`src/rendering/canvas.js`)
-  - Ocean layers, lakes, and landmass rendering
-  - Example HTML file for testing (`examples/canvas-basic.html`)
-  - Rendering porting guide and API specification documents created
-  
-- **Sub-Phase 3.2: Public API Finalization** ✅ Complete
-  - Stateful generator API implemented (`src/generator.js`)
-  - Singleton state management
-  - All 5 public API functions: `initGenerator`, `loadOptions`, `generateMap`, `getMapData`, `renderPreview`
-  - Custom error classes (`InitializationError`, `InvalidOptionError`, etc.)
-  - Full API example (`examples/canvas-preview.html`)
-  - Complete API documentation in README and `docs/api-spec.md`
-  
-- **Sub-Phase 3.3: Examples & Documentation** ✅ Complete
-  - 5 comprehensive example files created
-  - Headless JSON generation example
-  - Godot WebView integration demo
-  - Minimal working example
-  - Options demonstration with live preview
-  - Performance testing suite
-  - Complete documentation with Godot integration notes
-  
-- **Sub-Phase 3.4: Build Configuration & Bundling** ✅ Complete
-  - Production build configuration with Vite
-  - Three bundle variants: UMD, ESM, and minified UMD
-  - External dependencies (D3/Delaunator) configured
-  - Build scripts and versioning (v0.3.0)
-  - Build documentation and deployment guide
-  
-- **Sub-Phase 3.5: Final Validation & Polish** ✅ Complete
-  - Validation metrics documented (`docs/validation-metrics.md`)
-  - Performance profiling completed (`docs/performance-report.md`)
-  - Lake rendering improved (filled circles per cell)
-  - Jest tests added for API error handling
-  - Full regression testing with built bundles
-  - README updated with Phase 3 completion status
+See detailed reports in `docs/`:
+- [`docs/validation-metrics.md`](docs/validation-metrics.md) - Data structure comparison
+- [`docs/performance-report.md`](docs/performance-report.md) - Performance profiling results
+- [`docs/api-spec.md`](docs/api-spec.md) - Complete API documentation
 
 ## Public API
 
@@ -271,43 +240,271 @@ See [`docs/api-spec.md`](docs/api-spec.md) for complete API documentation includ
 - JSON schema for `getMapData()`
 - Usage flow examples
 
-### JSON Schema
+### JSON Export Structure
 
-The `getMapData()` function returns a structured JSON object optimized for Godot import:
+The `getMapData()` function returns a structured JSON object optimized for Godot import. The structure is flat (no circular references) and uses standard JavaScript arrays (not TypedArrays) for JSON compatibility.
+
+**Complete JSON Schema:**
 
 ```json
 {
-  "seed": "string",
-  "options": { /* full merged options */ },
-  "grid": {
-    "cells": {
-      "i": [/* cell indices */],
-      "h": [/* heights 0-100 */],
-      "t": [/* cell types */],
-      "temp": [/* temperatures */],
-      "prec": [/* precipitation */],
-      "f": [/* feature IDs */],
-      "b": [/* biome IDs */]
-    },
-    "points": [[x, y], ...],
-    "vertices": { /* Voronoi vertices */ },
-    "features": [/* grid-level features */]
+  "seed": "string",                    // Seed used for generation
+  "options": {                         // Full merged options object
+    "mapWidth": 960,
+    "mapHeight": 540,
+    "points": 4,
+    "statesNumber": 18,
+    "cultures": 12,
+    // ... all other options
   },
-  "pack": {
-    "cells": { /* pack cell data */ },
-    "vertices": { /* pack vertices */ },
-    "features": [/* pack features (lakes, islands) */],
-    "burgs": [/* settlements */],
-    "states": [/* political entities */],
-    "rivers": [/* river paths */],
-    "cultures": [/* culture data */],
-    "religions": [/* religion data */],
-    "provinces": [/* province data */]
+  "grid": {                            // Grid-level data (Voronoi diagram)
+    "cells": {
+      "i": [0, 1, 2, ...],             // Cell indices
+      "h": [20, 45, 67, ...],          // Heights (0-100, 20+ = land)
+      "t": [0, 1, -1, ...],            // Cell types (0=land, 1=ocean, -1=coast)
+      "temp": [15, 20, 25, ...],       // Temperatures (°C)
+      "prec": [50, 100, 150, ...],     // Precipitation values
+      "f": [0, 1, 0, ...],             // Feature IDs (0=none, >0=feature)
+      "b": [3, 5, 7, ...]              // Biome IDs (0-12)
+    },
+    "points": [[x1, y1], [x2, y2], ...], // Voronoi cell center points
+    "vertices": {                      // Voronoi vertices (for rendering)
+      "p": [[x, y], ...],              // Vertex coordinates
+      "v": [[v1, v2, v3], ...],        // Adjacent vertices per vertex
+      "c": [[c1, c2, c3], ...]         // Adjacent cells per vertex
+    },
+    "features": [                      // Grid-level features
+      { "i": 123, "type": "lake", ... }
+    ]
+  },
+  "pack": {                            // Pack-level data (refined Voronoi)
+    "cells": {
+      "i": [0, 1, 2, ...],             // Pack cell indices
+      "p": [[x, y], ...],              // Pack cell center points
+      "h": [20, 45, 67, ...],          // Heights (interpolated from grid)
+      "biome": [3, 5, 7, ...],         // Biome IDs per pack cell
+      "state": [0, 1, 1, ...],         // State IDs (0=neutral)
+      "culture": [0, 1, 2, ...],       // Culture IDs
+      "province": [0, 1, 1, ...],      // Province IDs
+      "v": [[v1, v2, ...], ...],      // Vertex indices per cell (for polygon rendering)
+      "vCoords": [[[x,y], ...], ...],  // Polygon coordinates per cell
+      "area": [1.5, 2.3, ...],         // Cell areas
+      // ... other cell properties
+    },
+    "vertices": {                      // Pack vertices
+      "p": [[x, y], ...],              // Vertex coordinates
+      "v": [[v1, v2, v3], ...],        // Adjacent vertices
+      "c": [[c1, c2, c3], ...]         // Adjacent cells
+    },
+    "features": [                      // Pack features (lakes, islands)
+      {
+        "i": 123,
+        "type": "lake",
+        "cells": [123, 124, 125],
+        "freshwater": true,
+        // ... feature properties
+      }
+    ],
+    "burgs": [                        // Settlements
+      {
+        "i": 0,
+        "cell": 123,
+        "x": 456.7,
+        "y": 234.5,
+        "name": "Capital City",
+        "capital": true,
+        "population": 50000,
+        "culture": 1,
+        "state": 1,
+        // ... burg properties
+      }
+    ],
+    "states": [                        // Political entities
+      {
+        "i": 1,
+        "name": "Kingdom of Example",
+        "capital": 0,                  // Burg index
+        "color": "#aabbcc",
+        "area": 1234.5,
+        "population": 100000,
+        // ... state properties
+      }
+    ],
+    "rivers": [                        // River paths
+      {
+        "i": 0,
+        "cells": [123, 124, 125],
+        "source": 123,
+        "mouth": 125,
+        "widthFactor": 1.5,
+        "sourceWidth": 2,
+        // ... river properties
+      }
+    ],
+    "cultures": [                      // Culture data
+      {
+        "i": 1,
+        "name": "Example Culture",
+        "base": "european",
+        "color": "#ff0000",
+        // ... culture properties
+      }
+    ],
+    "religions": [                     // Religion data
+      {
+        "i": 1,
+        "name": "Example Religion",
+        "type": "monotheistic",
+        // ... religion properties
+      }
+    ],
+    "provinces": [                     // Province data
+      {
+        "i": 1,
+        "state": 1,
+        "name": "Province Name",
+        // ... province properties
+      }
+    ]
   }
 }
 ```
 
-All arrays use standard JavaScript arrays (not TypedArrays) for JSON compatibility. Circular references are resolved, and internal temporary data is excluded.
+**Key Objects/Arrays for Godot Import:**
+
+1. **`grid.cells.h`** - Heightmap data (0-100, 20+ = land)
+2. **`grid.cells.biome`** - Biome IDs per grid cell
+3. **`pack.cells.state`** - State IDs per pack cell (0 = neutral/water)
+4. **`pack.cells.biome`** - Biome IDs per pack cell
+5. **`pack.burgs`** - All settlements with coordinates, names, populations
+6. **`pack.states`** - All political entities with names, capitals, colors
+7. **`pack.rivers`** - River paths with cell sequences
+8. **`pack.features`** - Lakes and islands with cell lists
+9. **`pack.cells.vCoords`** - Polygon coordinates for rendering (if `fullRendering: true`)
+
+**Data Type Conversions:**
+- TypedArrays (`Uint8Array`, `Int16Array`, etc.) → Standard JavaScript arrays
+- Circular references resolved (e.g., `pack.cells.c` neighbor arrays)
+- Internal temporary data excluded (e.g., `cells.s` suitability scores not exported)
+- All numeric values preserved as-is (no rounding or truncation)
+
+**Size Considerations:**
+- 10K cells: ~3-4MB JSON
+- 20K cells: ~6-8MB JSON
+- 50K cells: ~15-20MB JSON
+
+For large maps, consider compressing JSON or using binary formats in Godot.
+
+### Default Options and Behavior
+
+The library replicates original Azgaar default behavior exactly. Default options are defined in `src/options.js` and match the original generator's defaults:
+
+**Key Defaults:**
+- `mapWidth: 960, mapHeight: 540` - Standard map dimensions
+- `points: 4` - Maps to 10,000 cells (via `CELLS_DENSITY_MAP`)
+- `statesNumber: 18` - Number of political states
+- `cultures: 12` - Number of cultures
+- `landPercentage: 40` - Target land coverage (40% for continent template)
+- `temperatureEquator: 27, temperatureNorthPole: -30, temperatureSouthPole: -15` - Climate defaults
+- `prec: 100` - Precipitation percentage
+
+**Option Loading Process:**
+1. `loadOptions()` merges user-provided options with `DEFAULT_OPTIONS`
+2. Each option is validated and clamped via `validateOption()`:
+   - `mapWidth/mapHeight`: Clamped to 240-10000
+   - `statesNumber`: Clamped to 0-100, rounded
+   - `cultures`: Clamped to 1-100, rounded
+   - `points`: Clamped to 1-13, rounded (maps to 1K-100K cells)
+   - All numeric options have min/max bounds matching original Azgaar
+3. Unknown options are included but warned (for forward compatibility)
+4. `cellsDesired` is auto-calculated from `points` value
+
+**Hardcoded Fallbacks:**
+- If `seed` is `null`, generates seed from `Date.now()`
+- If `template` is `null`, uses random template selection
+- If `mapSize` is `null`, auto-calculated from template
+- If `longitude` is `null`, auto-calculated from template
+- If `manors` is `1000` or `'auto'`, uses auto-calculation based on map size
+
+**Parameter Mapping to Original UI Controls:**
+
+| Original UI Control | Options Parameter | Default | Range |
+|-------------------|------------------|---------|-------|
+| Map Width slider | `mapWidth` | 960 | 240-10000 |
+| Map Height slider | `mapHeight` | 540 | 135-10000 |
+| Points slider | `points` | 4 | 1-13 (maps to 1K-100K cells) |
+| States slider | `statesNumber` | 18 | 0-100 |
+| Cultures slider | `cultures` | 12 | 1-100 |
+| Religions slider | `religionsNumber` | 6 | 0-50 |
+| Temperature Equator | `temperatureEquator` | 27 | -50 to 50 |
+| Temperature North Pole | `temperatureNorthPole` | -30 | -50 to 50 |
+| Precipitation | `prec` | 100 | 0-500 |
+| Land Percentage | `landPercentage` | 40 | 1-90 |
+| Template dropdown | `template` | null (random) | null or template ID |
+
+### Seed Reproducibility Guarantees
+
+**Perfect Reproducibility:** The library guarantees that the same seed + same options = identical output.
+
+**How It Works:**
+1. **Seeded RNG**: Uses Alea PRNG (same algorithm as original Azgaar) initialized with seed string
+2. **Deterministic Pipeline**: All random operations use the seeded RNG, not `Math.random()`
+3. **Seed Format**: Accepts string or number, converted to string internally
+4. **RNG Instance**: Created once per generation and passed to all generation phases
+
+**Example:**
+```javascript
+// Same seed + same options = identical output
+loadOptions({ seed: '42', mapWidth: 960, mapHeight: 540, statesNumber: 18 });
+const data1 = generateMap(Delaunator);
+const json1 = getMapData();
+
+// Regenerate with same seed/options
+loadOptions({ seed: '42', mapWidth: 960, mapHeight: 540, statesNumber: 18 });
+const data2 = generateMap(Delaunator);
+const json2 = getMapData();
+
+// json1 and json2 are identical (deep equality)
+```
+
+**Seed Generation:**
+- If `seed` is `null` or not provided, generates random seed: `String(Math.floor(Math.random() * 1e9))`
+- Generated seed is stored in state and included in `getMapData()` output
+- You can use the stored seed to regenerate identical maps
+
+### Headless Mode vs. Preview Mode
+
+**Headless Mode** (Data-Only Generation):
+- No DOM dependencies
+- No canvas or container required
+- Fastest generation (no rendering overhead)
+- Perfect for server-side or data-only use cases
+
+```javascript
+// Headless mode - no rendering
+initGenerator({ container: null });
+loadOptions({ seed: '42' });
+const data = generateMap(Delaunator);
+const json = getMapData(); // Export JSON only
+// renderPreview() is a no-op in headless mode
+```
+
+**Preview Mode** (With Rendering):
+- Requires container element for SVG rendering
+- Can render to SVG string or append to DOM
+- Full visual output with all layers
+
+```javascript
+// Preview mode - with rendering
+const container = document.getElementById('mapContainer');
+initGenerator({ container });
+loadOptions({ seed: '42' });
+const data = generateMap(Delaunator);
+renderPreviewSVG(); // Renders to container
+// Or: const svgString = renderPreviewSVG({ width: 1920, height: 1080 });
+```
+
+**Note:** Canvas rendering is deprecated. Use SVG rendering (`renderPreviewSVG()`) instead.
 
 ## Features
 
@@ -346,20 +543,58 @@ MIT License - preserved from original Azgaar repository.
 
 Based on: https://github.com/Azgaar/Fantasy-Map-Generator
 
-## Building the Library
+## Build Process
+
+### How Bundles Are Created
+
+The build process uses **Vite** to bundle the modular ES6 source code into distributable formats:
+
+1. **Entry Point**: `src/index.js` exports all public API functions
+2. **Bundling**: Vite bundles all `src/` modules into single files
+3. **External Dependencies**: D3 and Delaunator are marked as external (not bundled)
+4. **Output Formats**: ESM (ES Module) and UMD (Universal Module Definition)
+5. **Minification**: Optional minification for production builds
+6. **Source Maps**: Generated for non-minified builds (for debugging)
+
+**Build Configuration** (`vite.config.js`):
+- Library mode with entry point `src/index.js`
+- External dependencies: `delaunator` (required), `d3` (optional)
+- Output formats: `es` (ESM) and `umd` (UMD)
+- Minification via esbuild (for minified builds)
+- Source maps enabled for development builds
+
+**Bundle Verification**:
+After each build, `scripts/verify-bundle-exports.js` runs automatically to:
+- Verify all exports are present and callable
+- Validate default render config values
+- Ensure bundle includes latest code changes
 
 ### Build Commands
 
 ```bash
-# Build all variants (UMD, ESM, and minified UMD)
+# Build all variants (UMD, ESM, and minified)
 npm run build
 
-# Build only development variants (UMD + ESM, no minification)
+# Build development variants (UMD + ESM, no minification, with source maps)
 npm run build:dev
+
+# Build production variant (ESM only, minified)
+npm run build:prod
 
 # Build only minified UMD
 npm run build:min
 ```
+
+**Build Output:**
+- `dist/azgaar-genesis.esm.js` - ES Module bundle (~400KB uncompressed)
+- `dist/azgaar-genesis.umd.js` - UMD bundle (~400KB uncompressed)
+- `dist/azgaar-genesis.min.js` - Minified ESM bundle (~200KB uncompressed)
+- `dist/*.map` - Source maps (for debugging)
+
+**Embedding in Godot WebView:**
+1. Copy `dist/azgaar-genesis.esm.js` to `res://assets/ui_web/js/azgaar/`
+2. Include Delaunator (peer dependency) via CDN or local file
+3. Import in HTML: `import { ... } from './js/azgaar/azgaar-genesis.esm.js'`
 
 ### Output Files
 
@@ -853,31 +1088,310 @@ See detailed reports:
 - [`docs/validation-metrics.md`](docs/validation-metrics.md) - Data structure comparison
 - [`docs/performance-report.md`](docs/performance-report.md) - Performance profiling results
 
+## Testing Recommendations
+
+### Testing Partial Generation
+
+The library supports partial generation through the `skipPhases` option and `generatePartial()` API. Test files are provided in `examples/` to verify fidelity and performance:
+
+**Test Files:**
+- `examples/full-gen.html` - Baseline full generation test
+- `examples/partial-skip.html` - Test using `skipPhases` option (skips political phases)
+- `examples/partial-run.html` - Test using `generatePartial()` API (runs only specific phases)
+
+**Running Tests:**
+
+1. **Build the library:**
+   ```bash
+   npm run build:dev
+   ```
+
+2. **Start dev server:**
+   ```bash
+   npm run dev
+   ```
+
+3. **Open test files in browser:**
+   - Navigate to `http://localhost:5173/examples/full-gen.html`
+   - Then open `http://localhost:5173/examples/partial-skip.html` in a new tab
+   - Compare results visually and check console logs
+
+**What to Verify:**
+
+1. **Fidelity Testing:**
+   - Same seed + same options should produce identical terrain data
+   - Skipped phases should not affect terrain generation
+   - Partial runs should preserve existing data correctly
+
+2. **Performance Testing:**
+   - Measure time saved by skipping phases
+   - Verify cache is working (second run with same skip should be faster)
+   - Compare full generation vs. partial generation times
+
+3. **Data Consistency:**
+   - Terrain data (heights, biomes, rivers) should match between full and partial runs
+   - Political data (states, cultures, burgs) should be absent when skipped
+   - Partial runs should merge correctly with existing data
+
+**Example Test Workflow:**
+
+```javascript
+// 1. Generate full map
+initGenerator({ container });
+loadOptions({ seed: 'test-42', mapWidth: 960, mapHeight: 540 });
+const fullData = generateMap(Delaunator);
+const fullTime = performance.now() - startTime;
+
+// 2. Generate partial (terrain only)
+loadOptions({ 
+  seed: 'test-42', 
+  skipPhases: [PHASES.CULTURES, PHASES.BURGS, PHASES.STATES] 
+});
+const partialData = generateMap(Delaunator);
+const partialTime = performance.now() - startTime;
+
+// 3. Compare results
+console.log('Time saved:', fullTime - partialTime);
+console.log('Terrain match:', 
+  JSON.stringify(fullData.grid.cells.h) === JSON.stringify(partialData.grid.cells.h)
+);
+```
+
+**Visual Diff Utility:**
+
+A simple SVG comparison utility is available in `examples/svg-diff.js`:
+
+```javascript
+import { compareSVG, compareMapData } from './examples/svg-diff.js';
+
+// Compare SVG outputs
+const svgDiff = compareSVG(fullSVG, partialSVG);
+console.log('SVG identical:', svgDiff.identical);
+
+// Compare map data
+const dataDiff = compareMapData(fullData, partialData);
+console.log('Terrain match:', dataDiff.gridCellsMatch);
+```
+
+**Expected Results:**
+
+- **Terrain Fidelity:** 100% match for same seed (heights, biomes, rivers identical)
+- **Performance Gain:** 30-50% time savings when skipping political phases
+- **Data Integrity:** Skipped phases produce empty/default data as expected
+- **Cache Efficiency:** Second run with same skips uses cache (near-instant)
+
+## Testing Recommendations
+
+### Testing Partial Generation
+
+The library supports partial generation through the `skipPhases` option and `generatePartial()` API. Test files are provided in `examples/` to verify fidelity and performance:
+
+**Test Files:**
+- `examples/full-gen.html` - Baseline full generation test
+- `examples/partial-skip.html` - Test using `skipPhases` option (skips political phases)
+- `examples/partial-run.html` - Test using `generatePartial()` API (runs only specific phases)
+
+**Running Tests:**
+
+1. **Build the library:**
+   ```bash
+   npm run build:dev
+   ```
+
+2. **Start dev server:**
+   ```bash
+   npm run dev
+   ```
+
+3. **Open test files in browser:**
+   - Navigate to `http://localhost:5173/examples/full-gen.html`
+   - Then open `http://localhost:5173/examples/partial-skip.html` in a new tab
+   - Compare results visually and check console logs
+
+**What to Verify:**
+
+1. **Fidelity Testing:**
+   - Same seed + same options should produce identical terrain data
+   - Skipped phases should not affect terrain generation
+   - Partial runs should preserve existing data correctly
+
+2. **Performance Testing:**
+   - Measure time saved by skipping phases
+   - Verify cache is working (second run with same skip should be faster)
+   - Compare full generation vs. partial generation times
+
+3. **Data Consistency:**
+   - Terrain data (heights, biomes, rivers) should match between full and partial runs
+   - Political data (states, cultures, burgs) should be absent when skipped
+   - Partial runs should merge correctly with existing data
+
+**Example Test Workflow:**
+
+```javascript
+// 1. Generate full map
+initGenerator({ container });
+loadOptions({ seed: 'test-42', mapWidth: 960, mapHeight: 540 });
+const fullData = generateMap(Delaunator);
+const fullTime = performance.now() - startTime;
+
+// 2. Generate partial (terrain only)
+loadOptions({ 
+  seed: 'test-42', 
+  skipPhases: [PHASES.CULTURES, PHASES.BURGS, PHASES.STATES] 
+});
+const partialData = generateMap(Delaunator);
+const partialTime = performance.now() - startTime;
+
+// 3. Compare results
+console.log('Time saved:', fullTime - partialTime);
+console.log('Terrain match:', 
+  JSON.stringify(fullData.grid.cells.h) === JSON.stringify(partialData.grid.cells.h)
+);
+```
+
+**Visual Diff Utility:**
+
+A simple SVG comparison utility is available in `examples/svg-diff.js`:
+
+```javascript
+import { compareSVG, compareMapData } from './examples/svg-diff.js';
+
+// Compare SVG outputs
+const svgDiff = compareSVG(fullSVG, partialSVG);
+console.log('SVG identical:', svgDiff.identical);
+
+// Compare map data
+const dataDiff = compareMapData(fullData, partialData);
+console.log('Terrain match:', dataDiff.gridCellsMatch);
+```
+
+**Expected Results:**
+
+- **Terrain Fidelity:** 100% match for same seed (heights, biomes, rivers identical)
+- **Performance Gain:** 30-50% time savings when skipping political phases
+- **Data Integrity:** Skipped phases produce empty/default data as expected
+- **Cache Efficiency:** Second run with same skips uses cache (near-instant)
+
+### Using Examples
+
+The `examples/` directory contains HTML files for testing:
+
+1. **`examples/canvas-preview.html`** - Full API demonstration with interactive controls
+2. **`examples/headless-json.html`** - Headless JSON generation test
+3. **`examples/godot-demo.html`** - Godot WebView integration pattern
+4. **`examples/minimal-example.html`** - Minimal working example
+5. **`examples/options-demo.html`** - Options showcase with live preview
+6. **`examples/performance-test.html`** - Performance benchmarking
+
+**Running Examples:**
+```bash
+npm run dev
+# Then open http://localhost:5173/examples/canvas-preview.html
+```
+
+### Testing Seed Reproducibility
+
+```javascript
+// Test that same seed produces identical output
+const seed = '42';
+loadOptions({ seed, mapWidth: 960, mapHeight: 540 });
+const data1 = generateMap(Delaunator);
+const json1 = getMapData();
+
+// Regenerate
+loadOptions({ seed, mapWidth: 960, mapHeight: 540 });
+const data2 = generateMap(Delaunator);
+const json2 = getMapData();
+
+// Compare (should be identical)
+console.assert(JSON.stringify(json1) === JSON.stringify(json2), 'Reproducibility failed!');
+```
+
+### Unit Tests
+
+```bash
+npm test              # Run all tests
+npm run test:watch   # Watch mode
+npm run test:coverage # With coverage report
+```
+
+Tests are located in `tests/` and use Jest.
+
+## Maintenance Notes
+
+### Syncing with Upstream
+
+The fork is based on [Azgaar's Fantasy-Map-Generator](https://github.com/Azgaar/Fantasy-Map-Generator). To sync with upstream:
+
+1. **Add upstream remote** (if not already added):
+   ```bash
+   git remote add upstream https://github.com/Azgaar/Fantasy-Map-Generator.git
+   ```
+
+2. **Fetch upstream changes**:
+   ```bash
+   git fetch upstream
+   ```
+
+3. **Merge upstream master** (resolve conflicts in favor of our modular code):
+   ```bash
+   git merge upstream/master
+   ```
+
+4. **Test after merge**:
+   - Generate map with seed 42 and default options
+   - Compare data/SVG output to pre-merge
+   - Verify no regressions
+
+5. **Commit merge**:
+   ```bash
+   git commit -m "chore:sync-upstream - Merged latest Azgaar master (YYYY-MM-DD)"
+   ```
+
+**Current Upstream Sync Status:**
+- Last checked: 2026-01-08
+- Upstream repository: https://github.com/Azgaar/Fantasy-Map-Generator
+- Latest upstream commit (as of Jan 2026): ~0feca43 from Jan 5, 2026
+- Sync frequency: Monthly (recommended)
+
+**Conflict Resolution Strategy:**
+- Core generation algorithms: Preserve our modular ES6 implementations
+- Options system: Keep our centralized validation/clamping
+- Rendering: Prefer our SVG-first approach
+- API: Maintain our stateful API design
+- UI components: Upstream UI changes not applicable (we're headless)
+
+### Archived Files
+
+Vestigial files from the original upstream and early fork stages have been archived in `archive/` for cleanliness while preserving history/reference. See [`archive/README.md`](archive/README.md) for details.
+
+**Archive Contents:**
+- `archive/audits/` - Phase completion reports, investigation reports, audit documents
+- `archive/tests/` - Test output files, test scripts, testing reports
+- `archive/ui/` - Full upstream UI example (full-azgaar-ui)
+- `archive/jsons/` - Sample JSON output files
+- `archive/svgs/` - Sample SVG output files
+- `archive/misc/` - Temporary files and artifacts
+
+These files are no longer part of the active modular library but are preserved for reference.
+
 ## Known Limitations
 
-### Rendering Layers (Phase 3 Scope)
+### Rendering
 
-The following rendering layers are **not yet implemented** (expected for Phase 3):
+- **Canvas rendering is deprecated** - Use SVG rendering (`renderPreviewSVG()`) instead
+- **SVG rendering is production-ready** - Includes all layers: ocean, biomes, states, borders, rivers, burgs
 
-- ❌ Texture overlay
-- ❌ Terrain/Heightmap shading
-- ❌ Biome color fills
-- ❌ River paths
-- ❌ Burg icons and labels
-- ❌ State borders and labels
-- ❌ Province borders
-- ❌ Markers and other overlays
+### Data Generation
 
-**Status**: Basic layers (ocean, lakes, landmass) are implemented. Additional layers will be added in future phases.
+- **100% fidelity** with original Azgaar algorithms
+- **Perfect seed reproducibility** - Same seed + options = identical output
+- **All core features implemented** - Heightmap, biomes, cultures, states, burgs, rivers, religions, provinces
 
-### Pack Structure
+## License
 
-- Simplified reGraph (mirrors grid structure)
-- Full refined Voronoi pack will be implemented in future phases
+MIT License - preserved from original Azgaar repository.
 
-**Note**: Data generation is complete and accurate. Only visual rendering layers are incomplete.
+## Original Repository
 
-## Next Steps
-
-- **Phase 4**: Integration Testing - Build bundle and test in Genesis Mythos WebView
-- **Future Phases**: Complete rendering layers, full reGraph implementation
+Based on: https://github.com/Azgaar/Fantasy-Map-Generator

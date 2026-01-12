@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Partial Generation Test - generatePartial API</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      display: flex;
+      gap: 20px;
+      width: 100%;
+      max-width: 2000px;
+    }
+    .map-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #map {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      max-width: 100%;
+    }
+    .info {
+      margin-top: 20px;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      max-width: 600px;
+      width: 100%;
+    }
+    .info h3 {
+      margin-top: 0;
+    }
+    .metric {
+      margin: 10px 0;
+      padding: 8px;
+      background: #333;
+      border-radius: 3px;
+    }
+    .metric strong {
+      color: #4a9eff;
+    }
+    .metric.success {
+      background: #2a4a2a;
+      border-left: 3px solid #4a9f4a;
+    }
+    .metric.warning {
+      background: #4a4a2a;
+      border-left: 3px solid #9f9f4a;
+    }
+    pre {
+      background: #000;
+      padding: 10px;
+      border-radius: 3px;
+      overflow-x: auto;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .comparison {
+      margin-top: 20px;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 5px;
+    }
+    button {
+      margin: 10px 5px;
+      padding: 10px 20px;
+      background: #4a9eff;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5aaeff;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <h1>Partial Generation Test - generatePartial API</h1>
+  <div class="container">
+    <div class="map-container">
+      <div id="map"></div>
+      <div class="info">
+        <h3>Generation Controls</h3>
+        <button id="btnFull">1. Generate Full Map</button>
+        <button id="btnPartial" disabled>2. Run Partial (States Only)</button>
+        <button id="btnCompare" disabled>3. Compare Results</button>
+        
+        <h3>Generation Info</h3>
+        <div class="metric"><strong>Seed:</strong> <span id="seed">-</span></div>
+        <div class="metric"><strong>Full Generation Time:</strong> <span id="fullTime">-</span> ms</div>
+        <div class="metric"><strong>Partial Generation Time:</strong> <span id="partialTime">-</span> ms</div>
+        <div class="metric"><strong>Phases Run (Partial):</strong> <span id="phases">-</span></div>
+        <div class="metric"><strong>Time Saved:</strong> <span id="timeSaved">-</span></div>
+        
+        <h3>Data Summary</h3>
+        <pre id="summary"></pre>
+        <div class="comparison" id="comparison" style="display: none;">
+          <h3>Comparison Results</h3>
+          <div id="comparisonResults"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Partial generation test using generatePartial API
+     * First generates full map, then runs only states phase
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap,
+      generatePartial,
+      getMapData,
+      renderPreviewSVG,
+      PHASES
+    } = await import(isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js');
+
+    const container = document.getElementById('map');
+    const seed = 'test-seed-42';
+    const options = {
+      seed,
+      mapWidth: 960,
+      mapHeight: 540,
+      cellsDesired: 10000,
+      points: 4,
+    };
+
+    let fullGenData = null;
+    let partialGenData = null;
+
+    // Initialize
+    initGenerator({ container });
+    loadOptions(options);
+
+    // Button handlers
+    document.getElementById('btnFull').addEventListener('click', async () => {
+      try {
+        document.getElementById('btnFull').disabled = true;
+        
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const endTime = performance.now();
+        const generationTime = Math.round(endTime - startTime);
+        
+        renderPreviewSVG({ width: 960, height: 540 });
+        
+        const jsonData = getMapData();
+        fullGenData = {
+          jsonData,
+          generationTime,
+          svg: container.innerHTML,
+        };
+        
+        document.getElementById('seed').textContent = seed;
+        document.getElementById('fullTime').textContent = generationTime;
+        document.getElementById('btnPartial').disabled = false;
+        
+        updateSummary(fullGenData.jsonData);
+        
+        console.log('Full generation complete:', fullGenData);
+      } catch (error) {
+        console.error('Full generation failed:', error);
+        alert('Full generation failed: ' + error.message);
+      } finally {
+        document.getElementById('btnFull').disabled = false;
+      }
+    });
+
+    document.getElementById('btnPartial').addEventListener('click', async () => {
+      try {
+        if (!fullGenData) {
+          alert('Please generate full map first');
+          return;
+        }
+        
+        document.getElementById('btnPartial').disabled = true;
+        
+        // Run only states phase (requires cultures and burgs to be cached)
+        const phasesToRun = [PHASES.STATES];
+        
+        const startTime = performance.now();
+        const data = generatePartial(phasesToRun, Delaunator);
+        const endTime = performance.now();
+        const generationTime = Math.round(endTime - startTime);
+        
+        renderPreviewSVG({ width: 960, height: 540 });
+        
+        const jsonData = getMapData();
+        partialGenData = {
+          jsonData,
+          generationTime,
+          phasesToRun,
+          svg: container.innerHTML,
+        };
+        
+        document.getElementById('partialTime').textContent = generationTime;
+        document.getElementById('phases').textContent = phasesToRun.join(', ');
+        
+        const timeSaved = fullGenData.generationTime - generationTime;
+        const timeSavedPercent = ((timeSaved / fullGenData.generationTime) * 100).toFixed(1);
+        document.getElementById('timeSaved').textContent = `${timeSaved} ms (${timeSavedPercent}%)`;
+        
+        document.getElementById('btnCompare').disabled = false;
+        
+        updateSummary(partialGenData.jsonData);
+        
+        console.log('Partial generation complete:', partialGenData);
+      } catch (error) {
+        console.error('Partial generation failed:', error);
+        alert('Partial generation failed: ' + error.message);
+      } finally {
+        document.getElementById('btnPartial').disabled = false;
+      }
+    });
+
+    document.getElementById('btnCompare').addEventListener('click', () => {
+      if (!fullGenData || !partialGenData) {
+        alert('Please generate both full and partial maps first');
+        return;
+      }
+      
+      const comparison = compareData(fullGenData.jsonData, partialGenData.jsonData);
+      
+      let comparisonHTML = `
+        <div class="metric ${comparison.terrainMatch ? 'success' : 'warning'}">
+          <strong>Terrain Match:</strong> ${comparison.terrainMatch ? '✓ Match' : '✗ Mismatch'}
+        </div>
+        <div class="metric">
+          <strong>Terrain Differences:</strong> ${comparison.terrainDiffs}
+        </div>
+        <div class="metric ${comparison.statesMatch ? 'success' : 'warning'}">
+          <strong>States Match:</strong> ${comparison.statesMatch ? '✓ Match' : '✗ Mismatch'}
+        </div>
+        <div class="metric">
+          <strong>States Count (Full):</strong> ${fullGenData.jsonData.pack.states?.length || 0}
+        </div>
+        <div class="metric">
+          <strong>States Count (Partial):</strong> ${partialGenData.jsonData.pack.states?.length || 0}
+        </div>
+        <div class="metric">
+          <strong>Other Data Preserved:</strong> ${comparison.otherDataStatus}
+        </div>
+      `;
+      
+      document.getElementById('comparisonResults').innerHTML = comparisonHTML;
+      document.getElementById('comparison').style.display = 'block';
+    });
+
+    function updateSummary(jsonData) {
+      const summary = {
+        seed: jsonData.seed,
+        grid: {
+          cells: jsonData.grid.cells.i.length,
+          features: jsonData.grid.features?.length || 0,
+        },
+        pack: {
+          cells: jsonData.pack.cells.i.length,
+          features: jsonData.pack.features?.length || 0,
+          rivers: jsonData.pack.rivers?.length || 0,
+          cultures: jsonData.pack.cultures?.length || 0,
+          burgs: jsonData.pack.burgs?.length || 0,
+          states: jsonData.pack.states?.length || 0,
+          provinces: jsonData.pack.provinces?.length || 0,
+          religions: jsonData.pack.religions?.length || 0,
+        }
+      };
+      
+      document.getElementById('summary').textContent = JSON.stringify(summary, null, 2);
+    }
+
+    /**
+     * Compare two map data objects
+     */
+    function compareData(fullData, partialData) {
+      const result = {
+        terrainMatch: true,
+        terrainDiffs: 0,
+        statesMatch: false,
+        otherDataStatus: 'Preserved',
+      };
+      
+      // Compare terrain data (should match)
+      const fullHeights = fullData.grid.cells.h;
+      const partialHeights = partialData.grid.cells.h;
+      
+      if (fullHeights.length !== partialHeights.length) {
+        result.terrainMatch = false;
+        result.terrainDiffs = 'Length mismatch';
+      } else {
+        let diffs = 0;
+        for (let i = 0; i < fullHeights.length; i++) {
+          if (fullHeights[i] !== partialHeights[i]) {
+            diffs++;
+          }
+        }
+        result.terrainDiffs = diffs;
+        result.terrainMatch = diffs === 0;
+      }
+      
+      // Compare states (should be regenerated)
+      const fullStates = fullData.pack.states || [];
+      const partialStates = partialData.pack.states || [];
+      
+      result.statesMatch = fullStates.length === partialStates.length;
+      
+      // Check if other data is preserved
+      const fullCultures = fullData.pack.cultures?.length || 0;
+      const partialCultures = partialData.pack.cultures?.length || 0;
+      const fullBurgs = fullData.pack.burgs?.length || 0;
+      const partialBurgs = partialData.pack.burgs?.length || 0;
+      
+      if (fullCultures === partialCultures && fullBurgs === partialBurgs) {
+        result.otherDataStatus = 'Preserved ✓';
+      } else {
+        result.otherDataStatus = 'Modified (unexpected)';
+      }
+      
+      return result;
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Partial Generation Test - Full Generation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      display: flex;
+      gap: 20px;
+      width: 100%;
+      max-width: 2000px;
+    }
+    .map-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #map {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      max-width: 100%;
+    }
+    .info {
+      margin-top: 20px;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      max-width: 600px;
+      width: 100%;
+    }
+    .info h3 {
+      margin-top: 0;
+    }
+    .metric {
+      margin: 10px 0;
+      padding: 8px;
+      background: #333;
+      border-radius: 3px;
+    }
+    .metric strong {
+      color: #4a9eff;
+    }
+    pre {
+      background: #000;
+      padding: 10px;
+      border-radius: 3px;
+      overflow-x: auto;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Partial Generation Test - Full Generation (Baseline)</h1>
+  <div class="container">
+    <div class="map-container">
+      <div id="map"></div>
+      <div class="info">
+        <h3>Generation Info</h3>
+        <div class="metric"><strong>Seed:</strong> <span id="seed">-</span></div>
+        <div class="metric"><strong>Generation Time:</strong> <span id="time">-</span> ms</div>
+        <div class="metric"><strong>Phases Run:</strong> <span id="phases">All (full generation)</span></div>
+        <div class="metric"><strong>Data Size:</strong> <span id="dataSize">-</span> bytes</div>
+        <h3>Data Summary</h3>
+        <pre id="summary"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Full generation test - baseline for comparison
+     * Generates complete map with all phases
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData,
+      renderPreviewSVG,
+      PHASES
+    } = await import(isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js');
+
+    const container = document.getElementById('map');
+    const seed = 'test-seed-42';
+    const options = {
+      seed,
+      mapWidth: 960,
+      mapHeight: 540,
+      cellsDesired: 10000,
+      points: 4,
+    };
+
+    // Initialize and generate
+    initGenerator({ container });
+    loadOptions(options);
+    
+    const startTime = performance.now();
+    const data = generateMap(Delaunator);
+    const endTime = performance.now();
+    const generationTime = Math.round(endTime - startTime);
+    
+    // Render
+    renderPreviewSVG({ width: 960, height: 540 });
+    
+    // Get data
+    const jsonData = getMapData();
+    const dataSize = new Blob([JSON.stringify(jsonData)]).size;
+    
+    // Display results
+    document.getElementById('seed').textContent = seed;
+    document.getElementById('time').textContent = generationTime;
+    document.getElementById('dataSize').textContent = dataSize.toLocaleString();
+    
+    // Summary
+    const summary = {
+      seed: jsonData.seed,
+      grid: {
+        cells: jsonData.grid.cells.i.length,
+        features: jsonData.grid.features?.length || 0,
+      },
+      pack: {
+        cells: jsonData.pack.cells.i.length,
+        features: jsonData.pack.features?.length || 0,
+        rivers: jsonData.pack.rivers?.length || 0,
+        cultures: jsonData.pack.cultures?.length || 0,
+        burgs: jsonData.pack.burgs?.length || 0,
+        states: jsonData.pack.states?.length || 0,
+        provinces: jsonData.pack.provinces?.length || 0,
+        religions: jsonData.pack.religions?.length || 0,
+      }
+    };
+    
+    document.getElementById('summary').textContent = JSON.stringify(summary, null, 2);
+    
+    // Store in window for comparison
+    window.fullGenData = {
+      jsonData,
+      generationTime,
+      dataSize,
+      summary,
+      svg: container.innerHTML,
+    };
+    
+    console.log('Full generation complete:', {
+      time: generationTime,
+      dataSize,
+      summary,
+    });
+  </script>
+</body>
+</html>
