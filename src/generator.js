@@ -478,15 +478,7 @@ function generateMapInternal(options, DelaunatorClass) {
     // Cache pack creation data
     state.cached[PHASES.PACK_CREATION] = efficientDeepCopyOfRelevantData(PHASES.PACK_CREATION, { grid, pack });
     manageCacheSize(state.cached, options.maxCachedPhases || 8);
-  } else {
-    // Simplified pack (faster, for headless/data-only use)
-    pack = createSimplifiedPack(grid, options);
-    // Ensure pack has data from grid
-    pack.cells.h = grid.cells.h;
-    // Ensure pack.cells.g maps pack cells to grid cells (for simplified version, 1:1 mapping)
-    for (let i = 0; i < pack.cells.i.length; i++) {
-      pack.cells.g[i] = i;
-    }
+  }
     
     // Try to restore from cache
     if (state.cached[PHASES.PACK_CREATION]) {
