@@ -50,6 +50,7 @@ import {
   getFallbackForPhase,
   restorePhaseData,
   validatePhaseDependencies,
+  deepMerge,
 } from './partials.js';
 import { DependencyError } from './utils/errors.js';
 
@@ -1002,7 +1003,9 @@ export function initGenerator({ canvas = null, container = null } = {}) {
 }
 
 /**
- * Load and merge options with defaults, performing validation and clamping
+ * Load and merge options with defaults, performing validation and clamping.
+ * Invalidates cache when structural options change (seed, size, template).
+ * 
  * @param {Object} curatedParams - Partial options object (e.g., { seed: 42, mapWidth: 800 })
  * @throws {InitializationError} If generator not initialized
  * @throws {InvalidOptionError} For invalid option values
@@ -1011,6 +1014,24 @@ export function loadOptions(curatedParams = {}) {
   requireInitialized();
 
   try {
+    // Check if structural options changed (requires cache invalidation)
+    const structuralOptionsChanged = state.options && (
+      curatedParams.seed !== undefined && curatedParams.seed !== state.options.seed ||
+      curatedParams.cellsDesired !== undefined && curatedParams.cellsDesired !== state.options.cellsDesired ||
+      curatedParams.mapWidth !== undefined && curatedParams.mapWidth !== state.options.mapWidth ||
+      curatedParams.mapHeight !== undefined && curatedParams.mapHeight !== state.options.mapHeight ||
+      curatedParams.template !== undefined && curatedParams.template !== state.options.template ||
+      curatedParams.points !== undefined && curatedParams.points !== state.options.points
+    );
+    
+    // Invalidate cache if structural options changed
+    if (structuralOptionsChanged) {
+      state.cached = {};
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[generator] Cache invalidated due to structural option changes');
+      }
+    }
+    
     // Merge with defaults and validate
     const merged = mergeOptions(curatedParams);
     
@@ -1120,6 +1141,21 @@ export function generatePartial(phasesToRun, DelaunatorClass = null) {
     );
   }
 
+  // Hard requirement: RANK_CELLS is required for political phases
+  const politicsPhases = [PHASES.CULTURES, PHASES.BURGS, PHASES.STATES, PHASES.PROVINCES];
+  const runningPoliticalPhase = phasesToRun.some(phase => politicsPhases.includes(phase));
+  const rankCellsIncluded = phasesToRun.includes(PHASES.RANK_CELLS);
+  const rankCellsCached = state.cached[PHASES.RANK_CELLS] != null;
+  
+  if (runningPoliticalPhase && !rankCellsIncluded && !rankCellsCached) {
+    throw new DependencyError(
+      'generatePartial',
+      PHASES.RANK_CELLS,
+      `Phase ${PHASES.RANK_CELLS} is required for political phases (cultures, burgs, states, provinces). ` +
+      `Either include ${PHASES.RANK_CELLS} in phasesToRun or ensure it is cached from a previous generation.`
+    );
+  }
+  
   // Save original skipPhases
   const originalSkipPhases = state.options.skipPhases || [];
   
@@ -1131,25 +1167,30 @@ export function generatePartial(phasesToRun, DelaunatorClass = null) {
     // Set temporary skipPhases
     state.options.skipPhases = newSkipPhases;
     
+    // Validate dependencies before running
+    for (const phase of phasesToRun) {
+      validatePhaseDependencies(phase, newSkipPhases, state.cached);
+    }
+    
     // Run generation with temporary skipPhases
     const data = generateMapInternal(state.options, DelaunatorClass);
     
     // Store generated data (merges with existing state.data if present)
     if (state.data) {
-      // Merge partial data with existing data
+      // Use deep merge to preserve nested structures and typed arrays
       if (data.grid) {
-        state.data.grid = { ...state.data.grid, ...data.grid };
-        // Merge grid.cells carefully
-        if (data.grid.cells && state.data.grid.cells) {
-          state.data.grid.cells = { ...state.data.grid.cells, ...data.grid.cells };
-        }
+        state.data.grid = deepMerge(state.data.grid || {}, data.grid || {});
       }
       if (data.pack) {
-        state.data.pack = { ...state.data.pack, ...data.pack };
-        // Merge pack.cells carefully
-        if (data.pack.cells && state.data.pack.cells) {
-          state.data.pack.cells = { ...state.data.pack.cells, ...data.pack.cells };
-        }
+        state.data.pack = deepMerge(state.data.pack || {}, data.pack || {});
+      }
+      // Merge options if provided
+      if (data.options) {
+        state.data.options = deepMerge(state.data.options || {}, data.options || {});
+      }
+      // Preserve seed
+      if (data.seed) {
+        state.data.seed = data.seed;
       }
     } else {
       state.data = data;

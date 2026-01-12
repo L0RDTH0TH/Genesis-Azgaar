@@ -1180,6 +1180,13 @@ console.log('Terrain match:', dataDiff.gridCellsMatch);
 - **Data Integrity:** Skipped phases produce empty/default data as expected
 - **Cache Efficiency:** Second run with same skips uses cache (near-instant)
 
+**Cache Invalidation:**
+
+⚠️ **Important:** The cache is automatically cleared when structural options change:
+- Changing `seed` invalidates all cached phases
+- Changing `mapWidth`, `mapHeight`, `cellsDesired`, `points`, or `template` invalidates all cached phases
+- This ensures cache consistency - cached data from one map configuration cannot be incorrectly used with a different configuration
+
 ## Testing Recommendations
 
 ### Testing Partial Generation

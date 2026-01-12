@@ -11,6 +11,93 @@ import { DependencyError } from './utils/errors.js';
 import { createTypedArray } from './utils/array.js';
 
 /**
+ * Deep merge two objects, preserving typed arrays and nested structures.
+ * Handles objects recursively, preserves typed arrays via .slice(), handles plain arrays,
+ * and falls back gracefully on primitives.
+ * 
+ * @param {Object} target - Target object to merge into
+ * @param {Object} source - Source object to merge from
+ * @returns {Object} Deeply merged object
+ */
+export function deepMerge(target, source) {
+  // Handle null/undefined
+  if (target == null) return source != null ? source : {};
+  if (source == null) return target;
+  
+  // Handle primitives (strings, numbers, booleans)
+  if (typeof target !== 'object' || typeof source !== 'object') {
+    return source; // Source takes precedence for primitives
+  }
+  
+  // Handle typed arrays (Uint8Array, Uint16Array, Int8Array, Float32Array, etc.)
+  if (target instanceof Uint8Array || target instanceof Uint16Array || 
+      target instanceof Int8Array || target instanceof Float32Array ||
+      target instanceof Uint32Array || target instanceof Int16Array ||
+      target instanceof Int32Array || target instanceof Float64Array) {
+    // If source is also a typed array of same type, use source
+    if (source instanceof target.constructor) {
+      return source.slice(); // Return copy
+    }
+    // If source is array, convert to typed array
+    if (Array.isArray(source)) {
+      const TypedArray = target.constructor;
+      const result = new TypedArray(source.length);
+      result.set(source);
+      return result;
+    }
+    return source;
+  }
+  
+  // Handle plain arrays
+  if (Array.isArray(target) && Array.isArray(source)) {
+    // For arrays, we merge by index (source overwrites target at same indices)
+    // If source is longer, extend; if shorter, keep target values
+    const result = target.slice();
+    for (let i = 0; i < source.length; i++) {
+      if (i < result.length) {
+        // Recursively merge if both are objects
+        if (typeof result[i] === 'object' && typeof source[i] === 'object' && 
+            result[i] != null && source[i] != null && 
+            !Array.isArray(result[i]) && !Array.isArray(source[i]) &&
+            !(result[i] instanceof Uint8Array) && !(source[i] instanceof Uint8Array)) {
+          result[i] = deepMerge(result[i], source[i]);
+        } else {
+          result[i] = source[i];
+        }
+      } else {
+        result.push(source[i]);
+      }
+    }
+    return result;
+  }
+  
+  // Handle objects
+  if (typeof target === 'object' && typeof source === 'object' && 
+      !Array.isArray(target) && !Array.isArray(source)) {
+    const result = { ...target }; // Start with target's properties
+    
+    // Merge source properties
+    for (const key in source) {
+      if (source.hasOwnProperty(key)) {
+        if (key in result && typeof result[key] === 'object' && typeof source[key] === 'object' &&
+            result[key] != null && source[key] != null) {
+          // Recursively merge nested objects
+          result[key] = deepMerge(result[key], source[key]);
+        } else {
+          // Overwrite with source value
+          result[key] = source[key];
+        }
+      }
+    }
+    
+    return result;
+  }
+  
+  // Fallback: source takes precedence
+  return source;
+}
+
+/**
  * Phase dependency graph (defines what phases require which others).
  * Used for validation and automatic dependency resolution.
  */
@@ -42,9 +129,39 @@ const PHASE_DEPENDENCIES = {
  * @param {Object} cached - Cached phases object (state.cached)
  * @throws {DependencyError} If required dependencies are missing
  */
+/**
+ * Check if all dependencies for a phase are available (either executed or cached).
+ * Includes hard requirement check for RANK_CELLS when running political phases.
+ * 
+ * @param {string} phaseName - Phase name from PHASES constant
+ * @param {Array<string>} skipPhases - Array of phases to skip
+ * @param {Object} cached - Cached phases object (state.cached)
+ * @throws {DependencyError} If required dependencies are missing
+ */
 export function validatePhaseDependencies(phaseName, skipPhases, cached) {
   const deps = PHASE_DEPENDENCIES[phaseName] || [];
   
+  // Hard requirement: RANK_CELLS is required for political phases
+  const politicsPhases = [PHASES.CULTURES, PHASES.BURGS, PHASES.STATES, PHASES.PROVINCES];
+  const needsRanking = politicsPhases.includes(phaseName);
+  
+  if (needsRanking) {
+    // Check if RANK_CELLS is skipped and not cached
+    const rankCellsSkipped = skipPhases.includes(PHASES.RANK_CELLS);
+    const rankCellsCached = cached[PHASES.RANK_CELLS] != null;
+    
+    if (rankCellsSkipped && !rankCellsCached) {
+      throw new DependencyError(
+        phaseName,
+        PHASES.RANK_CELLS,
+        `Phase ${PHASES.RANK_CELLS} is required for ${phaseName}. ` +
+        `Rank cells must be run first or cached. ` +
+        `Either run ${PHASES.RANK_CELLS} in a previous generation or include it in the current generation.`
+      );
+    }
+  }
+  
+  // Check standard dependencies
   for (const dep of deps) {
     // Check if dependency was skipped
     if (skipPhases.includes(dep)) {
