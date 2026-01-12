@@ -7,6 +7,8 @@
  */
 
 import { deepCopy, minmax } from './utils/index.js';
+import { PHASES } from './utils/constants.js';
+import { InvalidOptionError } from './utils/errors.js';
 
 /**
  * Default options matching original Azgaar generator behavior
@@ -75,6 +77,9 @@ const DEFAULT_OPTIONS = {
   year: null, // Current year (null = random 100-2000)
   era: null, // Era name (null = auto-generated)
   eraShort: null, // Short era name (null = auto-generated)
+
+  // Partial generation support (Iteration 2)
+  skipPhases: [], // Array of phase names to skip (e.g., ['terrain', 'politics'])
 };
 
 /**
@@ -211,17 +216,66 @@ export function getDefaultOptions() {
 }
 
 /**
+ * Validate skipPhases array
+ * @param {Array<string>} skipPhases - Array of phase names to skip
+ * @returns {Array<string>} Validated and normalized skipPhases array
+ * @throws {InvalidOptionError} If invalid phase names are provided
+ */
+function validateSkipPhases(skipPhases) {
+  // Default to empty array if not provided
+  if (!skipPhases) {
+    return [];
+  }
+
+  // Ensure it's an array
+  if (!Array.isArray(skipPhases)) {
+    throw new InvalidOptionError(
+      'skipPhases',
+      skipPhases,
+      'skipPhases must be an array of phase names'
+    );
+  }
+
+  // Get all valid phase values
+  const validPhases = Object.values(PHASES);
+
+  // Validate each phase name
+  const invalidPhases = skipPhases.filter(phase => !validPhases.includes(phase));
+  if (invalidPhases.length > 0) {
+    throw new InvalidOptionError(
+      'skipPhases',
+      skipPhases,
+      `Invalid phase names: ${invalidPhases.join(', ')}. Valid phases: ${validPhases.join(', ')}`
+    );
+  }
+
+  // Remove duplicates and return
+  return [...new Set(skipPhases)];
+}
+
+/**
  * Merge user options with defaults, performing validation and clamping
  * @param {Object} userOptions - User-provided options (partial or complete)
  * @returns {Object} Merged and validated options object
+ * @throws {InvalidOptionError} If skipPhases contains invalid phase names
  */
 export function mergeOptions(userOptions = {}) {
   const defaults = getDefaultOptions();
   const merged = deepCopy(defaults);
 
+  // Validate skipPhases separately (before merging other options)
+  if (userOptions.hasOwnProperty('skipPhases')) {
+    merged.skipPhases = validateSkipPhases(userOptions.skipPhases);
+  }
+
   // Deep merge user options
   for (const key in userOptions) {
     if (userOptions.hasOwnProperty(key)) {
+      // Skip skipPhases as it's already handled above
+      if (key === 'skipPhases') {
+        continue;
+      }
+
       if (key in DEFAULT_OPTIONS) {
         merged[key] = validateOption(key, userOptions[key]);
       } else {

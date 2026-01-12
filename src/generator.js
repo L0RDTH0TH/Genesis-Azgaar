@@ -43,6 +43,10 @@ import { createPackFromGrid } from './core/regraph.js';
 // Canvas rendering is deprecated - use SVG instead
 // import { renderMap } from './rendering/canvas.js'; // DEPRECATED
 import { renderMapSVG } from './rendering/svg.js';
+import { PHASES } from './utils/constants.js';
+
+// Re-export PHASES for convenience
+export { PHASES };
 
 /**
  * Singleton state for the generator
@@ -52,6 +56,7 @@ let state = {
   container: null, // SVG container element (optional)
   options: getDefaultOptions(),
   data: null, // { grid, pack, seed }
+  cached: {}, // Phase cache: { [phaseName]: deepCopyOfRelevantData }
   initialized: false,
 };
 
@@ -500,6 +505,12 @@ export function initGenerator({ canvas = null, container = null } = {}) {
 
   // state.canvas = canvas; // DEPRECATED: Canvas rendering is deprecated
   state.container = container;
+  
+  // Initialize phase cache for partial generation support
+  if (!state.cached) {
+    state.cached = {};
+  }
+  
   state.initialized = true;
 }
 

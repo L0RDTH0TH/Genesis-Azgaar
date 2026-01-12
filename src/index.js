@@ -16,6 +16,7 @@ export {
   renderPreviewSVG, // Primary rendering method (SVG) - appends to container or returns string
   renderToSVG, // Convenience function - always returns SVG string
   loadMapData,
+  PHASES, // Phase constants for partial generation support
 } from './generator.js';
 
 // Utility exports (for advanced usage)
