@@ -49,6 +49,7 @@ import {
   efficientDeepCopyOfRelevantData,
   getFallbackForPhase,
   restorePhaseData,
+  validatePhaseDependencies,
 } from './partials.js';
 import { DependencyError } from './utils/errors.js';
 
@@ -333,24 +334,28 @@ function generateMapInternal(options, DelaunatorClass) {
   }
 
   // Phase 7: Create pack from grid
-  // Use full Voronoi pack if fullRendering is enabled or container (SVG) is provided
-  // Full pack is required for SVG rendering (needs vCoords/v data for isoline rendering)
-  // ALWAYS use full pack for now to ensure cell data is populated
-  const useFullPack = true; // Force full pack creation for all cases
+  // Validate dependencies
+  validatePhaseDependencies(PHASES.PACK_CREATION, skipPhases, state.cached);
   
-  // Debug: Log decision
-  if (typeof console !== 'undefined' && console.log) {
-    console.log('[generator] Pack creation decision:', {
-      useFullPack,
-      fullRendering: options.fullRendering,
-      hasContainer: state.container !== null,
-      forcedFullPack: true,
-    });
-  }
-  
-  let pack;
-  
-  if (useFullPack) {
+  if (!skipPhases.includes(PHASES.PACK_CREATION)) {
+    // Use full Voronoi pack if fullRendering is enabled or container (SVG) is provided
+    // Full pack is required for SVG rendering (needs vCoords/v data for isoline rendering)
+    // ALWAYS use full pack for now to ensure cell data is populated
+    const useFullPack = true; // Force full pack creation for all cases
+    
+    // Debug: Log decision
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[generator] Pack creation decision:', {
+        useFullPack,
+        fullRendering: options.fullRendering,
+        hasContainer: state.container !== null,
+        forcedFullPack: true,
+      });
+    }
+    
+    let pack;
+    
+    if (useFullPack) {
     // Full Voronoi pack with polygon vertices (for rendering)
     pack = createPackFromGrid({ grid, options, DelaunatorClass });
     // Ensure pack has height data from grid (pack may have fewer cells than grid)
@@ -461,124 +466,434 @@ function generateMapInternal(options, DelaunatorClass) {
         hasV: Array.isArray(pack.cells.v),
       });
     }
+    
+    // Cache pack creation data
+    state.cached[PHASES.PACK_CREATION] = efficientDeepCopyOfRelevantData(PHASES.PACK_CREATION, { grid, pack });
+  } else {
+    // Simplified pack (faster, for headless/data-only use)
+    pack = createSimplifiedPack(grid, options);
+    // Ensure pack has data from grid
+    pack.cells.h = grid.cells.h;
+    // Ensure pack.cells.g maps pack cells to grid cells (for simplified version, 1:1 mapping)
+    for (let i = 0; i < pack.cells.i.length; i++) {
+      pack.cells.g[i] = i;
+    }
+    
+    // Try to restore from cache
+    if (state.cached[PHASES.PACK_CREATION]) {
+      restorePhaseData(PHASES.PACK_CREATION, state.cached[PHASES.PACK_CREATION], { grid, pack });
+    } else {
+      throw new DependencyError(
+        PHASES.PACK_CREATION,
+        PHASES.PACK_CREATION,
+        `Cannot skip ${PHASES.PACK_CREATION} phase without cached data. Pack creation is required.`
+      );
+    }
   }
 
   // Phase 8: River generation
-  generateRivers({
-    grid,
-    pack,
-    options,
-    rng,
-    precipitation: grid.cells.prec,
-    allowErosion: options.allowErosion !== false,
-  });
+  validatePhaseDependencies(PHASES.RIVERS, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.RIVERS)) {
+    // Run river phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.RIVERS);
+    const rng = new RNG(phaseSeed);
+    
+    generateRivers({
+      grid,
+      pack,
+      options,
+      rng,
+      precipitation: grid.cells.prec,
+      allowErosion: options.allowErosion !== false,
+    });
+    
+    // Cache rivers data
+    state.cached[PHASES.RIVERS] = efficientDeepCopyOfRelevantData(PHASES.RIVERS, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.RIVERS]) {
+      restorePhaseData(PHASES.RIVERS, state.cached[PHASES.RIVERS], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.RIVERS, { grid, pack, options });
+      if (fallback && fallback.pack?.rivers) {
+        pack.rivers = fallback.pack.rivers;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.RIVERS} phase`);
+        }
+      } else {
+        pack.rivers = [];
+      }
+    }
+  }
 
   // Phase 9: Biome assignment
-  const biomesData = getDefaultBiomes();
-  assignBiomes({ pack, grid, options, biomesData });
+  validatePhaseDependencies(PHASES.BIOMES, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.BIOMES)) {
+    // Run biome phase
+    const biomesData = getDefaultBiomes();
+    assignBiomes({ pack, grid, options, biomesData });
+    
+    // Cache biomes data
+    state.cached[PHASES.BIOMES] = efficientDeepCopyOfRelevantData(PHASES.BIOMES, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.BIOMES]) {
+      restorePhaseData(PHASES.BIOMES, state.cached[PHASES.BIOMES], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.BIOMES, { grid, pack, options });
+      if (fallback && fallback.pack?.cells?.biome) {
+        pack.cells.biome = fallback.pack.cells.biome;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.BIOMES} phase`);
+        }
+      } else if (pack.cells.i) {
+        pack.cells.biome = new Uint8Array(pack.cells.i.length).fill(0);
+      }
+    }
+  }
 
   // Phase 10: Pack-level feature detection
-  markupPack({ pack });
+  validatePhaseDependencies(PHASES.PACK_MARKUP, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.PACK_MARKUP)) {
+    // Run pack markup phase
+    markupPack({ pack });
+    
+    // Cache pack markup data
+    state.cached[PHASES.PACK_MARKUP] = efficientDeepCopyOfRelevantData(PHASES.PACK_MARKUP, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.PACK_MARKUP]) {
+      restorePhaseData(PHASES.PACK_MARKUP, state.cached[PHASES.PACK_MARKUP], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.PACK_MARKUP, { grid, pack, options });
+      if (fallback && fallback.pack?.features) {
+        pack.features = fallback.pack.features;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.PACK_MARKUP} phase`);
+        }
+      } else {
+        pack.features = [];
+      }
+    }
+  }
   
   // Phase 10.25: Post-processing cluster merging (connect nearby land features)
-  // Template-aware merging: aggressive for cohesion styles, minimal for fragmented styles
-  const templateId = options.template || 'continent';
-  const isCohesionStyle = templateId === 'continent' || templateId === 'pangea';
-  const isFragmentedStyle = templateId === 'archipelago' || templateId === 'shattered';
+  validatePhaseDependencies(PHASES.CLUSTER_MERGE, skipPhases, state.cached);
   
-  const initialClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
-  
-  // Only merge for cohesion styles OR if fragmentation is extreme (even for fragmented styles, allow some merging if >20 clusters)
-  if (isCohesionStyle && initialClusters > 5) {
-    // Aggressive merging for cohesion styles (continent, pangea)
-    const mergesPerformed = mergeNearbyClusters(pack, {
-      mergeDistance: 6, // Aggressive: merge features up to 6 cells apart
-      maxMergeDistance: 10, // Maximum distance to consider
-      minClusterSize: 5, // Include smaller isles
-      maxIterations: 10, // Allow up to 10 iterations for convergence
-      maxClusterSize: pack.cells.i.length * 0.6 // Prevent supercontinents (60% of cells)
-    });
+  if (!skipPhases.includes(PHASES.CLUSTER_MERGE)) {
+    // Template-aware merging: aggressive for cohesion styles, minimal for fragmented styles
+    const templateId = options.template || 'continent';
+    const isCohesionStyle = templateId === 'continent' || templateId === 'pangea';
+    const isFragmentedStyle = templateId === 'archipelago' || templateId === 'shattered';
     
-    // Re-run feature detection after merging (heights changed, so features need recalculation)
-    if (mergesPerformed > 0) {
-      markupPack({ pack });
-      specifyFeatures({ pack, grid, options });
+    const initialClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
+    
+    // Only merge for cohesion styles OR if fragmentation is extreme (even for fragmented styles, allow some merging if >20 clusters)
+    if (isCohesionStyle && initialClusters > 5) {
+      // Aggressive merging for cohesion styles (continent, pangea)
+      const mergesPerformed = mergeNearbyClusters(pack, {
+        mergeDistance: 6, // Aggressive: merge features up to 6 cells apart
+        maxMergeDistance: 10, // Maximum distance to consider
+        minClusterSize: 5, // Include smaller isles
+        maxIterations: 10, // Allow up to 10 iterations for convergence
+        maxClusterSize: pack.cells.i.length * 0.6 // Prevent supercontinents (60% of cells)
+      });
       
-      const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
-      if (typeof console !== 'undefined' && console.log) {
-        console.log('[cluster-merge] Template-aware merge:', {
-          template: templateId,
-          style: isCohesionStyle ? 'cohesion' : 'fragmented',
-          initialClusters,
-          mergesPerformed,
-          finalClusters,
-          reduction: initialClusters - finalClusters
-        });
+      // Re-run feature detection after merging (heights changed, so features need recalculation)
+      if (mergesPerformed > 0) {
+        markupPack({ pack });
+        specifyFeatures({ pack, grid, options });
+        
+        const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
+        if (typeof console !== 'undefined' && console.log) {
+          console.log('[cluster-merge] Template-aware merge:', {
+            template: templateId,
+            style: isCohesionStyle ? 'cohesion' : 'fragmented',
+            initialClusters,
+            mergesPerformed,
+            finalClusters,
+            reduction: initialClusters - finalClusters
+          });
+        }
+      } else {
+        specifyFeatures({ pack, grid, options });
+      }
+    } else if (isFragmentedStyle && initialClusters > 20) {
+      // Minimal merging for fragmented styles (archipelago, shattered) - only if extremely fragmented (>20 clusters)
+      // Use very conservative parameters to preserve fragmentation
+      const mergesPerformed = mergeNearbyClusters(pack, {
+        mergeDistance: 1, // Very conservative: only merge features 1 cell apart
+        maxMergeDistance: 2, // Maximum distance to consider
+        minClusterSize: 20, // Only merge larger clusters (preserve small islands)
+        maxIterations: 1, // Single pass only (no iteration)
+        maxClusterSize: pack.cells.i.length * 0.3 // Prevent large landmasses (30% max)
+      });
+      
+      if (mergesPerformed > 0) {
+        markupPack({ pack });
+        specifyFeatures({ pack, grid, options });
+        
+        const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
+        if (typeof console !== 'undefined' && console.log) {
+          console.log('[cluster-merge] Minimal merge (fragmented style):', {
+            template: templateId,
+            initialClusters,
+            mergesPerformed,
+            finalClusters,
+            reduction: initialClusters - finalClusters
+          });
+        }
+      } else {
+        specifyFeatures({ pack, grid, options });
       }
     } else {
+      // No merging needed (fragmented style with acceptable fragmentation, or cohesion style with ≤5 clusters)
       specifyFeatures({ pack, grid, options });
     }
-  } else if (isFragmentedStyle && initialClusters > 20) {
-    // Minimal merging for fragmented styles (archipelago, shattered) - only if extremely fragmented (>20 clusters)
-    // Use very conservative parameters to preserve fragmentation
-    const mergesPerformed = mergeNearbyClusters(pack, {
-      mergeDistance: 1, // Very conservative: only merge features 1 cell apart
-      maxMergeDistance: 2, // Maximum distance to consider
-      minClusterSize: 20, // Only merge larger clusters (preserve small islands)
-      maxIterations: 1, // Single pass only (no iteration)
-      maxClusterSize: pack.cells.i.length * 0.3 // Prevent large landmasses (30% max)
-    });
     
-    if (mergesPerformed > 0) {
-      markupPack({ pack });
-      specifyFeatures({ pack, grid, options });
-      
-      const finalClusters = pack.features ? pack.features.filter(f => f && f.land).length : 0;
-      if (typeof console !== 'undefined' && console.log) {
-        console.log('[cluster-merge] Minimal merge (fragmented style):', {
-          template: templateId,
-          initialClusters,
-          mergesPerformed,
-          finalClusters,
-          reduction: initialClusters - finalClusters
-        });
-      }
-    } else {
-      specifyFeatures({ pack, grid, options });
-    }
+    // Cache cluster merge data
+    state.cached[PHASES.CLUSTER_MERGE] = efficientDeepCopyOfRelevantData(PHASES.CLUSTER_MERGE, { grid, pack });
   } else {
-    // No merging needed (fragmented style with acceptable fragmentation, or cohesion style with ≤5 clusters)
-    specifyFeatures({ pack, grid, options });
+    // Try to restore from cache
+    if (state.cached[PHASES.CLUSTER_MERGE]) {
+      restorePhaseData(PHASES.CLUSTER_MERGE, state.cached[PHASES.CLUSTER_MERGE], { grid, pack });
+    } else {
+      // Try fallback (no merging, just run specifyFeatures)
+      specifyFeatures({ pack, grid, options });
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`Using fallback for ${PHASES.CLUSTER_MERGE} phase`);
+      }
+    }
   }
 
   // Phase 10.5: Calculate suitability and population scores (CRITICAL for cultures/burgs/states)
-  rankCells({ pack, grid, options, biomesData });
+  validatePhaseDependencies(PHASES.RANK_CELLS, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.RANK_CELLS)) {
+    // Run rank cells phase
+    const biomesData = getDefaultBiomes();
+    rankCells({ pack, grid, options, biomesData });
+    
+    // Cache rank cells data (mainly for dependency tracking)
+    state.cached[PHASES.RANK_CELLS] = efficientDeepCopyOfRelevantData(PHASES.RANK_CELLS, { grid, pack });
+  } else {
+    // Rank cells modifies existing data, no restoration needed but validate dependencies
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn(`Skipping ${PHASES.RANK_CELLS} phase - may cause issues with cultures/burgs/states`);
+    }
+  }
 
   // Phase 11: Culture generation
-  generateCultures({ pack, grid, options, rng, biomesData });
-  expandCultures({ pack, options, biomesData });
+  validatePhaseDependencies(PHASES.CULTURES, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.CULTURES)) {
+    // Run culture phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.CULTURES);
+    const rng = new RNG(phaseSeed);
+    const biomesData = getDefaultBiomes();
+    
+    generateCultures({ pack, grid, options, rng, biomesData });
+    expandCultures({ pack, options, biomesData });
+    
+    // Cache cultures data
+    state.cached[PHASES.CULTURES] = efficientDeepCopyOfRelevantData(PHASES.CULTURES, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.CULTURES]) {
+      restorePhaseData(PHASES.CULTURES, state.cached[PHASES.CULTURES], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.CULTURES, { grid, pack, options });
+      if (fallback && fallback.pack) {
+        if (fallback.pack.cultures) pack.cultures = fallback.pack.cultures;
+        if (fallback.pack.cells?.culture) pack.cells.culture = fallback.pack.cells.culture;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.CULTURES} phase`);
+        }
+      } else {
+        pack.cultures = [];
+        if (pack.cells.i) {
+          pack.cells.culture = new Uint16Array(pack.cells.i.length).fill(0);
+        }
+      }
+    }
+  }
 
   // Phase 12: Burg (settlement) generation
-  generateBurgs({ pack, grid, options, rng });
+  validatePhaseDependencies(PHASES.BURGS, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.BURGS)) {
+    // Run burg phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.BURGS);
+    const rng = new RNG(phaseSeed);
+    
+    generateBurgs({ pack, grid, options, rng });
+    
+    // Cache burgs data
+    state.cached[PHASES.BURGS] = efficientDeepCopyOfRelevantData(PHASES.BURGS, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.BURGS]) {
+      restorePhaseData(PHASES.BURGS, state.cached[PHASES.BURGS], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.BURGS, { grid, pack, options });
+      if (fallback && fallback.pack?.burgs) {
+        pack.burgs = fallback.pack.burgs;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.BURGS} phase`);
+        }
+      } else {
+        pack.burgs = [];
+      }
+    }
+  }
 
   // Phase 13: State generation
-  generateStates({ pack, options, rng });
+  validatePhaseDependencies(PHASES.STATES, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.STATES)) {
+    // Run state phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.STATES);
+    const rng = new RNG(phaseSeed);
+    
+    generateStates({ pack, options, rng });
+    
+    // Cache states data
+    state.cached[PHASES.STATES] = efficientDeepCopyOfRelevantData(PHASES.STATES, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.STATES]) {
+      restorePhaseData(PHASES.STATES, state.cached[PHASES.STATES], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.STATES, { grid, pack, options });
+      if (fallback && fallback.pack) {
+        if (fallback.pack.states) pack.states = fallback.pack.states;
+        if (fallback.pack.cells?.state) pack.cells.state = fallback.pack.cells.state;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.STATES} phase`);
+        }
+      } else {
+        // Default: Single state covering entire map
+        if (pack.cells.i) {
+          const length = pack.cells.i.length;
+          pack.states = [{ i: 0, name: 'Default State', cells: Array.from({ length }, (_, i) => i) }];
+          pack.cells.state = new Uint16Array(length).fill(0);
+        }
+      }
+    }
+  }
 
   // Phase 14: Province generation
-  generateProvinces({ pack, options, rng });
+  validatePhaseDependencies(PHASES.PROVINCES, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.PROVINCES)) {
+    // Run province phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.PROVINCES);
+    const rng = new RNG(phaseSeed);
+    
+    generateProvinces({ pack, options, rng });
+    
+    // Cache provinces data
+    state.cached[PHASES.PROVINCES] = efficientDeepCopyOfRelevantData(PHASES.PROVINCES, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.PROVINCES]) {
+      restorePhaseData(PHASES.PROVINCES, state.cached[PHASES.PROVINCES], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.PROVINCES, { grid, pack, options });
+      if (fallback && fallback.pack) {
+        if (fallback.pack.provinces) pack.provinces = fallback.pack.provinces;
+        if (fallback.pack.cells?.province) pack.cells.province = fallback.pack.cells.province;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.PROVINCES} phase`);
+        }
+      } else {
+        pack.provinces = [];
+        if (pack.cells.i) {
+          pack.cells.province = new Uint16Array(pack.cells.i.length).fill(0);
+        }
+      }
+    }
+  }
 
   // Phase 15: Religion generation (optional)
-  if (options.religionsNumber > 0) {
-    generateReligions({ pack, options, rng });
+  validatePhaseDependencies(PHASES.RELIGIONS, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.RELIGIONS)) {
+    // Run religion phase
+    if (options.religionsNumber > 0) {
+      const phaseSeed = getPhaseSeed(seed, PHASES.RELIGIONS);
+      const rng = new RNG(phaseSeed);
+      
+      generateReligions({ pack, options, rng });
+    } else {
+      pack.religions = [{ name: 'No religion', i: 0 }];
+      if (!pack.cells.religion) {
+        pack.cells.religion = createTypedArray({ maxValue: 65535, length: pack.cells.i.length });
+      }
+    }
+    
+    // Cache religions data
+    state.cached[PHASES.RELIGIONS] = efficientDeepCopyOfRelevantData(PHASES.RELIGIONS, { grid, pack });
   } else {
-    pack.religions = [{ name: 'No religion', i: 0 }];
-    if (!pack.cells.religion) {
-      pack.cells.religion = createTypedArray({ maxValue: 65535, length: pack.cells.i.length });
+    // Try to restore from cache
+    if (state.cached[PHASES.RELIGIONS]) {
+      restorePhaseData(PHASES.RELIGIONS, state.cached[PHASES.RELIGIONS], { grid, pack });
+    } else {
+      // Try fallback
+      const fallback = getFallbackForPhase(PHASES.RELIGIONS, { grid, pack, options });
+      if (fallback && fallback.pack) {
+        if (fallback.pack.religions) pack.religions = fallback.pack.religions;
+        if (fallback.pack.cells?.religion) pack.cells.religion = fallback.pack.cells.religion;
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`Using fallback for ${PHASES.RELIGIONS} phase`);
+        }
+      } else {
+        // Default based on religionsNumber
+        if (options.religionsNumber > 0) {
+          pack.religions = [{ name: 'No religion', i: 0 }];
+        } else {
+          pack.religions = [];
+        }
+        if (pack.cells.i && !pack.cells.religion) {
+          pack.cells.religion = new Uint16Array(pack.cells.i.length).fill(0);
+        }
+      }
     }
   }
 
   // Phase 16: Emblem generation
-  generateEmblems({ pack, options, rng });
+  validatePhaseDependencies(PHASES.EMBLEMS, skipPhases, state.cached);
+  
+  if (!skipPhases.includes(PHASES.EMBLEMS)) {
+    // Run emblem phase
+    const phaseSeed = getPhaseSeed(seed, PHASES.EMBLEMS);
+    const rng = new RNG(phaseSeed);
+    
+    generateEmblems({ pack, options, rng });
+    
+    // Cache emblems data (stored in states/cultures)
+    state.cached[PHASES.EMBLEMS] = efficientDeepCopyOfRelevantData(PHASES.EMBLEMS, { grid, pack });
+  } else {
+    // Try to restore from cache
+    if (state.cached[PHASES.EMBLEMS]) {
+      restorePhaseData(PHASES.EMBLEMS, state.cached[PHASES.EMBLEMS], { grid, pack });
+    } else {
+      // Emblems are optional, no fallback needed
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`Skipping ${PHASES.EMBLEMS} phase - emblems will not be generated`);
+      }
+    }
+  }
 
   // Diagnostic logging after generation
   if (typeof console !== 'undefined' && console.log) {
@@ -769,6 +1084,90 @@ export function generateMap(DelaunatorClass = null) {
     }
     // Wrap other errors
     throw new GenerationError(`Map generation failed: ${error.message}`);
+  }
+}
+
+/**
+ * Generate only specific phases (partial generation).
+ * Sets temporary skipPhases to all phases except the ones specified, then runs generation.
+ * 
+ * @param {Array<string>} phasesToRun - Array of phase names from PHASES constant to run
+ * @param {Function} DelaunatorClass - Delaunator class (required as peer dependency)
+ * @returns {Object} Reference to generated data {grid, pack, seed}
+ * @throws {InitializationError} If generator not initialized
+ * @throws {InvalidOptionError} If invalid phase names provided
+ * @throws {GenerationError} If generation fails
+ */
+export function generatePartial(phasesToRun, DelaunatorClass = null) {
+  requireInitialized();
+
+  if (!Array.isArray(phasesToRun) || phasesToRun.length === 0) {
+    throw new InvalidOptionError(
+      'phasesToRun',
+      phasesToRun,
+      'phasesToRun must be a non-empty array of phase names'
+    );
+  }
+
+  // Validate phase names
+  const validPhases = Object.values(PHASES);
+  const invalidPhases = phasesToRun.filter(phase => !validPhases.includes(phase));
+  if (invalidPhases.length > 0) {
+    throw new InvalidOptionError(
+      'phasesToRun',
+      phasesToRun,
+      `Invalid phase names: ${invalidPhases.join(', ')}. Valid phases: ${validPhases.join(', ')}`
+    );
+  }
+
+  // Save original skipPhases
+  const originalSkipPhases = state.options.skipPhases || [];
+  
+  // Calculate skipPhases: all phases except the ones to run
+  const allPhases = Object.values(PHASES);
+  const newSkipPhases = allPhases.filter(phase => !phasesToRun.includes(phase));
+  
+  try {
+    // Set temporary skipPhases
+    state.options.skipPhases = newSkipPhases;
+    
+    // Run generation with temporary skipPhases
+    const data = generateMapInternal(state.options, DelaunatorClass);
+    
+    // Store generated data (merges with existing state.data if present)
+    if (state.data) {
+      // Merge partial data with existing data
+      if (data.grid) {
+        state.data.grid = { ...state.data.grid, ...data.grid };
+        // Merge grid.cells carefully
+        if (data.grid.cells && state.data.grid.cells) {
+          state.data.grid.cells = { ...state.data.grid.cells, ...data.grid.cells };
+        }
+      }
+      if (data.pack) {
+        state.data.pack = { ...state.data.pack, ...data.pack };
+        // Merge pack.cells carefully
+        if (data.pack.cells && state.data.pack.cells) {
+          state.data.pack.cells = { ...state.data.pack.cells, ...data.pack.cells };
+        }
+      }
+    } else {
+      state.data = data;
+    }
+    
+    return state.data;
+  } catch (error) {
+    // Restore original skipPhases on error
+    state.options.skipPhases = originalSkipPhases;
+    
+    if (error instanceof GenerationError || error instanceof InitializationError || error instanceof InvalidOptionError) {
+      throw error;
+    }
+    // Wrap other errors
+    throw new GenerationError(`Partial generation failed: ${error.message}`);
+  } finally {
+    // Restore original skipPhases
+    state.options.skipPhases = originalSkipPhases;
   }
 }
 

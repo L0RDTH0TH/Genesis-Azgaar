@@ -11,6 +11,57 @@ import { DependencyError } from './utils/errors.js';
 import { createTypedArray } from './utils/array.js';
 
 /**
+ * Phase dependency graph (defines what phases require which others).
+ * Used for validation and automatic dependency resolution.
+ */
+const PHASE_DEPENDENCIES = {
+  [PHASES.HEIGHTMAP]: [PHASES.VORONOI],
+  [PHASES.GRID_MARKUP]: [PHASES.HEIGHTMAP],
+  [PHASES.MAP_COORDINATES]: [], // No dependencies
+  [PHASES.TEMPERATURES]: [PHASES.HEIGHTMAP, PHASES.MAP_COORDINATES],
+  [PHASES.PRECIPITATION]: [PHASES.HEIGHTMAP, PHASES.MAP_COORDINATES],
+  [PHASES.PACK_CREATION]: [PHASES.VORONOI, PHASES.HEIGHTMAP],
+  [PHASES.RIVERS]: [PHASES.PACK_CREATION, PHASES.PRECIPITATION],
+  [PHASES.BIOMES]: [PHASES.PACK_CREATION, PHASES.TEMPERATURES, PHASES.PRECIPITATION],
+  [PHASES.PACK_MARKUP]: [PHASES.PACK_CREATION],
+  [PHASES.CLUSTER_MERGE]: [PHASES.PACK_MARKUP],
+  [PHASES.RANK_CELLS]: [PHASES.BIOMES, PHASES.PACK_MARKUP],
+  [PHASES.CULTURES]: [PHASES.RANK_CELLS, PHASES.BIOMES],
+  [PHASES.BURGS]: [PHASES.CULTURES, PHASES.RIVERS],
+  [PHASES.STATES]: [PHASES.BURGS],
+  [PHASES.PROVINCES]: [PHASES.STATES],
+  [PHASES.RELIGIONS]: [PHASES.STATES],
+  [PHASES.EMBLEMS]: [PHASES.STATES, PHASES.CULTURES],
+};
+
+/**
+ * Check if all dependencies for a phase are available (either executed or cached).
+ * 
+ * @param {string} phaseName - Phase name from PHASES constant
+ * @param {Array<string>} skipPhases - Array of phases to skip
+ * @param {Object} cached - Cached phases object (state.cached)
+ * @throws {DependencyError} If required dependencies are missing
+ */
+export function validatePhaseDependencies(phaseName, skipPhases, cached) {
+  const deps = PHASE_DEPENDENCIES[phaseName] || [];
+  
+  for (const dep of deps) {
+    // Check if dependency was skipped
+    if (skipPhases.includes(dep)) {
+      // Check if cached version exists
+      if (!cached[dep]) {
+        throw new DependencyError(
+          phaseName,
+          dep,
+          `Cannot execute ${phaseName}: dependency ${dep} is skipped but not cached. ` +
+          `Either run ${dep} first or provide cached data.`
+        );
+      }
+    }
+  }
+}
+
+/**
  * Get phase-specific seed from main seed and phase name.
  * Ensures same seed + phase name always produces same RNG sequence.
  * Formula: phaseSeed = hash(mainSeed + phaseName)
@@ -173,6 +224,135 @@ function getPhaseData(phaseName, fullData) {
         }
       };
       
+    case PHASES.PACK_CREATION:
+      // Store pack structure (cells, vertices, features)
+      return {
+        pack: {
+          cells: {
+            i: pack?.cells?.i ? Array.from(pack.cells.i) : [],
+            h: pack?.cells?.h ? Array.from(pack.cells.h) : [],
+            g: pack?.cells?.g ? Array.from(pack.cells.g) : [],
+            p: pack?.cells?.p ? pack.cells.p.map(p => [...p]) : [],
+            c: pack?.cells?.c ? deepCopyArrayOfArrays(pack.cells.c) : [],
+            v: pack?.cells?.v ? deepCopyArrayOfArrays(pack.cells.v) : [],
+            area: pack?.cells?.area ? Array.from(pack.cells.area) : [],
+          },
+          vertices: pack?.vertices ? {
+            p: pack.vertices.p ? pack.vertices.p.map(v => [...v]) : [],
+            v: pack.vertices.v ? deepCopyArrayOfArrays(pack.vertices.v) : [],
+            c: pack.vertices.c ? deepCopyArrayOfArrays(pack.vertices.c) : [],
+          } : {},
+          features: pack?.features ? deepCopyArray(pack.features) : [],
+        }
+      };
+      
+    case PHASES.RIVERS:
+      // Store rivers data
+      return {
+        pack: {
+          rivers: pack?.rivers ? deepCopyArray(pack.rivers) : [],
+        }
+      };
+      
+    case PHASES.BIOMES:
+      // Store biome assignments
+      return {
+        pack: {
+          cells: {
+            biome: pack?.cells?.biome ? Array.from(pack.cells.biome) : [],
+          }
+        }
+      };
+      
+    case PHASES.PACK_MARKUP:
+      // Store pack markup (features after markupPack)
+      return {
+        pack: {
+          features: pack?.features ? deepCopyArray(pack.features) : [],
+        }
+      };
+      
+    case PHASES.CLUSTER_MERGE:
+      // Cluster merge modifies features, cache updated features
+      return {
+        pack: {
+          features: pack?.features ? deepCopyArray(pack.features) : [],
+        }
+      };
+      
+    case PHASES.RANK_CELLS:
+      // Rank cells data (suitability scores)
+      return {
+        pack: {
+          cells: {
+            // Rank cells modifies pack.cells but doesn't add new arrays typically
+            // Cache is mainly for dependency tracking
+          }
+        }
+      };
+      
+    case PHASES.CULTURES:
+      // Store cultures data
+      return {
+        pack: {
+          cultures: pack?.cultures ? deepCopyArray(pack.cultures) : [],
+          cells: {
+            culture: pack?.cells?.culture ? Array.from(pack.cells.culture) : [],
+          }
+        }
+      };
+      
+    case PHASES.BURGS:
+      // Store burgs (settlements) data
+      return {
+        pack: {
+          burgs: pack?.burgs ? deepCopyArray(pack.burgs) : [],
+        }
+      };
+      
+    case PHASES.STATES:
+      // Store states data
+      return {
+        pack: {
+          states: pack?.states ? deepCopyArray(pack.states) : [],
+          cells: {
+            state: pack?.cells?.state ? Array.from(pack.cells.state) : [],
+          }
+        }
+      };
+      
+    case PHASES.PROVINCES:
+      // Store provinces data
+      return {
+        pack: {
+          provinces: pack?.provinces ? deepCopyArray(pack.provinces) : [],
+          cells: {
+            province: pack?.cells?.province ? Array.from(pack.cells.province) : [],
+          }
+        }
+      };
+      
+    case PHASES.RELIGIONS:
+      // Store religions data
+      return {
+        pack: {
+          religions: pack?.religions ? deepCopyArray(pack.religions) : [],
+          cells: {
+            religion: pack?.cells?.religion ? Array.from(pack.cells.religion) : [],
+          }
+        }
+      };
+      
+    case PHASES.EMBLEMS:
+      // Store emblems data (typically stored in states/cultures)
+      return {
+        pack: {
+          // Emblems are typically attached to states/cultures, so we cache those
+          states: pack?.states ? deepCopyArray(pack.states) : [],
+          cultures: pack?.cultures ? deepCopyArray(pack.cultures) : [],
+        }
+      };
+      
     default:
       // Full copy if phase-specific extraction not defined
       return fullData;
@@ -288,6 +468,124 @@ export function getFallbackForPhase(phaseName, context) {
         };
       }
       return null;
+      
+    case PHASES.PACK_CREATION:
+      // No fallback - pack creation is required
+      return null;
+      
+    case PHASES.RIVERS:
+      // Default: Empty rivers array
+      return {
+        pack: {
+          rivers: [],
+        }
+      };
+      
+    case PHASES.BIOMES:
+      // Default: Ocean biome for all cells
+      if (pack?.cells?.i) {
+        const length = pack.cells.i.length;
+        return {
+          pack: {
+            cells: {
+              biome: new Uint8Array(length).fill(0), // Ocean biome
+            }
+          }
+        };
+      }
+      return null;
+      
+    case PHASES.PACK_MARKUP:
+    case PHASES.CLUSTER_MERGE:
+      // Default: Empty features array
+      return {
+        pack: {
+          features: [],
+        }
+      };
+      
+    case PHASES.RANK_CELLS:
+      // No fallback - rank cells is required for cultures/burgs/states
+      return null;
+      
+    case PHASES.CULTURES:
+      // Default: Empty cultures array
+      if (pack?.cells?.i) {
+        const length = pack.cells.i.length;
+        return {
+          pack: {
+            cultures: [],
+            cells: {
+              culture: new Uint16Array(length).fill(0),
+            }
+          }
+        };
+      }
+      return null;
+      
+    case PHASES.BURGS:
+      // Default: Empty burgs array
+      return {
+        pack: {
+          burgs: [],
+        }
+      };
+      
+    case PHASES.STATES:
+      // Default: Single state covering entire map
+      if (pack?.cells?.i) {
+        const length = pack.cells.i.length;
+        return {
+          pack: {
+            states: [{ i: 0, name: 'Default State', cells: Array.from({ length }, (_, i) => i) }],
+            cells: {
+              state: new Uint16Array(length).fill(0),
+            }
+          }
+        };
+      }
+      return null;
+      
+    case PHASES.PROVINCES:
+      // Default: Empty provinces array
+      if (pack?.cells?.i) {
+        const length = pack.cells.i.length;
+        return {
+          pack: {
+            provinces: [],
+            cells: {
+              province: new Uint16Array(length).fill(0),
+            }
+          }
+        };
+      }
+      return null;
+      
+    case PHASES.RELIGIONS:
+      // Default: Single "No religion" entry if religionsNumber > 0, otherwise empty
+      if (pack?.cells?.i) {
+        const length = pack.cells.i.length;
+        const religions = options?.religionsNumber > 0 
+          ? [{ name: 'No religion', i: 0 }]
+          : [];
+        return {
+          pack: {
+            religions: religions,
+            cells: {
+              religion: new Uint16Array(length).fill(0),
+            }
+          }
+        };
+      }
+      return null;
+      
+    case PHASES.EMBLEMS:
+      // Default: No emblems (empty)
+      return {
+        pack: {
+          // Emblems are attached to states/cultures, so no separate fallback needed
+        }
+      };
       
     default:
       // No fallback for most phases
@@ -409,6 +707,131 @@ export function restorePhaseData(phaseName, cachedData, currentData) {
       } else if (grid.cells.i && grid.cells.i.length > 0) {
         // Initialize default precipitation if cache missing but grid exists
         grid.cells.prec = new Float32Array(grid.cells.i.length).fill(50.0);
+      }
+      break;
+      
+    case PHASES.PACK_CREATION:
+      // Restore pack structure
+      if (cachedData.pack && pack) {
+        if (cachedData.pack.cells) {
+          if (cachedData.pack.cells.i) {
+            pack.cells.i = createTypedArray({ maxValue: 65535, length: cachedData.pack.cells.i.length });
+            pack.cells.i.set(cachedData.pack.cells.i);
+          }
+          if (cachedData.pack.cells.h) {
+            pack.cells.h = new Uint8Array(cachedData.pack.cells.h.length);
+            pack.cells.h.set(cachedData.pack.cells.h);
+          }
+          if (cachedData.pack.cells.g) {
+            pack.cells.g = createTypedArray({ maxValue: 65535, length: cachedData.pack.cells.g.length });
+            pack.cells.g.set(cachedData.pack.cells.g);
+          }
+          if (cachedData.pack.cells.p) pack.cells.p = cachedData.pack.cells.p;
+          if (cachedData.pack.cells.c) pack.cells.c = cachedData.pack.cells.c;
+          if (cachedData.pack.cells.v) pack.cells.v = cachedData.pack.cells.v;
+          if (cachedData.pack.cells.area) {
+            pack.cells.area = new Float32Array(cachedData.pack.cells.area.length);
+            pack.cells.area.set(cachedData.pack.cells.area);
+          }
+        }
+        if (cachedData.pack.vertices) pack.vertices = cachedData.pack.vertices;
+        if (cachedData.pack.features) pack.features = cachedData.pack.features;
+      }
+      break;
+      
+    case PHASES.RIVERS:
+      // Restore rivers
+      if (cachedData.pack?.rivers && pack) {
+        pack.rivers = cachedData.pack.rivers;
+      } else if (pack) {
+        pack.rivers = [];
+      }
+      break;
+      
+    case PHASES.BIOMES:
+      // Restore biomes
+      if (cachedData.pack?.cells?.biome && pack?.cells) {
+        const biomes = new Uint8Array(cachedData.pack.cells.biome.length);
+        biomes.set(cachedData.pack.cells.biome);
+        pack.cells.biome = biomes;
+      } else if (pack?.cells?.i) {
+        pack.cells.biome = new Uint8Array(pack.cells.i.length).fill(0);
+      }
+      break;
+      
+    case PHASES.PACK_MARKUP:
+    case PHASES.CLUSTER_MERGE:
+      // Restore pack features
+      if (cachedData.pack?.features && pack) {
+        pack.features = cachedData.pack.features;
+      } else if (pack) {
+        pack.features = [];
+      }
+      break;
+      
+    case PHASES.RANK_CELLS:
+      // Rank cells doesn't add new data structures, just modifies existing ones
+      // No restoration needed, but mark as processed
+      break;
+      
+    case PHASES.CULTURES:
+      // Restore cultures
+      if (cachedData.pack && pack) {
+        if (cachedData.pack.cultures) pack.cultures = cachedData.pack.cultures;
+        if (cachedData.pack.cells?.culture) {
+          pack.cells.culture = createTypedArray({ maxValue: 65535, length: cachedData.pack.cells.culture.length });
+          pack.cells.culture.set(cachedData.pack.cells.culture);
+        }
+      }
+      break;
+      
+    case PHASES.BURGS:
+      // Restore burgs
+      if (cachedData.pack?.burgs && pack) {
+        pack.burgs = cachedData.pack.burgs;
+      } else if (pack) {
+        pack.burgs = [];
+      }
+      break;
+      
+    case PHASES.STATES:
+      // Restore states
+      if (cachedData.pack && pack) {
+        if (cachedData.pack.states) pack.states = cachedData.pack.states;
+        if (cachedData.pack.cells?.state) {
+          pack.cells.state = createTypedArray({ maxValue: 65535, length: cachedData.pack.cells.state.length });
+          pack.cells.state.set(cachedData.pack.cells.state);
+        }
+      }
+      break;
+      
+    case PHASES.PROVINCES:
+      // Restore provinces
+      if (cachedData.pack && pack) {
+        if (cachedData.pack.provinces) pack.provinces = cachedData.pack.provinces;
+        if (cachedData.pack.cells?.province) {
+          pack.cells.province = createTypedArray({ maxValue: 65535, length: cachedData.pack.cells.province.length });
+          pack.cells.province.set(cachedData.pack.cells.province);
+        }
+      }
+      break;
+      
+    case PHASES.RELIGIONS:
+      // Restore religions
+      if (cachedData.pack && pack) {
+        if (cachedData.pack.religions) pack.religions = cachedData.pack.religions;
+        if (cachedData.pack.cells?.religion) {
+          pack.cells.religion = createTypedArray({ maxValue: 65535, length: cachedData.pack.cells.religion.length });
+          pack.cells.religion.set(cachedData.pack.cells.religion);
+        }
+      }
+      break;
+      
+    case PHASES.EMBLEMS:
+      // Restore emblems (stored in states/cultures)
+      if (cachedData.pack && pack) {
+        if (cachedData.pack.states) pack.states = cachedData.pack.states;
+        if (cachedData.pack.cultures) pack.cultures = cachedData.pack.cultures;
       }
       break;
       

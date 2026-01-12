@@ -11,6 +11,7 @@ export {
   initGenerator,
   loadOptions,
   generateMap,
+  generatePartial, // Partial generation: run only specific phases
   getMapData,
   renderPreview, // DEPRECATED: Use renderPreviewSVG() or renderToSVG() instead
   renderPreviewSVG, // Primary rendering method (SVG) - appends to container or returns string
