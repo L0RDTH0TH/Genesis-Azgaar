@@ -132,13 +132,32 @@ function createStates({ pack, options, rng }) {
     const expansionism = rn(rng.random() * sizeVariety + 1, 1);
     const type = cultureData ? cultureData.type : 'Generic';
 
-    // Simplified name generation - will be enhanced when names module is fully integrated
-    const name = `State${stateId}`;
+    // Generate fantasy state name from capital burg or culture
+    let name = `State${stateId}`;
+    let fullName = name;
+    
+    // Try to use capital burg name if available
+    if (b.name && b.name !== `Burg${b.i}` && b.name.length > 2) {
+      const burgName = b.name;
+      // Generate state name with form suffix (e.g., "Kingdom of Lanith")
+      const forms = ['Kingdom', 'Empire', 'Realm', 'Dominion', 'Principality', 'Duchy', 'Republic', 'Federation'];
+      const form = forms[rng.randInt(0, forms.length - 1)];
+      name = burgName;
+      fullName = `${form} of ${burgName}`;
+    } else if (cultureData && cultureData.name) {
+      // Use culture name as fallback
+      const cultureName = cultureData.name;
+      const forms = ['Kingdom', 'Empire', 'Realm', 'Dominion', 'Principality', 'Duchy'];
+      const form = forms[rng.randInt(0, forms.length - 1)];
+      name = cultureName;
+      fullName = `${form} of ${cultureName}`;
+    }
 
     states.push({
       i: stateId,
       color: colors[(stateId - 1) % colors.length],
       name,
+      fullName,
       expansionism,
       capital: b.i,
       type,

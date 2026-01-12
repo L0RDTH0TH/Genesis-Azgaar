@@ -67,18 +67,6 @@ export function drawPolygon(ctx, polygon) {
 }
 
 /**
- * Poisson disc sampling for evenly distributed points
- * Based on mbostock's poissonDiscSampler
- * @generator
- * @param {number} x0 - Minimum x coordinate
- * @param {number} y0 - Minimum y coordinate
- * @param {number} x1 - Maximum x coordinate
- * @param {number} y1 - Maximum y coordinate
- * @param {number} r - Minimum distance between points
- * @param {number} k - Number of attempts per point (default: 3)
- * @yields {Array<number>} [x, y] coordinates
- */
-/**
  * Check if a point is inside a polygon using ray casting algorithm
  * @param {Array<number>} point - Point [x, y]
  * @param {Array<Array<number>>} polygon - Polygon vertices [[x1, y1], [x2, y2], ...]
@@ -99,6 +87,109 @@ export function pointInPolygon(point, polygon) {
   }
   
   return inside;
+}
+
+/**
+ * Clip polygon by bounding box (ported from original/commonUtils.js)
+ * Uses Cohen-Sutherland algorithm for clipping
+ * @param {Array<Array<number>>} points - Polygon points [[x1, y1], [x2, y2], ...]
+ * @param {number} width - Map width (right boundary)
+ * @param {number} height - Map height (bottom boundary)
+ * @param {number} secure - Security parameter (default: 0)
+ * @returns {Array<Array<number>>} Clipped polygon points
+ */
+export function clipPoly(points, width, height, secure = 0) {
+  if (points.length < 2) return points;
+  if (points.some(point => point === undefined || !Array.isArray(point) || point.length < 2)) {
+    console.error("Invalid point in clipPoly", points);
+    return points;
+  }
+
+  const bbox = [0, 0, width, height]; // [x0, y0, x1, y1]
+  let clipped = points;
+
+  // Clip against each edge of the bounding box (top, right, bottom, left)
+  // Using bit codes: 1=left, 2=right, 4=bottom, 8=top
+  for (let edge = 1; edge <= 8; edge *= 2) {
+    const result = [];
+    if (clipped.length === 0) break;
+
+    let prevInside = !(bitCode(clipped[clipped.length - 1], bbox) & edge);
+
+    for (let i = 0; i < clipped.length; i++) {
+      const current = clipped[i];
+      const currentInside = !(bitCode(current, bbox) & edge);
+
+      if (currentInside !== prevInside) {
+        // Edge crossing detected - add intersection point
+        const intersection = intersectEdge(clipped[i - 1] || clipped[clipped.length - 1], current, edge, bbox);
+        if (intersection) {
+          result.push(intersection);
+          if (secure && currentInside !== prevInside) {
+            result.push(intersection); // Add twice if secure mode
+            if (secure > 1) result.push(intersection); // Add thrice if secure > 1
+          }
+        }
+      }
+
+      if (currentInside) {
+        result.push(current);
+      }
+
+      prevInside = currentInside;
+    }
+
+    clipped = result;
+    if (clipped.length === 0) break;
+  }
+
+  return clipped.length > 0 ? clipped : points;
+}
+
+/**
+ * Get bit code for Cohen-Sutherland clipping algorithm
+ * @param {Array<number>} point - Point [x, y]
+ * @param {Array<number>} bbox - Bounding box [x0, y0, x1, y1]
+ * @returns {number} Bit code (1=left, 2=right, 4=bottom, 8=top)
+ */
+function bitCode(point, bbox) {
+  let code = 0;
+  const [x, y] = point;
+  const [x0, y0, x1, y1] = bbox;
+
+  if (x < x0) code |= 1; // Left
+  else if (x > x1) code |= 2; // Right
+
+  if (y < y0) code |= 4; // Bottom
+  else if (y > y1) code |= 8; // Top
+
+  return code;
+}
+
+/**
+ * Find intersection point with edge
+ * @param {Array<number>} p1 - First point [x, y]
+ * @param {Array<number>} p2 - Second point [x, y]
+ * @param {number} edge - Edge code (1=left, 2=right, 4=bottom, 8=top)
+ * @param {Array<number>} bbox - Bounding box [x0, y0, x1, y1]
+ * @returns {Array<number>|null} Intersection point [x, y] or null
+ */
+function intersectEdge(p1, p2, edge, bbox) {
+  const [x1, y1] = p1;
+  const [x2, y2] = p2;
+  const [x0, y0, x1_bound, y1_bound] = bbox;
+
+  if (edge & 8) { // Top edge
+    return [x1 + (x2 - x1) * (y1_bound - y1) / (y2 - y1), y1_bound];
+  } else if (edge & 4) { // Bottom edge
+    return [x1 + (x2 - x1) * (y0 - y1) / (y2 - y1), y0];
+  } else if (edge & 2) { // Right edge
+    return [x1_bound, y1 + (y2 - y1) * (x1_bound - x1) / (x2 - x1)];
+  } else if (edge & 1) { // Left edge
+    return [x0, y1 + (y2 - y1) * (x0 - x1) / (x2 - x1)];
+  }
+
+  return null;
 }
 
 /**

@@ -147,7 +147,8 @@
     
     // Dynamic import is required for variable paths
     let initGenerator, loadOptions, generateMap, renderPreviewSVG, renderToSVG;
-    let getDefaultRenderConfig, getOriginalRenderConfig;
+    let getDefaultRenderConfig, getOriginalRenderConfig, mergeRenderConfig;
+    let fromBundle = false; // Track import source for logging
     
     try {
       const lib = await import(libraryPath);
@@ -157,126 +158,52 @@
       renderPreviewSVG = lib.renderPreviewSVG;
       renderToSVG = lib.renderToSVG;
       
-      // Try to import render config functions from bundle first (preferred)
-      // Bundle exports should have latest config if bundle was rebuilt
-      if (lib.getDefaultRenderConfig && lib.mergeRenderConfig && lib.getOriginalRenderConfig) {
-        getDefaultRenderConfig = lib.getDefaultRenderConfig;
-        getOriginalRenderConfig = lib.getOriginalRenderConfig;
-        mergeRenderConfig = lib.mergeRenderConfig;
-        console.log('Render config functions imported from bundle (preferred)');
-        
-        // Verify parchment config is correct from bundle
-        const testConfig = getDefaultRenderConfig();
-        console.log('Bundle parchment config verification:', {
-          textureEnabled: testConfig.effects?.parchment?.enabled,
-          textureUrl: testConfig.effects?.parchment?.textureUrl,
-          pseudo3DEnabled: testConfig.effects?.pseudo3D?.enabled,
-          coastEnabled: testConfig.layers?.coast?.enabled,
-          colorScheme: testConfig.colorScheme,
-          oceanColor: testConfig.colors?.oceanBase,
-          reliefDensity: testConfig.layers?.relief?.density
-        });
-        
-        // Warn if config looks outdated (check for parchment defaults)
-        if (testConfig.colors?.oceanBase !== '#d2b48c') {
-          console.warn('⚠️ Bundle config may be outdated! Expected oceanBase: #d2b48c, got:', testConfig.colors?.oceanBase);
+      // FIRST try to import render config functions from bundle (PREFERRED)
+      try {
+        if (lib.getDefaultRenderConfig && lib.mergeRenderConfig && lib.getOriginalRenderConfig) {
+          getDefaultRenderConfig = lib.getDefaultRenderConfig;
+          getOriginalRenderConfig = lib.getOriginalRenderConfig;
+          mergeRenderConfig = lib.mergeRenderConfig;
+          fromBundle = true;
+        } else {
+          throw new Error('Bundle does not export render config functions');
         }
-      } else {
-        console.warn('Bundle does not export render config functions, falling back to source');
-      }
-      
-      // Fallback to source import only if bundle doesn't have exports
-      if (!getDefaultRenderConfig) {
+      } catch (bundleConfigError) {
+        // Bundle import failed or exports missing - fallback to source
+        console.warn('⚠️ Bundle config functions not available, using source fallback:', bundleConfigError.message);
+        
+        // FALLBACK: Import from source (only for development/debugging when bundle is broken/outdated)
         try {
           const configModule = await import('../src/rendering/config.js');
           getDefaultRenderConfig = configModule.getDefaultRenderConfig;
           getOriginalRenderConfig = configModule.getOriginalRenderConfig;
           mergeRenderConfig = configModule.mergeRenderConfig;
-          console.log('Render config functions imported from source file (fallback)');
-          
-          // Verify parchment config is correct
-          const testConfig = getDefaultRenderConfig();
-          console.log('Source parchment config verification:', {
-            textureEnabled: testConfig.effects?.parchment?.enabled,
-            textureUrl: testConfig.effects?.parchment?.textureUrl,
-            pseudo3DEnabled: testConfig.effects?.pseudo3D?.enabled,
-            coastEnabled: testConfig.layers?.coast?.enabled,
-            colorScheme: testConfig.colorScheme,
-            oceanColor: testConfig.colors?.oceanBase
-          });
-        } catch (configError) {
-          console.error('Could not import render config functions from source:', configError);
-          // Try bundle as fallback
-          if (lib.getDefaultRenderConfig && lib.getOriginalRenderConfig) {
-            getDefaultRenderConfig = lib.getDefaultRenderConfig;
-            getOriginalRenderConfig = lib.getOriginalRenderConfig;
-            console.log('Using render config functions from bundle (fallback)');
-          } else {
-            // Final fallback: create simple config objects
-          getDefaultRenderConfig = () => ({
-            colorScheme: 'parchment',
-            colors: {
-              oceanBase: '#d2b48c',
-              landBase: '#f5f5dc',
-              lakeFreshwater: '#d4a574',
-              lakeSaltwater: '#c9a671',
-              stateBorderStroke: '#654321',
-              provinceBorderStroke: '#654321',
-              riverStroke: '#a0826d',
-              riverFill: '#d4a574',
-              burgCapitalColor: '#5c4a3a',
-              burgTownColor: '#7d6b5a',
-              routeStroke: '#8b7355',
-            },
-            layers: {
-              biomes: { opacity: 0.6, showShadows: true },
-              states: { opacity: 0.4 },
-              borders: { stateWidth: 1, stateDashArray: '2', provinceWidth: 0.5, provinceDashArray: '0 2' },
-              rivers: { strokeWidth: 0.5, showLabels: false },
-              burgs: { capitalSize: 1, townSize: 0.5, showLabels: true },
-              relief: { density: 1.2, size: 1, shadow: true, heightScaling: true },
-              coast: { enabled: true, stroke: '#ffffff', width: 2, opacity: 0.8, glowWidth: 3 },
-              labels: { stateLabelColor: '#5c4a3a', stateLabelStroke: '#f5f5dc', stateLabelStrokeWidth: 0.3 },
-            },
-            effects: {
-              parchment: { enabled: true, textureUrl: 'https://i2.wp.com/azgaar.files.wordpress.com/2019/07/pergamena-small.jpg', opacity: 0.65, blendMode: 'multiply' },
-              pseudo3D: { enabled: true, heightExaggeration: 1.0, shadowOffsetX: 2, shadowOffsetY: 3, shadowBlur: 4, shadowOpacity: 0.5 },
-              sepia: { enabled: true, amount: 0.4 },
-            },
-          });
-          getOriginalRenderConfig = () => ({
-            colorScheme: 'bright',
-            colors: {
-              oceanBase: '#b4d2f3',
-              landBase: '#eef6fb',
-              lakeFreshwater: '#a8c8e0',
-              lakeSaltwater: '#9bb5d1',
-              stateBorderStroke: '#56566d',
-              provinceBorderStroke: '#56566d',
-              riverStroke: '#6b93d6',
-              riverFill: '#a8c8e0',
-              burgCapitalColor: '#333',
-              burgTownColor: '#666',
-              routeStroke: '#8b7355',
-            },
-            layers: {
-              biomes: { opacity: 0.7, showShadows: false },
-              states: { opacity: 0.5 },
-              borders: { stateWidth: 1, stateDashArray: '2', provinceWidth: 0.5, provinceDashArray: '0 2' },
-              rivers: { strokeWidth: 0.5, showLabels: false },
-              burgs: { capitalSize: 1, townSize: 0.5, showLabels: true },
-              relief: { density: 0.3, size: 1, shadow: false },
-              coast: { enabled: false },
-              labels: { stateLabelColor: '#000000', stateLabelStroke: '#ffffff', stateLabelStrokeWidth: 0.3 },
-            },
-            effects: {
-              parchment: { enabled: false, textureUrl: null, opacity: 0.8, blendMode: 'multiply' },
-              pseudo3D: { enabled: false, heightExaggeration: 1.0 },
-              sepia: { enabled: false, amount: 0.4 },
-            },
-          });
-          }
+          fromBundle = false;
+        } catch (sourceConfigError) {
+          console.error('❌ Could not import render config functions from source:', sourceConfigError);
+          throw new Error('Render config functions unavailable from both bundle and source');
         }
+      }
+      
+      // Log which import path was used
+      console.log('Render config functions loaded from: ' + (fromBundle ? 'BUNDLE' : 'SOURCE FALLBACK'));
+      
+      // Runtime verification: Check if parchment defaults are correctly loaded
+      const testConfig = getDefaultRenderConfig();
+      const isParchment = testConfig.colors?.oceanBase === '#d2b48c' &&
+                          testConfig.effects?.parchment?.enabled === true &&
+                          testConfig.layers?.relief?.density === 1.2;
+      
+      if (isParchment) {
+        console.log('Config verification: PARCHMENT DEFAULTS DETECTED ✓');
+      } else {
+        console.warn('Config verification: WARNING: Old/vibrant defaults detected!');
+        console.warn('Expected: oceanBase=#d2b48c, parchment.enabled=true, relief.density=1.2');
+        console.warn('Got:', {
+          oceanBase: testConfig.colors?.oceanBase,
+          parchmentEnabled: testConfig.effects?.parchment?.enabled,
+          reliefDensity: testConfig.layers?.relief?.density
+        });
       }
       
       if (!initGenerator || !loadOptions || !generateMap || !renderPreviewSVG) {

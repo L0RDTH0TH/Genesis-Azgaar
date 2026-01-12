@@ -1,0 +1,172 @@
+{
+  "timestamp": "2026-01-06T05:37:10.233Z",
+  "summary": {
+    "total": 5,
+    "successful": 5,
+    "failed": 0
+  },
+  "results": [
+    {
+      "name": "Continents_Seed42",
+      "success": true,
+      "metrics": {
+        "totalCells": 10188,
+        "landCells": 4075,
+        "landPercentage": 40,
+        "activeStates": 18,
+        "activeBurgs": 503,
+        "riverCount": 41,
+        "uniqueBiomes": 7
+      },
+      "svgAnalysis": {
+        "totalPaths": 144,
+        "borderPaths": 27,
+        "textPaths": 36,
+        "multiLineLabels": 0,
+        "tspanElements": 18,
+        "gradients": 3,
+        "circles": 503,
+        "polygons": 0,
+        "uniqueColors": 14
+      },
+      "generationTime": 3422,
+      "renderTime": 287,
+      "error": null
+    },
+    {
+      "name": "Archipelago_Seed42",
+      "success": true,
+      "metrics": {
+        "totalCells": 10915,
+        "landCells": 4366,
+        "landPercentage": 40,
+        "activeStates": 18,
+        "activeBurgs": 543,
+        "riverCount": 36,
+        "uniqueBiomes": 8
+      },
+      "svgAnalysis": {
+        "totalPaths": 145,
+        "borderPaths": 30,
+        "textPaths": 36,
+        "multiLineLabels": 0,
+        "tspanElements": 18,
+        "gradients": 4,
+        "circles": 543,
+        "polygons": 0,
+        "uniqueColors": 14
+      },
+      "generationTime": 1905,
+      "renderTime": 305,
+      "error": null
+    },
+    {
+      "name": "Pangea_Seed42",
+      "success": true,
+      "metrics": {
+        "totalCells": 10100,
+        "landCells": 4040,
+        "landPercentage": 40,
+        "activeStates": 18,
+        "activeBurgs": 502,
+        "riverCount": 29,
+        "uniqueBiomes": 6
+      },
+      "svgAnalysis": {
+        "totalPaths": 134,
+        "borderPaths": 28,
+        "textPaths": 36,
+        "multiLineLabels": 0,
+        "tspanElements": 18,
+        "gradients": 3,
+        "circles": 502,
+        "polygons": 0,
+        "uniqueColors": 15
+      },
+      "generationTime": 1686,
+      "renderTime": 336,
+      "error": null
+    },
+    {
+      "name": "Shattered_Seed42",
+      "success": true,
+      "metrics": {
+        "totalCells": 11352,
+        "landCells": 4540,
+        "landPercentage": 39.99,
+        "activeStates": 18,
+        "activeBurgs": 582,
+        "riverCount": 60,
+        "uniqueBiomes": 8
+      },
+      "svgAnalysis": {
+        "totalPaths": 163,
+        "borderPaths": 27,
+        "textPaths": 36,
+        "multiLineLabels": 0,
+        "tspanElements": 18,
+        "gradients": 4,
+        "circles": 582,
+        "polygons": 0,
+        "uniqueColors": 14
+      },
+      "generationTime": 1839,
+      "renderTime": 318,
+      "error": null
+    },
+    {
+      "name": "Continents_Seed100",
+      "success": true,
+      "metrics": {
+        "totalCells": 9618,
+        "landCells": 3847,
+        "landPercentage": 40,
+        "activeStates": 18,
+        "activeBurgs": 477,
+        "riverCount": 25,
+        "uniqueBiomes": 7
+      },
+      "svgAnalysis": {
+        "totalPaths": 133,
+        "borderPaths": 30,
+        "textPaths": 36,
+        "multiLineLabels": 0,
+        "tspanElements": 18,
+        "gradients": 3,
+        "circles": 477,
+        "polygons": 0,
+        "uniqueColors": 14
+      },
+      "generationTime": 1285,
+      "renderTime": 188,
+      "error": null
+    }
+  ],
+  "validation": {
+    "borderCoverage": {
+      "status": "pass",
+      "message": "All maps have borders (avg: 28.4)",
+      "averageBorders": "28.4",
+      "allHaveBorders": true
+    },
+    "labelQuality": {
+      "status": "pass",
+      "message": "Labels present (avg: 36.0), Multi-line: 0.0",
+      "averageTextPaths": "36.0",
+      "averageMultiLine": "0.0",
+      "hasMultiLine": false
+    },
+    "colorComplexity": {
+      "status": "warning",
+      "message": "Color complexity: 14.2 unique colors, Gradients: Yes",
+      "averageColors": "14.2",
+      "hasGradients": true
+    },
+    "performance": {
+      "status": "pass",
+      "message": "Generation: 2027ms, Render: 287ms",
+      "averageGenerationTime": "2027",
+      "averageRenderTime": "287"
+    }
+  }
+}

@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fork vs Original Comparison Test</title>
+  <style>
+    body {
+      font-family: monospace;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #e0e0e0;
+    }
+    .container {
+      max-width: 1800px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #4a9eff;
+      border-bottom: 2px solid #4a9eff;
+      padding-bottom: 10px;
+    }
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      border-left: 4px solid #4a9eff;
+    }
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .map-output {
+      background: #333;
+      padding: 15px;
+      border-radius: 5px;
+    }
+    .map-output h3 {
+      margin-top: 0;
+      color: #4a9eff;
+    }
+    .map-output img {
+      max-width: 100%;
+      border: 2px solid #4a9eff;
+      border-radius: 5px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 10px;
+      margin: 10px 0;
+    }
+    .metric {
+      padding: 8px;
+      background: #444;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .metric strong {
+      color: #4a9eff;
+    }
+    .diff {
+      background: #3a2a2a;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
+    }
+    .diff-item {
+      margin: 5px 0;
+      padding: 5px;
+      background: #4a2a2a;
+      border-left: 3px solid #ff6b6b;
+    }
+    button {
+      background: #4a9eff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px;
+    }
+    button:hover {
+      background: #5aaeff;
+    }
+    button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+    .status {
+      display: inline-block;
+      padding: 5px 10px;
+      border-radius: 3px;
+      font-weight: bold;
+      margin-left: 10px;
+    }
+    .status.running {
+      background: #ffaa00;
+      color: #000;
+    }
+    .status.complete {
+      background: #4caf50;
+      color: #fff;
+    }
+    pre {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 5px;
+      overflow-x: auto;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Fork vs Original Azgaar - Comprehensive Comparison</h1>
+    
+    <div class="test-section">
+      <h2>Test Parameters</h2>
+      <pre id="testParams"></pre>
+      <button id="runComparison">Run Comparison</button>
+      <span id="status" class="status"></span>
+    </div>
+
+    <div id="results"></div>
+  </div>
+
+  <script type="module">
+    // Test parameters
+    const TEST_PARAMS = {
+      seed: '42',
+      statesNumber: 18,
+      template: 'Continents',
+      landPercentage: 40,
+      showLabels: true,
+      showRelief: true,
+      fullRendering: true
+    };
+
+    const ADDITIONAL_TEMPLATES = ['Archipelago', 'Pangea', 'Shattered'];
+
+    document.getElementById('testParams').textContent = JSON.stringify(TEST_PARAMS, null, 2);
+
+    const runBtn = document.getElementById('runComparison');
+    const status = document.getElementById('status');
+    const results = document.getElementById('results');
+
+    // Import fork generator
+    import { initGenerator, generateMap } from '../dist/azgaar-genesis.esm.js';
+
+    async function generateForkMap(options) {
+      try {
+        initGenerator();
+        const mapData = await generateMap(options);
+        return mapData;
+      } catch (error) {
+        console.error('Fork generation error:', error);
+        throw error;
+      }
+    }
+
+    function calculateMetrics(pack, svg) {
+      const landCells = pack.cells.i.filter(i => pack.cells.h[i] >= 20);
+      const landPercentage = ((landCells.length / pack.cells.i.length) * 100).toFixed(1);
+      const landFeatures = (pack.features || []).filter(f => f && f.land);
+      const clusters = landFeatures.length;
+      
+      // Count isolines (approximate from SVG)
+      const isolinePaths = (svg.match(/<path[^>]*class="[^"]*isoline[^"]*"/g) || []).length;
+      const totalPaths = (svg.match(/<path[^>]*class="[^"]*state[^"]*"/g) || []).length;
+      const isolinePercentage = totalPaths > 0 ? ((isolinePaths / totalPaths) * 100).toFixed(1) : '0.0';
+      
+      // Count relief icons
+      const reliefCount = (svg.match(/<use[^>]*href="#relief[^"]*"/g) || []).length;
+
+      // Count states
+      const statesCount = (pack.states || []).length;
+
+      // Count burgs
+      const burgsCount = (pack.burgs || []).length;
+
+      // Count rivers
+      const riversCount = (pack.rivers || []).length;
+
+      return {
+        landPercentage: parseFloat(landPercentage),
+        clusters,
+        isolinePercentage: parseFloat(isolinePercentage),
+        reliefIcons: reliefCount,
+        states: statesCount,
+        burgs: burgsCount,
+        rivers: riversCount,
+        totalCells: pack.cells.i.length
+      };
+    }
+
+    function compareMetrics(original, fork) {
+      const diffs = [];
+      
+      const keys = Object.keys(original);
+      for (const key of keys) {
+        const orig = original[key];
+        const forkVal = fork[key];
+        const diff = Math.abs(orig - forkVal);
+        const percentDiff = orig !== 0 ? ((diff / orig) * 100).toFixed(1) : (diff * 100).toFixed(1);
+        
+        if (diff > 0.1 || (orig === 0 && forkVal !== 0) || (orig !== 0 && forkVal === 0)) {
+          diffs.push({
+            metric: key,
+            original: orig,
+            fork: forkVal,
+            difference: diff,
+            percentDiff: parseFloat(percentDiff),
+            severity: percentDiff > 10 ? 'high' : percentDiff > 5 ? 'medium' : 'low'
+          });
+        }
+      }
+      
+      return diffs;
+    }
+
+    async function runComparison() {
+      runBtn.disabled = true;
+      status.textContent = 'Running...';
+      status.className = 'status running';
+      results.innerHTML = '';
+
+      try {
+        // Generate fork map
+        status.textContent = 'Generating fork map...';
+        const forkData = await generateForkMap(TEST_PARAMS);
+        
+        const forkMetrics = calculateMetrics(forkData.pack, forkData.svg);
+        
+        // Create comparison display
+        const section = document.createElement('div');
+        section.className = 'test-section';
+        
+        section.innerHTML = `
+          <h2>Comparison Results - ${TEST_PARAMS.template} (Seed: ${TEST_PARAMS.seed})</h2>
+          <div class="comparison">
+            <div class="map-output">
+              <h3>Fork Output</h3>
+              <div class="metrics">
+                ${Object.entries(forkMetrics).map(([key, val]) => 
+                  `<div class="metric"><strong>${key}:</strong> ${val}</div>`
+                ).join('')}
+              </div>
+              <img src="data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(forkData.svg)))}" alt="Fork Map">
+            </div>
+            <div class="map-output">
+              <h3>Original Output</h3>
+              <p style="color: #ffaa00;">⚠️ Original Azgaar must be run separately in browser</p>
+              <p>To compare:</p>
+              <ol>
+                <li>Open <code>original/index.html</code> in browser</li>
+                <li>Set seed to "${TEST_PARAMS.seed}"</li>
+                <li>Set template to "${TEST_PARAMS.template}"</li>
+                <li>Generate map</li>
+                <li>Export SVG and compare visually</li>
+              </ol>
+            </div>
+          </div>
+          <div class="diff">
+            <h3>Fork Metrics</h3>
+            <pre>${JSON.stringify(forkMetrics, null, 2)}</pre>
+          </div>
+        `;
+        
+        results.appendChild(section);
+
+        // Save fork data for later comparison
+        const forkDataStr = JSON.stringify({
+          metrics: forkMetrics,
+          timestamp: new Date().toISOString(),
+          params: TEST_PARAMS
+        }, null, 2);
+        
+        // Create download link
+        const downloadLink = document.createElement('a');
+        downloadLink.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(forkDataStr);
+        downloadLink.download = `fork-output-seed${TEST_PARAMS.seed}-${TEST_PARAMS.template}.json`;
+        downloadLink.textContent = 'Download Fork Output JSON';
+        downloadLink.style.color = '#4a9eff';
+        downloadLink.style.display = 'block';
+        downloadLink.style.margin = '10px 0';
+        section.appendChild(downloadLink);
+
+        status.textContent = 'Complete!';
+        status.className = 'status complete';
+        
+      } catch (error) {
+        status.textContent = 'Error: ' + error.message;
+        status.className = 'status';
+        status.style.background = '#ff6b6b';
+        console.error('Comparison error:', error);
+      } finally {
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener('click', runComparison);
+  </script>
+</body>
+</html>

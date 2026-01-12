@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Multi-Seed Test (5 Random Seeds)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .test-container {
+      margin-bottom: 40px;
+      padding: 20px;
+      background: #2a2a2a;
+      border-radius: 8px;
+    }
+    .test-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .test-title {
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .test-status {
+      padding: 5px 15px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .status-pending { background: #666; }
+    .status-generating { background: #ff8c00; }
+    .status-complete { background: #4CAF50; }
+    .status-error { background: #f44336; }
+    #svgContainer {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      margin: 10px auto;
+      width: 960px;
+      height: 540px;
+    }
+    #svgContainer svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .metrics {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+      margin-top: 10px;
+    }
+    .progress {
+      text-align: center;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Multi-Seed Test (5 Random Seeds)</h1>
+  <div class="progress" id="progress">Initializing...</div>
+  
+  <div id="testContainers"></div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm",
+        "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? 'http://localhost:5173/src/index.js' 
+      : '/dist/azgaar-genesis.esm.js';
+    
+    const testContainers = document.getElementById('testContainers');
+    const progressDiv = document.getElementById('progress');
+    
+    // Generate 5 random seeds
+    const seeds = [];
+    for (let i = 0; i < 5; i++) {
+      seeds.push(String(Math.floor(Math.random() * 1000000)));
+    }
+    
+    let currentTest = 0;
+    const results = [];
+    
+    async function runTests() {
+      try {
+        progressDiv.textContent = 'Loading library...';
+        const AzgaarModule = await import(libraryPath);
+        const { initGenerator, loadOptions, generateMap, renderPreviewSVG, getMapData } = AzgaarModule;
+        
+        // Initialize generator
+        initGenerator({ container: null });
+        
+        // Create test containers
+        seeds.forEach((seed, index) => {
+          const container = document.createElement('div');
+          container.className = 'test-container';
+          container.id = `test-${index}`;
+          container.innerHTML = `
+            <div class="test-header">
+              <div class="test-title">Test ${index + 1}: Seed ${seed}</div>
+              <div class="test-status status-pending" id="status-${index}">Pending</div>
+            </div>
+            <div id="svgContainer-${index}" style="border: 2px solid #444; background: #000; width: 960px; height: 540px; margin: 10px auto;"></div>
+            <div class="metrics" id="metrics-${index}"></div>
+          `;
+          testContainers.appendChild(container);
+        });
+        
+        // Run tests sequentially
+        for (let i = 0; i < seeds.length; i++) {
+          currentTest = i;
+          const seed = seeds[i];
+          const statusEl = document.getElementById(`status-${i}`);
+          const svgContainer = document.getElementById(`svgContainer-${i}`);
+          const metricsEl = document.getElementById(`metrics-${i}`);
+          
+          progressDiv.textContent = `Running test ${i + 1}/5: Seed ${seed}...`;
+          statusEl.textContent = 'Generating';
+          statusEl.className = 'test-status status-generating';
+          
+          try {
+            // Load options
+            loadOptions({
+              seed: seed,
+              mapWidth: 960,
+              mapHeight: 540,
+              cellsDesired: 10000,
+              template: 'continent',
+              statesNumber: 18,
+              cultures: 12,
+              manors: 100,
+              landPercentage: 40,
+              fullRendering: true,
+            });
+            
+            // Generate map
+            const genStart = performance.now();
+            const data = generateMap(Delaunator);
+            const genTime = performance.now() - genStart;
+            
+            // Render to SVG
+            const renderStart = performance.now();
+            renderPreviewSVG({ 
+              width: 960, 
+              height: 540,
+              container: svgContainer 
+            });
+            const renderTime = performance.now() - renderStart;
+            
+            // Get metrics
+            const mapData = getMapData();
+            const metrics = {
+              seed: seed,
+              generationTime: genTime.toFixed(2),
+              renderTime: renderTime.toFixed(2),
+              totalTime: (genTime + renderTime).toFixed(2),
+              gridCells: mapData.grid.cells.i.length,
+              packCells: mapData.pack.cells.i.length,
+              states: mapData.pack.states ? mapData.pack.states.filter(s => s && !s.removed).length : 0,
+              burgs: mapData.pack.burgs ? mapData.pack.burgs.filter(b => b && !b.removed).length : 0,
+              rivers: mapData.pack.rivers ? mapData.pack.rivers.length : 0,
+              features: mapData.pack.features ? mapData.pack.features.length : 0,
+              cultures: mapData.pack.cultures ? mapData.pack.cultures.length : 0,
+            };
+            
+            // Count biomes
+            let uniqueBiomes = 0;
+            if (mapData.pack.cells.biome) {
+              const biomeSet = new Set();
+              for (let j = 0; j < mapData.pack.cells.biome.length; j++) {
+                const biomeId = mapData.pack.cells.biome[j];
+                if (biomeId !== undefined) {
+                  biomeSet.add(biomeId);
+                }
+              }
+              uniqueBiomes = biomeSet.size;
+            }
+            metrics.biomes = uniqueBiomes;
+            
+            // Display metrics
+            metricsEl.innerHTML = `
+              <strong>Metrics:</strong><br>
+              Generation: ${metrics.generationTime}ms | Render: ${metrics.renderTime}ms | Total: ${metrics.totalTime}ms<br>
+              Grid cells: ${metrics.gridCells} | Pack cells: ${metrics.packCells}<br>
+              States: ${metrics.states} | Burgs: ${metrics.burgs} | Rivers: ${metrics.rivers}<br>
+              Features: ${metrics.features} | Cultures: ${metrics.cultures} | Biomes: ${metrics.biomes}
+            `;
+            
+            statusEl.textContent = 'Complete';
+            statusEl.className = 'test-status status-complete';
+            
+            results.push({
+              seed,
+              metrics,
+              container: svgContainer,
+              index: i
+            });
+            
+            // Small delay between tests
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+          } catch (error) {
+            statusEl.textContent = 'Error';
+            statusEl.className = 'test-status status-error';
+            metricsEl.textContent = `Error: ${error.message}`;
+            console.error(`Test ${i + 1} error:`, error);
+          }
+        }
+        
+        progressDiv.textContent = `All tests complete! Generated ${results.length} maps.`;
+        progressDiv.style.color = '#4CAF50';
+        
+        // Log results
+        console.log('Multi-seed test results:', results);
+        
+      } catch (error) {
+        progressDiv.textContent = `Error: ${error.message}`;
+        progressDiv.style.color = '#f44336';
+        console.error('Test error:', error);
+      }
+    }
+    
+    // Auto-run on load
+    window.addEventListener('load', () => {
+      setTimeout(() => runTests(), 100);
+    });
+  </script>
+</body>
+</html>

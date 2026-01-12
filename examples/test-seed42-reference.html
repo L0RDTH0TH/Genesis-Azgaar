@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Seed 42 Reference Alignment Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    #svgContainer {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      margin-top: 20px;
+      width: 960px;
+      height: 540px;
+    }
+    #svgContainer svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+      text-align: center;
+      max-width: 960px;
+    }
+    .metrics {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+      font-family: monospace;
+      font-size: 12px;
+      max-width: 960px;
+    }
+    .comparison {
+      background: #1a3a1a;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+      font-family: monospace;
+      font-size: 12px;
+      max-width: 960px;
+    }
+    .match { color: #4CAF50; }
+    .mismatch { color: #f44336; }
+    .loading { color: #4CAF50; font-weight: bold; }
+    .error { color: #f44336; }
+    .success { color: #4CAF50; }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Seed 42 Reference Alignment Test</h1>
+  <p class="info">Testing alignment with reference JSON settings from Test map Full 2026-01-06-01-31.json...</p>
+  
+  <div id="svgContainer"></div>
+  
+  <div class="info" id="info">Initializing...</div>
+  <div class="metrics" id="metrics" style="display: none;"></div>
+  <div class="comparison" id="comparison" style="display: none;"></div>
+
+  <!-- Import map to resolve bare module specifiers -->
+  <script type="importmap">
+    {
+      "imports": {
+        "d3": "https://cdn.jsdelivr.net/npm/d3@7/+esm",
+        "d3-shape": "https://cdn.jsdelivr.net/npm/d3-shape@3.2.0/+esm",
+        "d3-color": "https://cdn.jsdelivr.net/npm/d3-color@3.1.0/+esm",
+        "d3-interpolate": "https://cdn.jsdelivr.net/npm/d3-interpolate@3.0.1/+esm",
+        "d3-scale": "https://cdn.jsdelivr.net/npm/d3-scale@4.0.2/+esm",
+        "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Use Vite dev server if available, otherwise use built library
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? 'http://localhost:5173/src/index.js' 
+      : '/dist/azgaar-genesis.esm.js';
+    
+    const svgContainer = document.getElementById('svgContainer');
+    const infoDiv = document.getElementById('info');
+    const metricsDiv = document.getElementById('metrics');
+    const comparisonDiv = document.getElementById('comparison');
+
+    // Reference settings from Test map Full 2026-01-06-01-31.json
+    const referenceSettings = {
+      distanceUnit: "mi",
+      distanceScale: 2,
+      areaUnit: "square",
+      heightUnit: "ft",
+      heightExponent: 2,
+      temperatureScale: "°F",
+      populationRate: 1000,
+      urbanization: 1,
+      mapSize: 54,
+      latitude: 50,
+      longitude: 50,
+      prec: 171,
+      options: {
+        pinNotes: false,
+        winds: [225, 45, 225, 315, 135, 315],
+        temperatureEquator: 20,
+        temperatureNorthPole: -31,
+        temperatureSouthPole: -10,
+        stateLabelsMode: "auto",
+        showBurgPreview: true,
+        villageMaxPopulation: 2000,
+        year: 991,
+        era: "Kivery Era",
+        eraShort: "KE",
+        military: [] // Array of 5 units - simplified for now
+      },
+      mapName: "Test map",
+      hideLabels: true,
+      stylePreset: "default",
+      rescaleLabels: true,
+      urbanDensity: 10
+    };
+
+    // Reference metrics (expected from seed 42 with these settings)
+    const referenceMetrics = {
+      states: 11, // Exact count from reference
+      burgs: 565, // Exact count from reference
+      rivers: 272, // Exact count from reference
+      features: 12, // Exact count from reference
+      cultures: 16, // Exact count from reference
+      biomes: 13 // All biomes possible
+    };
+
+    // Expected biome names (13 total)
+    const expectedBiomes = [
+      'Marine',
+      'Hot desert',
+      'Cold desert',
+      'Savanna',
+      'Grassland',
+      'Tropical seasonal forest',
+      'Temperate deciduous forest',
+      'Tropical rainforest',
+      'Temperate rainforest',
+      'Taiga',
+      'Tundra',
+      'Glacier',
+      'Wetland'
+    ];
+
+    async function generateAndCompare() {
+      try {
+        infoDiv.textContent = 'Loading library...';
+        infoDiv.className = 'info loading';
+        
+        const AzgaarModule = await import(libraryPath);
+        const { initGenerator, loadOptions, generateMap, renderPreviewSVG, getMapData, getDefaultBiomes } = AzgaarModule;
+
+        infoDiv.textContent = 'Initializing generator...';
+        
+        initGenerator({ container: svgContainer });
+
+        infoDiv.textContent = 'Loading reference settings...';
+        
+        // Map reference settings to fork options
+        // Note: Some settings are display-only (distanceUnit, temperatureScale, etc.)
+        // Focus on generation-affecting parameters
+        loadOptions({
+          seed: '42', // Seed 42
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 10000, // Default for points: 4
+          template: 'continent', // Default template
+          statesNumber: 11, // From reference
+          cultures: 16, // From reference
+          manors: 565, // From reference (target ~565 burgs)
+          // World configuration
+          temperatureEquator: 20, // From reference
+          temperatureNorthPole: -31, // From reference
+          temperatureSouthPole: -10, // From reference
+          prec: 171, // From reference (precipitation percentage)
+          winds: [225, 45, 225, 315, 135, 315], // From reference
+          latitude: 50, // From reference
+          longitude: 50, // From reference
+          mapSize: 54, // From reference
+          // Heightmap
+          heightExponent: 2, // From reference
+          landPercentage: 40, // Default for continent template
+          // Population/Economy
+          populationRate: 1000, // From reference
+          urbanization: 1, // From reference
+          urbanDensity: 10, // From reference
+          // Rendering
+          fullRendering: true, // Required for SVG
+        });
+
+        infoDiv.textContent = 'Generating map with seed 42...';
+        
+        const genStart = performance.now();
+        const data = generateMap(Delaunator);
+        const genTime = performance.now() - genStart;
+
+        infoDiv.textContent = 'Rendering to SVG...';
+        
+        const renderStart = performance.now();
+        renderPreviewSVG({ 
+          width: 960, 
+          height: 540,
+          container: svgContainer 
+        });
+        const renderTime = performance.now() - renderStart;
+
+        // Get map data for analysis
+        const mapData = getMapData();
+        const biomesData = getDefaultBiomes();
+
+        // Extract metrics
+        const metrics = {
+          seed: data.seed,
+          gridCells: data.grid.cells.i.length,
+          packCells: data.pack.cells.i.length,
+          states: data.pack.states ? data.pack.states.filter(s => s && !s.removed).length : 0,
+          burgs: data.pack.burgs ? data.pack.burgs.filter(b => b && !b.removed).length : 0,
+          rivers: data.pack.rivers ? data.pack.rivers.length : 0,
+          features: data.pack.features ? data.pack.features.length : 0,
+          cultures: data.pack.cultures ? data.pack.cultures.length : 0,
+        };
+
+        // Analyze biomes
+        const biomeCounts = {};
+        if (data.pack.cells.biome) {
+          for (let i = 0; i < data.pack.cells.biome.length; i++) {
+            const biomeId = data.pack.cells.biome[i];
+            if (biomeId !== undefined) {
+              biomeCounts[biomeId] = (biomeCounts[biomeId] || 0) + 1;
+            }
+          }
+        }
+        const uniqueBiomes = Object.keys(biomeCounts).length;
+        const biomeNames = biomesData.name || [];
+        const presentBiomes = Object.keys(biomeCounts).map(id => biomeNames[parseInt(id)]).filter(Boolean);
+
+        // Display metrics
+        metricsDiv.style.display = 'block';
+        metricsDiv.innerHTML = `
+          <strong>Generated Map Metrics (Seed 42):</strong><br>
+          Generation time: ${genTime.toFixed(2)}ms<br>
+          Rendering time: ${renderTime.toFixed(2)}ms<br>
+          Total time: ${(genTime + renderTime).toFixed(2)}ms<br>
+          <br>
+          <strong>Data Metrics:</strong><br>
+          Grid cells: ${metrics.gridCells}<br>
+          Pack cells: ${metrics.packCells}<br>
+          States: ${metrics.states}<br>
+          Burgs: ${metrics.burgs}<br>
+          Rivers: ${metrics.rivers}<br>
+          Features: ${metrics.features}<br>
+          Cultures: ${metrics.cultures}<br>
+          <br>
+          <strong>Biome Analysis:</strong><br>
+          Unique biomes present: ${uniqueBiomes}<br>
+          Present biomes: ${presentBiomes.join(', ')}<br>
+          Expected biomes: ${expectedBiomes.length} (${expectedBiomes.join(', ')})<br>
+        `;
+
+        // Compare to reference
+        const comparisons = [];
+        let allMatch = true;
+
+        // States check (exact match expected)
+        const statesMatch = metrics.states === referenceMetrics.states;
+        comparisons.push({
+          name: 'States count',
+          expected: referenceMetrics.states,
+          actual: metrics.states,
+          match: statesMatch
+        });
+        if (!statesMatch) allMatch = false;
+
+        // Burgs check (exact match expected)
+        const burgsMatch = metrics.burgs === referenceMetrics.burgs;
+        comparisons.push({
+          name: 'Burgs count',
+          expected: referenceMetrics.burgs,
+          actual: metrics.burgs,
+          match: burgsMatch
+        });
+        if (!burgsMatch) allMatch = false;
+
+        // Rivers check (exact match expected)
+        const riversMatch = metrics.rivers === referenceMetrics.rivers;
+        comparisons.push({
+          name: 'Rivers count',
+          expected: referenceMetrics.rivers,
+          actual: metrics.rivers,
+          match: riversMatch
+        });
+        if (!riversMatch) allMatch = false;
+
+        // Features check (exact match expected)
+        const featuresMatch = metrics.features === referenceMetrics.features;
+        comparisons.push({
+          name: 'Features count',
+          expected: referenceMetrics.features,
+          actual: metrics.features,
+          match: featuresMatch
+        });
+        if (!featuresMatch) allMatch = false;
+
+        // Cultures check (exact match expected)
+        const culturesMatch = metrics.cultures === referenceMetrics.cultures;
+        comparisons.push({
+          name: 'Cultures count',
+          expected: referenceMetrics.cultures,
+          actual: metrics.cultures,
+          match: culturesMatch
+        });
+        if (!culturesMatch) allMatch = false;
+
+        // Biome count check (all 13 possible)
+        const biomeMatch = uniqueBiomes === expectedBiomes.length;
+        comparisons.push({
+          name: 'Biome count',
+          expected: expectedBiomes.length,
+          actual: uniqueBiomes,
+          match: biomeMatch
+        });
+        // Biome count is informational, not critical for match
+
+        // Display comparison
+        comparisonDiv.style.display = 'block';
+        comparisonDiv.innerHTML = `
+          <strong>Reference Comparison:</strong><br>
+          ${comparisons.map(c => 
+            `<span class="${c.match ? 'match' : 'mismatch'}">
+              ${c.name}: Expected ${c.expected}, Got ${c.actual} ${c.match ? '✓' : '✗'}
+            </span><br>`
+          ).join('')}
+          <br>
+          <strong>Overall Status:</strong> <span class="${allMatch ? 'match' : 'mismatch'}">
+            ${allMatch ? '✓ All metrics match reference' : '✗ Some metrics do not match'}
+          </span>
+        `;
+
+        infoDiv.textContent = allMatch 
+          ? `✅ Complete! All metrics match reference. Generated in ${genTime.toFixed(2)}ms`
+          : `⚠️ Complete with mismatches. Generated in ${genTime.toFixed(2)}ms`;
+        infoDiv.className = allMatch ? 'info success' : 'info error';
+
+        // Log detailed data for analysis
+        console.log('Seed 42 Reference Alignment Test:', {
+          metrics,
+          biomeCounts,
+          presentBiomes,
+          expectedBiomes,
+          comparisons,
+          allMatch,
+          mapData: {
+            gridCells: mapData.grid.cells.i.length,
+            packCells: mapData.pack.cells.i.length,
+            statesCount: mapData.pack.states?.length || 0,
+            burgsCount: mapData.pack.burgs?.length || 0,
+          }
+        });
+
+      } catch (error) {
+        infoDiv.textContent = `❌ Error: ${error.message}`;
+        infoDiv.className = 'info error';
+        console.error('Test error:', error);
+        throw error;
+      }
+    }
+
+    // Auto-generate on load
+    window.addEventListener('load', () => {
+      setTimeout(() => generateAndCompare(), 100);
+    });
+  </script>
+</body>
+</html>

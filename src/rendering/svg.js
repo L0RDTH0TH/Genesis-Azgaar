@@ -10,6 +10,7 @@ import { getDefaultBiomes } from '../core/biomes.js';
 import { rn, minmax } from '../utils/math.js';
 import { getCellPolygonPath, pointInPolygon, poissonDiscSampler, clipPoly } from './utils.js';
 import { drawReliefIconsSVG, getReliefIconDefs } from './relief-icons.js';
+import { getSVGDefs } from './svg-defs.js';
 import { drawOceanLayersSVG } from './ocean-layers.js';
 import { line, curveCatmullRom, curveNatural } from 'd3-shape';
 import { getColorScheme, getBiomeColor, getColor } from './colors.js';
@@ -1812,8 +1813,9 @@ export function renderMapSVG(data, options = {}) {
   const height = options.height || mapHeight || 600;
   
   // Get render configuration (merge user config with defaults)
-  // CRITICAL: If a full renderConfig is passed (not partial), use it directly
-  // Otherwise merge with defaults to allow partial overrides
+  // CRITICAL: mergeRenderConfig now handles full config detection internally
+  // It will bypass merge for full configs (prevents bundle default overrides)
+  // and merge partial configs with defaults
   let renderConfig;
   
   // Always log what we're receiving for debugging
@@ -1827,27 +1829,21 @@ export function renderMapSVG(data, options = {}) {
     });
   }
   
-  if (options.renderConfig && 
-      options.renderConfig.colors && 
-      options.renderConfig.layers && 
-      options.renderConfig.effects) {
-    // Full config object provided - use directly (prevents bundle merge issues)
-    renderConfig = options.renderConfig;
-    if (typeof console !== 'undefined' && console.log) {
-      console.log('[renderMapSVG] Using full renderConfig directly (bypassing merge)', {
-        oceanColor: renderConfig.colors?.oceanBase,
-        parchmentEnabled: renderConfig.effects?.parchment?.enabled
-      });
-    }
-  } else {
-    // Partial config - merge with defaults
-    renderConfig = mergeRenderConfig(options.renderConfig || {});
-    if (typeof console !== 'undefined' && console.log) {
-      console.log('[renderMapSVG] Merged partial renderConfig with defaults', {
-        oceanColor: renderConfig.colors?.oceanBase,
-        parchmentEnabled: renderConfig.effects?.parchment?.enabled
-      });
-    }
+  // Always use mergeRenderConfig - it now handles full config detection internally
+  // Full configs bypass merge (prevents bundle override issues)
+  // Partial configs are merged with defaults (allows selective overrides)
+  renderConfig = mergeRenderConfig(options.renderConfig || {});
+  
+  // Diagnostic logging for effective config values after merge/bypass
+  // These logs help verify that parchment defaults are correctly applied
+  // and that full configs bypass merge (preventing bundle override issues)
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[renderMapSVG] Effective config check:');
+    console.log('  - Ocean color:', renderConfig.colors?.oceanBase);
+    console.log('  - Parchment texture:', renderConfig.effects?.parchment?.enabled ? 'ENABLED' : 'DISABLED');
+    console.log('  - Pseudo-3D shadows:', renderConfig.effects?.pseudo3D?.enabled ? 'ENABLED' : 'DISABLED');
+    console.log('  - Relief density:', renderConfig.layers?.relief?.density);
+    console.log('  - Coast outline:', renderConfig.layers?.coast?.enabled ? 'ENABLED' : 'DISABLED');
   }
   
   // Diagnostic logging for parchment rendering verification
@@ -2098,10 +2094,22 @@ export function renderMapSVG(data, options = {}) {
   }
 
 
-  // Add relief icon symbol definitions and filters for pseudo-3D effects
-  let defs = getReliefIconDefs();
+  // Get base SVG defs from original (filters, patterns, symbols, masks, hatching)
+  // Extract content inside <defs> tags (remove outer tags for merging)
+  const baseDefsStr = getSVGDefs();
+  const baseDefsContent = baseDefsStr.replace(/^<defs>|<\/defs>$/g, '').trim();
+  
+  // Get relief icon defs (also extract content)
+  const reliefDefsStr = getReliefIconDefs();
+  const reliefDefsContent = reliefDefsStr.replace(/^<defs>|<\/defs>$/g, '').trim();
+  
+  // Combine all defs in a single <defs> section
+  let defs = `<defs>
+${baseDefsContent}
+${reliefDefsContent}`;
   
   // Add drop shadow filter definition for pseudo-3D relief icons (enhanced)
+  // Note: dropShadow filter may already exist in base defs, so we append with a unique ID
   const pseudo3D = renderConfig.effects?.pseudo3D || {};
   if (pseudo3D.enabled !== false) {
     const shadowBlur = pseudo3D.shadowBlur ?? 4;
@@ -2110,9 +2118,9 @@ export function renderMapSVG(data, options = {}) {
     const shadowOffsetY = pseudo3D.shadowOffsetY ?? 3;
     
     // Enhanced drop shadow with bevel-like effect via feComponentTransfer
+    // Use a unique ID to avoid conflicts with base defs
     defs += `
-  <defs>
-    <filter id="dropShadow" x="-50%" y="-50%" width="200%" height="200%">
+    <filter id="dropShadowEnhanced" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur in="SourceAlpha" stdDeviation="${shadowBlur}" result="blur"/>
       <feOffset dx="${shadowOffsetX}" dy="${shadowOffsetY}" in="blur" result="offsetblur"/>
       <feComponentTransfer in="offsetblur" result="shadow">
@@ -2122,9 +2130,11 @@ export function renderMapSVG(data, options = {}) {
         <feMergeNode in="shadow"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
-    </filter>
-  </defs>`;
+    </filter>`;
   }
+  
+  // Close defs section
+  defs += '\n</defs>';
 
   // Combine into complete SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Full UI Port</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    
+    /* Left sidebar with UI panels */
+    #sidebar {
+      width: 300px;
+      background: #2a2a2a;
+      border-right: 2px solid #444;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    
+    #sidebarHeader {
+      padding: 15px;
+      background: #333;
+      border-bottom: 2px solid #444;
+    }
+    
+    #sidebarHeader h1 {
+      font-size: 18px;
+      margin-bottom: 10px;
+    }
+    
+    #sidebarControls {
+      display: flex;
+      gap: 10px;
+    }
+    
+    button {
+      padding: 8px 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    button:hover {
+      background: #45a049;
+    }
+    
+    button.secondary {
+      background: #2196F3;
+    }
+    
+    button.secondary:hover {
+      background: #0b7dda;
+    }
+    
+    /* Tab buttons */
+    .tabs {
+      display: flex;
+      background: #222;
+      border-bottom: 2px solid #444;
+    }
+    
+    .tab {
+      padding: 12px 20px;
+      background: #333;
+      border: none;
+      border-right: 1px solid #444;
+      color: #aaa;
+      cursor: pointer;
+      font-size: 14px;
+      flex: 1;
+    }
+    
+    .tab.active {
+      background: #2a2a2a;
+      color: #fff;
+      border-bottom: 2px solid #4CAF50;
+    }
+    
+    .tab:hover {
+      background: #2d2d2d;
+    }
+    
+    /* Tab content */
+    .tabcontent {
+      display: none;
+      padding: 15px;
+      flex: 1;
+      overflow-y: auto;
+    }
+    
+    .tabcontent.active {
+      display: block;
+    }
+    
+    /* Map container */
+    #mapContainer {
+      flex: 1;
+      position: relative;
+      background: #000;
+      overflow: hidden;
+    }
+    
+    #map {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    
+    #map svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    
+    /* Layers panel */
+    #layers {
+      /* Layers content will be populated by layers.js */
+    }
+    
+    #layersPreset {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 15px;
+      background: #333;
+      color: #fff;
+      border: 1px solid #555;
+      border-radius: 4px;
+    }
+    
+    #mapLayers {
+      list-style: none;
+    }
+    
+    #mapLayers li {
+      padding: 8px;
+      margin: 5px 0;
+      background: #333;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    #mapLayers li:hover {
+      background: #3a3a3a;
+    }
+    
+    #mapLayers li.buttonoff {
+      opacity: 0.5;
+      text-decoration: line-through;
+    }
+    
+    /* Style panel */
+    #style {
+      /* Style content will be populated by styles.js */
+    }
+    
+    #stylePreset {
+      width: 100%;
+      padding: 8px;
+      margin-bottom: 15px;
+      background: #333;
+      color: #fff;
+      border: 1px solid #555;
+      border-radius: 4px;
+    }
+    
+    /* Options panel */
+    #options {
+      /* Options content placeholder */
+      color: #aaa;
+    }
+    
+    /* Tools panel */
+    #tools {
+      /* Tools content placeholder */
+      color: #aaa;
+    }
+    
+    /* About panel */
+    #about {
+      /* About content placeholder */
+      color: #aaa;
+    }
+    
+    /* Status/error messages */
+    #status {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 10px 15px;
+      background: rgba(0, 0, 0, 0.8);
+      border-radius: 4px;
+      color: #fff;
+      font-size: 14px;
+      z-index: 1000;
+      display: none;
+    }
+    
+    #status.show {
+      display: block;
+    }
+    
+    #status.error {
+      background: rgba(200, 0, 0, 0.9);
+    }
+    
+    #status.success {
+      background: rgba(0, 200, 0, 0.9);
+    }
+  </style>
+</head>
+<body>
+  <!-- Left sidebar with UI panels -->
+  <div id="sidebar">
+    <div id="sidebarHeader">
+      <h1>Azgaar Genesis</h1>
+      <div id="sidebarControls">
+        <button id="newMapBtn">New Map</button>
+        <button id="resetZoomBtn" class="secondary">Reset Zoom</button>
+      </div>
+    </div>
+    
+    <!-- Tab buttons -->
+    <div class="tabs">
+      <button class="tab active" data-tab="layers">Layers</button>
+      <button class="tab" data-tab="style">Style</button>
+      <button class="tab" data-tab="options">Options</button>
+      <button class="tab" data-tab="tools">Tools</button>
+      <button class="tab" data-tab="about">About</button>
+    </div>
+    
+    <!-- Tab contents -->
+    <div id="layers" class="tabcontent active">
+      <h2>Layer Presets</h2>
+      <select id="layersPreset">
+        <option value="political">Political</option>
+        <option value="cultural">Cultural</option>
+        <option value="religions">Religions</option>
+        <option value="provinces">Provinces</option>
+        <option value="biomes">Biomes</option>
+        <option value="heightmap">Heightmap</option>
+        <option value="physical">Physical</option>
+        <option value="poi">POI</option>
+        <option value="military">Military</option>
+        <option value="emblems">Emblems</option>
+        <option value="landmass">Landmass</option>
+        <option value="custom">Custom</option>
+      </select>
+      
+      <h2>Map Layers</h2>
+      <ul id="mapLayers">
+        <!-- Will be populated by layers.js -->
+      </ul>
+    </div>
+    
+    <div id="style" class="tabcontent">
+      <h2>Style Presets</h2>
+      <select id="stylePreset">
+        <option value="default">Default</option>
+        <option value="ancient">Ancient</option>
+        <option value="gloom">Gloom</option>
+        <option value="pale">Pale</option>
+        <option value="light">Light</option>
+        <option value="watercolor">Watercolor</option>
+        <option value="clean">Clean</option>
+        <option value="atlas">Atlas</option>
+        <option value="darkSeas">Dark Seas</option>
+        <option value="cyberpunk">Cyberpunk</option>
+        <option value="night">Night</option>
+        <option value="monochrome">Monochrome</option>
+      </select>
+      <p style="color: #aaa; margin-top: 15px; font-size: 12px;">
+        Select a style preset to apply visual styling (colors, filters, effects) to the map.
+      </p>
+    </div>
+    
+    <div id="options" class="tabcontent">
+      <h2>Options</h2>
+      <p style="color: #aaa;">Options panel - Coming in Step 2</p>
+    </div>
+    
+    <div id="tools" class="tabcontent">
+      <h2>Tools</h2>
+      <p style="color: #aaa;">Tools panel - Coming in Step 2</p>
+    </div>
+    
+    <div id="about" class="tabcontent">
+      <h2>About</h2>
+      <p style="color: #aaa; line-height: 1.6;">
+        Azgaar Genesis - Full UI Port (Step 1)<br/><br/>
+        This is a port of the original Azgaar Fantasy Map Generator UI to the modular Genesis fork.<br/><br/>
+        <strong>Current Features:</strong><br/>
+        • Map generation and rendering<br/>
+        • Layer presets and toggling<br/>
+        • Style presets<br/><br/>
+        <strong>Coming Soon:</strong><br/>
+        • Options panel<br/>
+        • Tools panel<br/>
+        • Full UI parity
+      </p>
+    </div>
+  </div>
+  
+  <!-- Map container -->
+  <div id="mapContainer">
+    <div id="map"></div>
+    <div id="status"></div>
+  </div>
+  
+  <!-- Import map for Delaunator dependency -->
+  <script type="importmap">
+  {
+    "imports": {
+      "delaunator": "https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm"
+    }
+  }
+  </script>
+  
+  <!-- Main application script -->
+  <script type="module" src="full-ui.js"></script>
+</body>
+</html>

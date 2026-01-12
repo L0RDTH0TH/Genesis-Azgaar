@@ -7,6 +7,9 @@
  */
 
 import { rn } from '../utils/math.js';
+import { line, curveBasisClosed } from 'd3-shape';
+import { clipPoly } from './utils.js';
+import { getOceanColor } from './colors.js';
 
 /**
  * Draw ocean layers (fog/atmosphere layers) for visual polish
@@ -50,36 +53,52 @@ export function drawOceanLayersSVG(pack, options = {}) {
     const relaxed = chain.filter((v, idx) => !(idx % relax) || vertices.c[v].some(c => c >= pointsN));
     if (relaxed.length < 4) continue;
 
-    // Convert to points
-    const points = relaxed.map(v => vertices.p[v]);
+    // Convert to points and clip to map boundaries (Phase 2 fix)
+    const rawPoints = relaxed.map(v => vertices.p[v]);
+    const graphWidth = options.width || 1000;
+    const graphHeight = options.height || 600;
+    const points = clipPoly(rawPoints, graphWidth, graphHeight, 1);
+    if (points.length < 3) continue; // Skip if clipping removed too many points
     chains.push([t, points]);
   }
 
-  // Generate SVG paths for each layer
+  // Generate SVG paths for each layer using D3 curve smoothing
+  const lineGen = line()
+    .x(d => d[0])
+    .y(d => d[1])
+    .curve(curveBasisClosed);
+  
+  // Phase 3: Generate ocean depth gradients
+  const colorScheme = options.colorScheme || null;
+  const gradientDefs = generateOceanGradients(limits, colorScheme);
+  
   const svgPaths = [];
   for (const t of limits) {
     const layer = chains.filter(c => c[0] === t);
     if (layer.length === 0) continue;
 
-    // Generate path string from points (simplified - using straight lines for now)
-    // In original, uses d3.curveBasisClosed for smooth curves
+    // Generate smooth curved paths using D3 curveBasisClosed (matches original)
     const pathStrings = layer.map(([_, points]) => {
       if (points.length < 3) return '';
-      let path = `M ${points[0][0]},${points[0][1]}`;
-      for (let i = 1; i < points.length; i++) {
-        path += ` L ${points[i][0]},${points[i][1]}`;
-      }
-      path += ' Z'; // Close path
-      return path;
-    });
+      // Use D3 line generator with curveBasisClosed for smooth curves
+      const path = lineGen(points);
+      return path || '';
+    }).filter(p => p); // Filter out empty paths
 
-    const pathStr = pathStrings.filter(p => p).join(' ');
+    const pathStr = pathStrings.join(' ');
     if (pathStr) {
-      svgPaths.push(`<path d="${pathStr}" fill="#ecf2f9" fill-opacity="${opacity}" />`);
+      // Phase 3: Use gradient for depth-based coloring, or fallback to opacity
+      const gradientId = `oceanGradient-${Math.abs(t)}`;
+      const fillColor = colorScheme && options.width && options.height
+        ? `url(#${gradientId})`
+        : '#ecf2f9';
+      const fillOpacity = colorScheme ? (opacity * 1.2) : opacity; // Slightly more opaque with gradients
+      
+      svgPaths.push(`<path d="${pathStr}" fill="${fillColor}" fill-opacity="${fillOpacity}" />`);
     }
   }
 
-  return svgPaths.join('');
+  return gradientDefs + svgPaths.join('');
 }
 
 /**
@@ -193,4 +212,38 @@ function randomizeOutline() {
     }
   }
   return limits;
+}
+
+/**
+ * Generate SVG gradient definitions for ocean depth (Phase 3)
+ * @param {Array<number>} limits - Depth limits (negative values)
+ * @param {Function|string|null} colorScheme - Optional color scheme
+ * @returns {string} SVG <defs> with gradients
+ */
+function generateOceanGradients(limits, colorScheme) {
+  if (!colorScheme || limits.length === 0) return '';
+  
+  const gradients = [];
+  
+  for (const t of limits) {
+    if (t >= 0) continue; // Only process ocean depths (negative)
+    
+    const depth = Math.abs(t); // 1-9 (shallow to deep)
+    const gradientId = `oceanGradient-${depth}`;
+    
+    // Create gradient from light blue (top) to deep blue (bottom)
+    const topColor = getOceanColor(-depth + 1, colorScheme) || '#b4d2f3';
+    const bottomColor = getOceanColor(-depth, colorScheme) || '#4a7fb0';
+    
+    gradients.push(
+      `<linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">`,
+      `  <stop offset="0%" stop-color="${topColor}" stop-opacity="0.6" />`,
+      `  <stop offset="100%" stop-color="${bottomColor}" stop-opacity="0.8" />`,
+      `</linearGradient>`
+    );
+  }
+  
+  if (gradients.length === 0) return '';
+  
+  return `<defs>${gradients.join('')}</defs>`;
 }

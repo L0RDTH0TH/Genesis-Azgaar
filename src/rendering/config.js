@@ -175,27 +175,69 @@ export const originalRenderConfig = {
 };
 
 /**
+ * Check if a config object is a full render configuration
+ * A full config must have all top-level keys (colors, layers, effects, colorScheme)
+ * AND at least one parchment-specific value (to distinguish from partial configs)
+ * @param {Object} config - Config object to check
+ * @returns {boolean} True if config appears to be a complete render config
+ */
+function isFullConfig(config) {
+  if (!config || typeof config !== 'object') {
+    return false;
+  }
+  
+  // Must have all top-level keys from defaultRenderConfig
+  const requiredKeys = ['colors', 'layers', 'effects'];
+  const hasAllKeys = requiredKeys.every(key => 
+    config[key] && typeof config[key] === 'object'
+  );
+  
+  if (!hasAllKeys) {
+    return false;
+  }
+  
+  // Must have at least one parchment-specific value to be considered "full"
+  // This helps distinguish full configs from partial configs that happen to have all keys
+  const hasParchmentIndicator = 
+    // Parchment tan ocean color
+    config.colors?.oceanBase === '#d2b48c' ||
+    // Parchment effect enabled
+    config.effects?.parchment?.enabled === true ||
+    // Or original style (bright ocean color)
+    config.colors?.oceanBase === '#b4d2f3' ||
+    // Or explicitly set colorScheme
+    (config.colorScheme && ['parchment', 'bright'].includes(config.colorScheme)) ||
+    // Or relief density set to parchment value (1.2)
+    config.layers?.relief?.density === 1.2;
+  
+  return hasParchmentIndicator;
+}
+
+/**
  * Merge user render configuration with defaults
  * @param {Object} userConfig - Partial render configuration (or full config to use directly)
  * @param {Object} baseConfig - Base configuration (defaults to parchment)
  * @returns {Object} Merged configuration
  */
 export function mergeRenderConfig(userConfig = {}, baseConfig = defaultRenderConfig) {
-  // If userConfig is already a full config object (has colors, layers, effects),
-  // return it directly to avoid overriding with stale bundle defaults
-  if (userConfig && 
-      typeof userConfig === 'object' &&
-      userConfig.colors && 
-      typeof userConfig.colors === 'object' &&
-      userConfig.layers && 
-      typeof userConfig.layers === 'object' &&
-      userConfig.effects && 
-      typeof userConfig.effects === 'object') {
-    // Full config provided - use directly (prevents bundle default override)
+  // FIRST: Check if userConfig is a full config object
+  // Full config detection prevents bundle-baked defaults from overriding user-provided full configs
+  // This is critical when bundle has outdated defaults but user passes complete config
+  if (isFullConfig(userConfig)) {
+    // Full config provided - bypass merge and use directly
+    // This prevents stale bundle defaults from overriding user's complete config
+    if (typeof console !== 'undefined' && console.log) {
+      console.log('[mergeRenderConfig] Using: FULL USER CONFIG (bypass)');
+    }
     return deepCopy(userConfig);
   }
   
   // Partial config - merge with defaults
+  // Fallback/default logic: deep merge user partial config over base defaults
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[mergeRenderConfig] Using: MERGED CONFIG');
+  }
+  
   const merged = deepCopy(baseConfig);
   
   // Deep merge user config

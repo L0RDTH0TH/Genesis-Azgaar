@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Final Validation Tests</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      border-bottom: 2px solid #4a90e2;
+      padding-bottom: 10px;
+    }
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 4px;
+      border-left: 4px solid #4a90e2;
+    }
+    .test-section h2 {
+      margin-top: 0;
+      color: #4a90e2;
+    }
+    .controls {
+      margin: 15px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    button {
+      padding: 10px 20px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #357abd;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .output-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .output-box {
+      border: 2px solid #ddd;
+      border-radius: 4px;
+      padding: 15px;
+      background: white;
+    }
+    .output-box h3 {
+      margin-top: 0;
+      color: #666;
+    }
+    #svgContainer {
+      border: 1px solid #ddd;
+      background: white;
+      min-height: 600px;
+    }
+    .metrics {
+      margin: 15px 0;
+      padding: 15px;
+      background: #e8f4f8;
+      border-radius: 4px;
+    }
+    .metrics table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    .metrics th, .metrics td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    .metrics th {
+      background: #4a90e2;
+      color: white;
+    }
+    .status {
+      padding: 10px;
+      border-radius: 4px;
+      margin: 10px 0;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    .status.warning {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .comparison-item {
+      border: 2px solid #ddd;
+      padding: 15px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Azgaar Genesis - Final Validation Tests</h1>
+    
+    <div class="test-section">
+      <h2>Test Configuration</h2>
+      <div class="controls">
+        <label>
+          Template:
+          <select id="templateSelect">
+            <option value="Continents">Continents</option>
+            <option value="Archipelago">Archipelago</option>
+            <option value="Pangea">Pangea</option>
+            <option value="Shattered">Shattered</option>
+          </select>
+        </label>
+        <label>
+          Seed:
+          <input type="text" id="seedInput" value="42" style="width: 80px;">
+        </label>
+        <label>
+          States:
+          <input type="number" id="statesInput" value="18" style="width: 60px;">
+        </label>
+        <label>
+          Land %:
+          <input type="number" id="landInput" value="40" style="width: 60px;">
+        </label>
+        <label>
+          Color Scheme:
+          <select id="colorSchemeSelect">
+            <option value="bright">Bright</option>
+            <option value="natural">Natural</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
+        <button id="generateBtn">Generate Map</button>
+        <button id="analyzeBtn" disabled>Analyze SVG</button>
+        <button id="exportBtn" disabled>Export Data</button>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>Map Output</h2>
+      <div id="svgContainer"></div>
+    </div>
+
+    <div class="test-section">
+      <h2>Validation Metrics</h2>
+      <div id="metricsContainer" class="metrics">
+        <p>Generate a map to see metrics...</p>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>SVG Analysis</h2>
+      <div id="analysisContainer">
+        <p>Click "Analyze SVG" to see element counts...</p>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>Export Data</h2>
+      <div id="exportContainer">
+        <p>Click "Export Data" to download JSON/SVG...</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { AzgaarGenerator } from '../dist/azgaar-genesis.esm.js';
+
+    const generator = new AzgaarGenerator();
+    let currentData = null;
+    let currentSVG = null;
+
+    document.getElementById('generateBtn').addEventListener('click', async () => {
+      const template = document.getElementById('templateSelect').value;
+      const seed = document.getElementById('seedInput').value;
+      const statesNumber = parseInt(document.getElementById('statesInput').value);
+      const landPercentage = parseInt(document.getElementById('landInput').value);
+      const colorScheme = document.getElementById('colorSchemeSelect').value;
+
+      const statusDiv = document.createElement('div');
+      statusDiv.className = 'status';
+      statusDiv.textContent = 'Generating map...';
+      document.getElementById('metricsContainer').innerHTML = '';
+      document.getElementById('metricsContainer').appendChild(statusDiv);
+
+      try {
+        const options = {
+          seed: seed,
+          template: template,
+          statesNumber: statesNumber,
+          landPercentage: landPercentage,
+          showLabels: true,
+          showRelief: true,
+          fullRendering: true,
+          width: 1000,
+          height: 600,
+          colorScheme: colorScheme
+        };
+
+        console.log('Generating with options:', options);
+        currentData = await generator.generateMap(options);
+        console.log('Generation complete:', currentData);
+
+        // Render SVG
+        const svgString = generator.renderSVG(currentData, { width: 1000, height: 600 });
+        currentSVG = svgString;
+        document.getElementById('svgContainer').innerHTML = svgString;
+
+        // Calculate metrics
+        const metrics = calculateMetrics(currentData);
+        displayMetrics(metrics);
+
+        statusDiv.className = 'status success';
+        statusDiv.textContent = 'Map generated successfully!';
+        document.getElementById('analyzeBtn').disabled = false;
+        document.getElementById('exportBtn').disabled = false;
+
+      } catch (error) {
+        console.error('Generation error:', error);
+        statusDiv.className = 'status error';
+        statusDiv.textContent = `Error: ${error.message}`;
+      }
+    });
+
+    document.getElementById('analyzeBtn').addEventListener('click', () => {
+      if (!currentSVG) return;
+      
+      const analysis = analyzeSVG(currentSVG);
+      displayAnalysis(analysis);
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      if (!currentData || !currentSVG) return;
+      
+      // Export JSON
+      const jsonStr = JSON.stringify(currentData, null, 2);
+      const jsonBlob = new Blob([jsonStr], { type: 'application/json' });
+      const jsonUrl = URL.createObjectURL(jsonBlob);
+      const jsonLink = document.createElement('a');
+      jsonLink.href = jsonUrl;
+      jsonLink.download = `azgaar-map-${Date.now()}.json`;
+      jsonLink.click();
+
+      // Export SVG
+      const svgBlob = new Blob([currentSVG], { type: 'image/svg+xml' });
+      const svgUrl = URL.createObjectURL(svgBlob);
+      const svgLink = document.createElement('a');
+      svgLink.href = svgUrl;
+      svgLink.download = `azgaar-map-${Date.now()}.svg`;
+      svgLink.click();
+    });
+
+    function calculateMetrics(data) {
+      const pack = data.pack;
+      const cells = pack.cells;
+      const states = pack.states || [];
+      const burgs = pack.burgs || [];
+      const rivers = pack.rivers || [];
+
+      // Count land cells
+      const landCells = cells.h ? cells.h.filter(h => h >= 20).length : 0;
+      const totalCells = cells.i ? cells.i.length : 0;
+      const landPercentage = totalCells > 0 ? (landCells / totalCells * 100).toFixed(2) : 0;
+
+      // Count states (excluding neutral)
+      const activeStates = states.filter(s => s && !s.removed && s.i !== 0).length;
+
+      // Count burgs
+      const activeBurgs = burgs.filter(b => b && !b.removed).length;
+
+      // Count rivers
+      const riverCount = rivers ? rivers.length : 0;
+
+      // Count biomes
+      const uniqueBiomes = new Set();
+      if (cells.biome) {
+        for (let i = 0; i < cells.biome.length; i++) {
+          if (cells.biome[i] !== undefined) {
+            uniqueBiomes.add(cells.biome[i]);
+          }
+        }
+      }
+
+      return {
+        totalCells,
+        landCells,
+        landPercentage,
+        activeStates,
+        activeBurgs,
+        riverCount,
+        uniqueBiomes: uniqueBiomes.size
+      };
+    }
+
+    function displayMetrics(metrics) {
+      const container = document.getElementById('metricsContainer');
+      container.innerHTML = `
+        <h3>Map Data Metrics</h3>
+        <table>
+          <tr>
+            <th>Metric</th>
+            <th>Value</th>
+          </tr>
+          <tr>
+            <td>Total Cells</td>
+            <td>${metrics.totalCells}</td>
+          </tr>
+          <tr>
+            <td>Land Cells</td>
+            <td>${metrics.landCells}</td>
+          </tr>
+          <tr>
+            <td>Land Percentage</td>
+            <td>${metrics.landPercentage}%</td>
+          </tr>
+          <tr>
+            <td>Active States</td>
+            <td>${metrics.activeStates}</td>
+          </tr>
+          <tr>
+            <td>Active Burgs</td>
+            <td>${metrics.activeBurgs}</td>
+          </tr>
+          <tr>
+            <td>Rivers</td>
+            <td>${metrics.riverCount}</td>
+          </tr>
+          <tr>
+            <td>Unique Biomes</td>
+            <td>${metrics.uniqueBiomes}</td>
+          </tr>
+        </table>
+      `;
+    }
+
+    function analyzeSVG(svgString) {
+      const parser = new DOMParser();
+      const svgDoc = parser.parseFromString(svgString, 'image/svg+xml');
+      const svg = svgDoc.documentElement;
+
+      // Count elements
+      const paths = svg.querySelectorAll('path');
+      const borders = svg.querySelectorAll('path[stroke]');
+      const textPaths = svg.querySelectorAll('textPath');
+      const tspan = svg.querySelectorAll('tspan');
+      const gradients = svg.querySelectorAll('linearGradient');
+      const circles = svg.querySelectorAll('circle');
+      const polygons = svg.querySelectorAll('polygon');
+
+      // Count unique fill colors
+      const fills = new Set();
+      paths.forEach(p => {
+        const fill = p.getAttribute('fill');
+        if (fill && fill !== 'none') fills.add(fill);
+      });
+      circles.forEach(c => {
+        const fill = c.getAttribute('fill');
+        if (fill && fill !== 'none') fills.add(fill);
+      });
+      polygons.forEach(p => {
+        const fill = p.getAttribute('fill');
+        if (fill && fill !== 'none') fills.add(fill);
+      });
+
+      // Count border paths (state borders)
+      const borderPaths = Array.from(borders).filter(p => {
+        const stroke = p.getAttribute('stroke');
+        return stroke && stroke !== 'none' && !p.getAttribute('fill');
+      });
+
+      // Count multi-line labels (labels with tspan)
+      const multiLineLabels = Array.from(textPaths).filter(tp => {
+        const parent = tp.parentElement;
+        return parent && parent.querySelectorAll('tspan').length > 1;
+      });
+
+      return {
+        totalPaths: paths.length,
+        borderPaths: borderPaths.length,
+        textPaths: textPaths.length,
+        multiLineLabels: multiLineLabels.length,
+        tspanElements: tspan.length,
+        gradients: gradients.length,
+        circles: circles.length,
+        polygons: polygons.length,
+        uniqueColors: fills.size
+      };
+    }
+
+    function displayAnalysis(analysis) {
+      const container = document.getElementById('analysisContainer');
+      container.innerHTML = `
+        <h3>SVG Element Analysis</h3>
+        <table>
+          <tr>
+            <th>Element Type</th>
+            <th>Count</th>
+          </tr>
+          <tr>
+            <td>Total Paths</td>
+            <td>${analysis.totalPaths}</td>
+          </tr>
+          <tr>
+            <td>Border Paths</td>
+            <td>${analysis.borderPaths}</td>
+          </tr>
+          <tr>
+            <td>Text Paths (Labels)</td>
+            <td>${analysis.textPaths}</td>
+          </tr>
+          <tr>
+            <td>Multi-Line Labels</td>
+            <td>${analysis.multiLineLabels}</td>
+          </tr>
+          <tr>
+            <td>Tspan Elements</td>
+            <td>${analysis.tspanElements}</td>
+          </tr>
+          <tr>
+            <td>Gradients</td>
+            <td>${analysis.gradients}</td>
+          </tr>
+          <tr>
+            <td>Circles (Burgs)</td>
+            <td>${analysis.circles}</td>
+          </tr>
+          <tr>
+            <td>Polygons (Relief)</td>
+            <td>${analysis.polygons}</td>
+          </tr>
+          <tr>
+            <td>Unique Fill Colors</td>
+            <td>${analysis.uniqueColors}</td>
+          </tr>
+        </table>
+      `;
+    }
+  </script>
+</body>
+</html>

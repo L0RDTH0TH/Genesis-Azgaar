@@ -221,8 +221,19 @@ function placeTowns({ pack, options, rng, burgs, burgsTree }) {
 
       const burg = burgs.length;
       const culture = cells.culture[cell];
-      // Simplified name generation - will be enhanced when names module is fully integrated
-      const name = `Town${burg}`;
+      // Generate fantasy burg name from culture or simple pattern
+      let name = `Town${burg}`;
+      if (pack.cultures && culture !== undefined && pack.cultures[culture]) {
+        const cultureName = pack.cultures[culture].name || '';
+        // Simple name generation: use culture name + suffix
+        const suffixes = ['burg', 'ton', 'ville', 'ford', 'port', 'haven', 'gate', 'keep', 'hall', 'stead'];
+        const suffix = suffixes[rng.randInt(0, suffixes.length - 1)];
+        if (cultureName.length > 0) {
+          // Use first 3-5 letters of culture name + suffix
+          const prefix = cultureName.substring(0, Math.min(5, cultureName.length));
+          name = prefix.charAt(0).toUpperCase() + prefix.slice(1).toLowerCase() + suffix;
+        }
+      }
       burgs.push({
         cell,
         x,
@@ -364,7 +375,19 @@ export function generateBurgs({ pack, grid, options, rng }) {
     b.state = i; // Capital is also state capital
     b.culture = cells.culture[b.cell];
     // Simplified name generation - will be enhanced when names module is fully integrated
-    b.name = `Capital${i}`;
+    // Generate fantasy capital name from culture
+    let capitalName = `Capital${i}`;
+    if (pack.cultures && b.culture !== undefined && pack.cultures[b.culture]) {
+      const cultureName = pack.cultures[b.culture].name || '';
+      if (cultureName.length > 0) {
+        // Use culture name + capital suffix
+        const suffixes = ['burg', 'ton', 'ville', 'ford', 'port', 'haven', 'gate', 'keep', 'hall', 'stead', 'holm', 'wick'];
+        const suffix = suffixes[rng.randInt(0, suffixes.length - 1)];
+        const prefix = cultureName.substring(0, Math.min(6, cultureName.length));
+        capitalName = prefix.charAt(0).toUpperCase() + prefix.slice(1).toLowerCase() + suffix;
+      }
+    }
+    b.name = capitalName;
     b.feature = cells.f[b.cell];
     b.capital = 1;
     cells.burg[b.cell] = i;
@@ -380,7 +403,23 @@ export function generateBurgs({ pack, grid, options, rng }) {
     b.capital = 0; // Not a capital - explicitly set to 0
     b.state = 0; // No state assigned yet
     b.culture = cells.culture[b.cell];
-    b.name = `Town${i}`;
+    // Generate fantasy town name (already handled in placeTowns, but ensure it's set)
+    if (!b.name || b.name === `Town${i}`) {
+      // Generate from culture if available
+      if (pack.cultures && b.culture !== undefined && pack.cultures[b.culture]) {
+        const cultureName = pack.cultures[b.culture].name || '';
+        if (cultureName.length > 0) {
+          const suffixes = ['burg', 'ton', 'ville', 'ford', 'port', 'haven', 'gate', 'keep', 'hall', 'stead'];
+          const suffix = suffixes[rng.randInt(0, suffixes.length - 1)];
+          const prefix = cultureName.substring(0, Math.min(5, cultureName.length));
+          b.name = prefix.charAt(0).toUpperCase() + prefix.slice(1).toLowerCase() + suffix;
+        } else {
+          b.name = `Town${i}`;
+        }
+      } else {
+        b.name = `Town${i}`;
+      }
+    }
     b.feature = cells.f[b.cell];
     cells.burg[b.cell] = i;
     townsMarked++;
