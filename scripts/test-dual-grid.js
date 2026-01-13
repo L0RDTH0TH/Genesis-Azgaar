@@ -822,7 +822,7 @@ async function generateDualGridPreviews() {
   console.log('=== Generating and Opening Dual-Grid Preview SVGs ===\n');
   
   const variants = [
-    { name: 'default', dissolveProbability: 0.5, description: 'Default (0.5 dissolve)' },
+    { name: 'default', dissolveProbability: 0.5, hexLayers: 14, description: 'Default (0.5 dissolve, 14 layers)' },
     { name: 'high-dissolve', dissolveProbability: 0.7, description: 'High dissolve (0.7 - more organic)' },
     { name: 'low-dissolve', dissolveProbability: 0.3, description: 'Low dissolve (0.3 - more regular)' },
   ];
