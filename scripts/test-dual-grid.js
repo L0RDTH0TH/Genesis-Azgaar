@@ -137,6 +137,45 @@ async function testDualGridRelaxation() {
     }
     console.log('');
     
+    // Burg snapping verification
+    console.log('=== Burg Snapping Verification ===');
+    const burgs = data.pack.burgs || [];
+    const snappedBurgs = burgs.filter(b => b && b.dualGridPointId !== undefined);
+    console.log(`Total burgs: ${burgs.length}`);
+    console.log(`Snapped burgs: ${snappedBurgs.length} ${snappedBurgs.length > 0 ? '✅' : '❌'}`);
+    console.log('');
+    
+    if (snappedBurgs.length > 0) {
+      console.log('Sample snapped burgs (first 5):');
+      const sampleCount = Math.min(5, snappedBurgs.length);
+      for (let i = 0; i < sampleCount; i++) {
+        const b = snappedBurgs[i];
+        const originalPos = `(${b.x.toFixed(2)}, ${b.y.toFixed(2)})`;
+        const pointId = b.dualGridPointId;
+        const pointDist = b.dualGridPointDistance !== undefined ? b.dualGridPointDistance.toFixed(2) : 'N/A';
+        const quadId = b.dualQuadId !== undefined ? b.dualQuadId : 'N/A';
+        const quadDist = b.dualQuadDistance !== undefined ? b.dualQuadDistance.toFixed(2) : 'N/A';
+        const parentQuadId = b.dualQuadParentId !== undefined ? b.dualQuadParentId : 'N/A';
+        
+        console.log(`  Burg ${b.i || i} (${b.name || 'unnamed'}):`);
+        console.log(`    Original pos: ${originalPos}`);
+        console.log(`    Snapped to point ${pointId}, distance: ${pointDist}`);
+        console.log(`    Snapped to quad ${quadId} (parent: ${parentQuadId}), distance: ${quadDist}`);
+        
+        // Verify no NaN/invalid snaps
+        if (pointId !== undefined && (isNaN(pointId) || pointId < 0)) {
+          console.log(`    ⚠️  WARNING: Invalid pointId: ${pointId}`);
+        }
+        if (pointDist !== 'N/A' && (isNaN(parseFloat(pointDist)) || parseFloat(pointDist) < 0)) {
+          console.log(`    ⚠️  WARNING: Invalid distance: ${pointDist}`);
+        }
+      }
+      console.log('');
+    } else {
+      console.log('⚠️  No burgs were snapped! Check that burgs have valid x,y positions.');
+      console.log('');
+    }
+    
     // Overall result
     console.log('=== Test Summary ===');
     const allValid = 
