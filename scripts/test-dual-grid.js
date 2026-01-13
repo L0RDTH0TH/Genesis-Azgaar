@@ -462,6 +462,173 @@ async function openInBrowser(filePath) {
 }
 
 /**
+ * Render dual-grid quads to SVG (custom renderer for dual-grid)
+ * @param {Object} data - Generated map data with dualGrid
+ * @param {Object} options - Rendering options
+ * @returns {string} SVG string
+ */
+function renderDualGridSVG(data, options = {}) {
+  const { pack } = data;
+  if (!pack || !pack.dualGrid) {
+    console.warn('No dualGrid data found, using fallback SVG');
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540"><text x="50" y="50" fill="red">No dual-grid data</text></svg>`;
+  }
+  
+  const { dualGrid, states, burgs } = pack;
+  const { points, level0Quads } = dualGrid;
+  
+  // Debug logs
+  console.log('=== Dual-Grid SVG Debug ===');
+  console.log(`Number of level0Quads: ${level0Quads?.length || 0}`);
+  console.log(`Number of points: ${points?.length || 0}`);
+  console.log(`Number of states: ${states?.length || 0}`);
+  
+  if (!points || points.length === 0 || !level0Quads || level0Quads.length === 0) {
+    console.warn('Missing points or quads data');
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540"><text x="50" y="50" fill="red">Missing dual-grid data</text></svg>`;
+  }
+  
+  // Calculate viewBox from point coordinates
+  let minX = Infinity, minY = Infinity;
+  let maxX = -Infinity, maxY = -Infinity;
+  
+  for (const point of points) {
+    if (point && typeof point.x === 'number' && typeof point.y === 'number') {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+  }
+  
+  const padding = 50;
+  const viewBoxX = minX - padding;
+  const viewBoxY = minY - padding;
+  const viewBoxWidth = (maxX - minX) + (padding * 2);
+  const viewBoxHeight = (maxY - minY) + (padding * 2);
+  
+  console.log(`ViewBox: ${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`);
+  console.log(`Point range: x[${minX.toFixed(1)}, ${maxX.toFixed(1)}], y[${minY.toFixed(1)}, ${maxY.toFixed(1)}]`);
+  
+  // Helper: Get state color
+  function getStateColor(stateId) {
+    if (!states || !stateId || stateId < 0) return '#888888';
+    const state = states[stateId];
+    if (state && state.color) return state.color;
+    // Generate HSL color from stateId
+    const hue = (stateId * 137.508) % 360; // Golden angle for color distribution
+    return `hsl(${hue}, 70%, 50%)`;
+  }
+  
+  // Build SVG layers
+  const layers = [];
+  
+  // 1. Background
+  layers.push(`<rect x="${viewBoxX}" y="${viewBoxY}" width="${viewBoxWidth}" height="${viewBoxHeight}" fill="#eef6fb" />`);
+  
+  // 2. Draw Level 0 quads as polygons
+  const quadPolygons = [];
+  let quadsDrawn = 0;
+  
+  for (const quad of level0Quads) {
+    if (!quad || !quad.verts || quad.verts.length < 3) continue;
+    
+    // Get vertex coordinates
+    const vertCoords = [];
+    let valid = true;
+    
+    for (const vertIdx of quad.verts) {
+      const point = points[vertIdx];
+      if (!point || typeof point.x !== 'number' || typeof point.y !== 'number') {
+        valid = false;
+        break;
+      }
+      vertCoords.push(`${point.x},${point.y}`);
+    }
+    
+    if (!valid || vertCoords.length < 3) continue;
+    
+    // Get state color
+    const stateId = quad.stateId !== undefined && quad.stateId >= 0 ? quad.stateId : -1;
+    const fillColor = getStateColor(stateId);
+    
+    // Create polygon
+    const pointsStr = vertCoords.join(' ');
+    quadPolygons.push(
+      `<polygon points="${pointsStr}" fill="${fillColor}" stroke="#000" stroke-width="1" opacity="0.8" />`
+    );
+    quadsDrawn++;
+  }
+  
+  console.log(`Quads drawn: ${quadsDrawn}/${level0Quads.length}`);
+  
+  if (quadPolygons.length > 0) {
+    layers.push(`<g id="level0-quads">${quadPolygons.join('\n')}</g>`);
+  }
+  
+  // 3. Draw burgs as red dots
+  const burgElements = [];
+  if (burgs && Array.isArray(burgs)) {
+    for (const burg of burgs) {
+      if (!burg || !burg.x || !burg.y || burg.removed) continue;
+      
+      // Check if burg is snapped to dual-grid
+      const pointId = burg.dualGridPointId;
+      let x, y;
+      
+      if (pointId !== undefined && points[pointId]) {
+        // Use snapped dual-grid point
+        x = points[pointId].x;
+        y = points[pointId].y;
+      } else {
+        // Use original burg position
+        x = burg.x;
+        y = burg.y;
+      }
+      
+      const radius = burg.capital ? 5 : 3;
+      const color = burg.capital ? '#ff0000' : '#cc0000';
+      burgElements.push(
+        `<circle cx="${x}" cy="${y}" r="${radius}" fill="${color}" stroke="#fff" stroke-width="1" />`
+      );
+      
+      // Add label for capitals
+      if (burg.capital && burg.name) {
+        burgElements.push(
+          `<text x="${x}" y="${y - radius - 5}" font-size="12" fill="#000" text-anchor="middle" font-weight="bold">${burg.name}</text>`
+        );
+      }
+    }
+  }
+  
+  console.log(`Burgs drawn: ${burgElements.length / 2}`); // Divide by 2 because we add circle + text for capitals
+  
+  if (burgElements.length > 0) {
+    layers.push(`<g id="burgs">${burgElements.join('\n')}</g>`);
+  }
+  
+  // 4. Add debug elements if nothing was drawn
+  if (quadPolygons.length === 0) {
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    layers.push(
+      `<circle cx="${centerX}" cy="${centerY}" r="50" fill="red" opacity="0.5" />`,
+      `<text x="${centerX}" y="${centerY}" font-size="16" fill="red" text-anchor="middle">DEBUG - Quads should be here</text>`,
+      `<text x="${centerX}" y="${centerY + 20}" font-size="12" fill="red" text-anchor="middle">Points: ${points.length}, Quads: ${level0Quads.length}</text>`
+    );
+  }
+  
+  // Combine into complete SVG
+  const width = options.width || 960;
+  const height = options.height || 540;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}">
+${layers.join('\n')}
+</svg>`;
+  
+  return svg;
+}
+
+/**
  * Export dual-grid map to SVG file and auto-open in browser
  * @param {Object} data - Generated map data
  * @param {string} filename - Output filename (without path)
@@ -480,8 +647,8 @@ async function exportDualGridToSVG(data, filename, options = {}) {
     // Directory might already exist
   }
   
-  // Generate SVG
-  const svgString = renderPreviewSVG({
+  // Generate SVG using custom dual-grid renderer
+  const svgString = renderDualGridSVG(data, {
     width: options.width || data.options.mapWidth || 960,
     height: options.height || data.options.mapHeight || 540,
   });
@@ -489,6 +656,9 @@ async function exportDualGridToSVG(data, filename, options = {}) {
   // Save to file
   const fullPath = join(samplesDir, filename);
   writeFileSync(fullPath, svgString, 'utf8');
+  
+  console.log(`✅ SVG saved to: ${fullPath}`);
+  console.log(`   File size: ${svgString.length} bytes\n`);
   
   // Auto-open in browser
   await openInBrowser(fullPath);
