@@ -6,6 +6,8 @@
  * =============================================================================
  */
 
+import { RNG } from '../utils/rng.js';
+
 /**
  * Build Stålberg-inspired quad grid from hexagonal base
  * @param {number} hexLayers - Number of hex layers (default: 20)
@@ -709,4 +711,307 @@ export function snapBurgsToDualGrid(pack, dualGrid, options) {
   }
   
   return { snappedCount, totalBurgs };
+}
+
+/**
+ * Pattern definitions for chunk matching (per design v2 section 3)
+ * Simple adjacency-based patterns for states/provinces
+ */
+const PATTERNS = [
+  {
+    id: 'single',
+    name: 'Single Quad',
+    quads: 1,
+    shape: [[0, 0]],
+    constraints: { minNeighbors: 0, maxNeighbors: 4 },
+  },
+  {
+    id: 'bar_horizontal',
+    name: 'Horizontal Bar (2×1)',
+    quads: 2,
+    shape: [[0, 0], [1, 0]],
+    constraints: { minNeighbors: 2, maxNeighbors: 6 },
+  },
+  {
+    id: 'bar_vertical',
+    name: 'Vertical Bar (1×2)',
+    quads: 2,
+    shape: [[0, 0], [0, 1]],
+    constraints: { minNeighbors: 2, maxNeighbors: 6 },
+  },
+  {
+    id: 'block_2x2',
+    name: '2×2 Block',
+    quads: 4,
+    shape: [[0, 0], [1, 0], [0, 1], [1, 1]],
+    constraints: { minNeighbors: 4, maxNeighbors: 12 },
+  },
+  {
+    id: 'l_shape',
+    name: 'L-Shape Corner',
+    quads: 3,
+    shape: [[0, 0], [1, 0], [0, 1]],
+    constraints: { minNeighbors: 3, maxNeighbors: 8 },
+  },
+  {
+    id: 't_shape',
+    name: 'T-Shape',
+    quads: 4,
+    shape: [[0, 0], [-1, 0], [1, 0], [0, 1]],
+    constraints: { minNeighbors: 4, maxNeighbors: 10 },
+  },
+  {
+    id: 'border_chain',
+    name: 'Border Chain (3 quads)',
+    quads: 3,
+    shape: [[0, 0], [1, 0], [2, 0]],
+    constraints: { minNeighbors: 3, maxNeighbors: 8 },
+  },
+  {
+    id: 'merge_bridge',
+    name: 'Merge Bridge',
+    quads: 2,
+    shape: [[0, 0], [1, 0]],
+    constraints: { minNeighbors: 2, maxNeighbors: 6, requiresDifferentState: true },
+  },
+  {
+    id: 'corner_2x2',
+    name: 'Corner 2×2',
+    quads: 3,
+    shape: [[0, 0], [1, 0], [0, 1]],
+    constraints: { minNeighbors: 3, maxNeighbors: 8 },
+  },
+  {
+    id: 'diagonal',
+    name: 'Diagonal Line',
+    quads: 2,
+    shape: [[0, 0], [1, 1]],
+    constraints: { minNeighbors: 2, maxNeighbors: 6 },
+  },
+];
+
+/**
+ * Assign patterns to quads using simple adjacency-based matching (per design v2 section 3)
+ * Uses burg-seeded quads as starting points for state assignment
+ * @param {Object} dualGrid - Dual grid structure with level0Quads and level1Quads
+ * @param {Object} pack - Pack object (will be modified)
+ * @param {Object} options - Generation options
+ * @returns {Object} Assignment stats {statesCreated, quadsAssigned, unassignedQuads}
+ */
+export function assignPatternsToQuads(dualGrid, pack, options) {
+  if (!dualGrid || !dualGrid.level0Quads || !pack || !pack.burgs) {
+    return { statesCreated: 0, quadsAssigned: 0, unassignedQuads: 0 };
+  }
+  
+  const { level0Quads } = dualGrid;
+  const { burgs } = pack;
+  const seed = options.seed || String(Date.now());
+  const rng = new RNG(seed + 'patternMatching');
+  
+  // Build neighbor map for Level 0 quads
+  const neighborMap = buildNeighborMap(dualGrid.points, level0Quads);
+  
+  // Track assigned quads
+  const assignedQuads = new Set();
+  const quadToState = new Map(); // quadIndex -> stateId
+  const states = [];
+  let stateIdCounter = 1;
+  
+  // Get burg-seeded quads (capitals first, then other burgs)
+  // Note: burgs are snapped to Level 1 quads, but we need Level 0 quads for states
+  // Map Level 1 quad to its parent Level 0 quad
+  const seededQuads = [];
+  const capitalBurgs = burgs.filter(b => b && b.capital && b.dualQuadId !== undefined);
+  const otherBurgs = burgs.filter(b => b && !b.capital && b.dualQuadId !== undefined);
+  
+  // Helper: Get Level 0 quad from Level 1 quad ID
+  function getLevel0QuadFromLevel1(level1QuadId) {
+    if (level1QuadId === undefined || level1QuadId < 0) return null;
+    const level1Quad = dualGrid.level1Quads[level1QuadId];
+    if (!level1Quad || level1Quad.parentQuadId === undefined) return null;
+    return level1Quad.parentQuadId;
+  }
+  
+  // Process capitals first (they become state centers)
+  for (const burg of capitalBurgs) {
+    const level1QuadId = burg.dualQuadId;
+    const level0QuadId = getLevel0QuadFromLevel1(level1QuadId);
+    if (level0QuadId !== null && level0QuadId < level0Quads.length && !assignedQuads.has(level0QuadId)) {
+      seededQuads.push({ quadId: level0QuadId, isCapital: true, burg });
+    }
+  }
+  
+  // Then process other burgs (they can become province centers or expand states)
+  for (const burg of otherBurgs) {
+    const level1QuadId = burg.dualQuadId;
+    const level0QuadId = getLevel0QuadFromLevel1(level1QuadId);
+    if (level0QuadId !== null && level0QuadId < level0Quads.length && !assignedQuads.has(level0QuadId)) {
+      seededQuads.push({ quadId: level0QuadId, isCapital: false, burg });
+    }
+  }
+  
+  // Helper: Get neighbors of a quad
+  function getQuadNeighbors(quadId) {
+    const quad = level0Quads[quadId];
+    if (!quad) return [];
+    
+    const neighborIndices = [];
+    const quadVerts = quad.verts;
+    
+    // Find quads that share vertices with this quad
+    for (let i = 0; i < level0Quads.length; i++) {
+      if (i === quadId || assignedQuads.has(i)) continue;
+      
+      const otherQuad = level0Quads[i];
+      const otherVerts = otherQuad.verts;
+      
+      // Check if quads share at least one vertex (adjacent)
+      const sharedVerts = quadVerts.filter(v => otherVerts.includes(v));
+      if (sharedVerts.length > 0) {
+        neighborIndices.push(i);
+      }
+    }
+    
+    return neighborIndices;
+  }
+  
+  // Helper: Check if a pattern can be applied at a quad
+  function canApplyPattern(pattern, startQuadId, neighborIndices) {
+    const numNeighbors = neighborIndices.length;
+    const constraints = pattern.constraints;
+    
+    if (constraints.minNeighbors !== undefined && numNeighbors < constraints.minNeighbors) {
+      return false;
+    }
+    if (constraints.maxNeighbors !== undefined && numNeighbors > constraints.maxNeighbors) {
+      return false;
+    }
+    
+    // For merge patterns, check if neighbors have different states
+    if (constraints.requiresDifferentState) {
+      const hasDifferentState = neighborIndices.some(nId => {
+        const neighborState = quadToState.get(nId);
+        return neighborState !== undefined && neighborState !== quadToState.get(startQuadId);
+      });
+      if (!hasDifferentState) return false;
+    }
+    
+    // Check if pattern size fits (enough unassigned neighbors)
+    const unassignedNeighbors = neighborIndices.filter(nId => !assignedQuads.has(nId));
+    if (unassignedNeighbors.length < pattern.quads - 1) {
+      return false; // Not enough unassigned neighbors for pattern
+    }
+    
+    return true;
+  }
+  
+  // Helper: Apply pattern to quads
+  function applyPattern(pattern, startQuadId, neighborIndices, stateId) {
+    const assigned = [startQuadId];
+    assignedQuads.add(startQuadId);
+    quadToState.set(startQuadId, stateId);
+    level0Quads[startQuadId].stateId = stateId;
+    
+    // For multi-quad patterns, assign neighbors
+    if (pattern.quads > 1) {
+      const unassignedNeighbors = neighborIndices.filter(nId => !assignedQuads.has(nId));
+      const toAssign = Math.min(pattern.quads - 1, unassignedNeighbors.length);
+      
+      // Randomly select neighbors to assign (or take first N)
+      const selected = [];
+      for (let i = 0; i < toAssign && i < unassignedNeighbors.length; i++) {
+        const idx = Math.floor(rng.random() * unassignedNeighbors.length);
+        const neighborId = unassignedNeighbors.splice(idx, 1)[0];
+        selected.push(neighborId);
+      }
+      
+      for (const neighborId of selected) {
+        assignedQuads.add(neighborId);
+        quadToState.set(neighborId, stateId);
+        level0Quads[neighborId].stateId = stateId;
+        assigned.push(neighborId);
+      }
+    }
+    
+    return assigned;
+  }
+  
+  // Main assignment loop
+  for (const { quadId, isCapital, burg } of seededQuads) {
+    if (assignedQuads.has(quadId)) continue;
+    
+    const neighborIndices = getQuadNeighbors(quadId);
+    
+    // Try to match a pattern
+    let patternMatched = false;
+    const shuffledPatterns = [...PATTERNS].sort(() => rng.random() - 0.5); // Shuffle for variety
+    
+    for (const pattern of shuffledPatterns) {
+      if (canApplyPattern(pattern, quadId, neighborIndices)) {
+        const stateId = isCapital ? stateIdCounter++ : (quadToState.get(neighborIndices[0]) || stateIdCounter++);
+        
+        if (isCapital) {
+          // Create new state for capital
+          states.push({
+            i: stateId,
+            name: burg.name || `State${stateId}`,
+            capital: burg.i,
+            center: quadId,
+            quads: [],
+          });
+        }
+        
+        const assignedQuadIds = applyPattern(pattern, quadId, neighborIndices, stateId);
+        
+        // Update state's quad list
+        const state = states.find(s => s.i === stateId);
+        if (state) {
+          state.quads.push(...assignedQuadIds);
+        }
+        
+        patternMatched = true;
+        break;
+      }
+    }
+    
+    // Fallback: assign as singleton if no pattern matches
+    if (!patternMatched) {
+      const stateId = isCapital ? stateIdCounter++ : (quadToState.get(neighborIndices[0]) || stateIdCounter++);
+      
+      if (isCapital) {
+        states.push({
+          i: stateId,
+          name: burg.name || `State${stateId}`,
+          capital: burg.i,
+          center: quadId,
+          quads: [quadId],
+        });
+      }
+      
+      assignedQuads.add(quadId);
+      quadToState.set(quadId, stateId);
+      level0Quads[quadId].stateId = stateId;
+      
+      const state = states.find(s => s.i === stateId);
+      if (state && !state.quads.includes(quadId)) {
+        state.quads.push(quadId);
+      }
+    }
+  }
+  
+  // Store assignments in dualGrid
+  if (!dualGrid.stateAssignments) {
+    dualGrid.stateAssignments = {};
+  }
+  dualGrid.stateAssignments.states = states;
+  dualGrid.stateAssignments.quadToState = Array.from(quadToState.entries());
+  
+  // Count unassigned quads
+  const unassignedQuads = level0Quads.filter(q => q.stateId === -1 || q.stateId === undefined).length;
+  
+  return {
+    statesCreated: states.length,
+    quadsAssigned: assignedQuads.size,
+    unassignedQuads,
+  };
 }
