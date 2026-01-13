@@ -36,7 +36,7 @@ async function testDualGridRelaxation() {
       fullRendering: true, // Required for SVG rendering
       useDualGridPolitics: true,
       politicsMode: {
-        hexLayers: 20,
+        hexLayers: 14, // Reduced for ~100-150 Level 0 quads (more organic, Townscaper-like)
         relaxationIterations: 150,
         dampingFactor: 0.25,
         dissolveProbability: 0.5,
@@ -510,14 +510,71 @@ function renderDualGridSVG(data, options = {}) {
   console.log(`ViewBox: ${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`);
   console.log(`Point range: x[${minX.toFixed(1)}, ${maxX.toFixed(1)}], y[${minY.toFixed(1)}, ${maxY.toFixed(1)}]`);
   
-  // Helper: Get state color
+  // Helper: Get state color (better color distribution)
   function getStateColor(stateId) {
     if (!states || !stateId || stateId < 0) return '#888888';
     const state = states[stateId];
     if (state && state.color) return state.color;
-    // Generate HSL color from stateId
-    const hue = (stateId * 137.508) % 360; // Golden angle for color distribution
+    // Generate HSL color from stateId (hue = stateId * 30 % 360 for better distribution)
+    const hue = (stateId * 30) % 360;
     return `hsl(${hue}, 70%, 50%)`;
+  }
+  
+  // Helper: Get state name
+  function getStateName(stateId) {
+    if (!states || !stateId || stateId < 0) return '';
+    const state = states[stateId];
+    return state && state.name ? state.name : `State ${stateId}`;
+  }
+  
+  // Helper: Calculate quad center (for labels)
+  function calculateQuadCenter(verts, points) {
+    if (!verts || verts.length === 0) return { x: 0, y: 0 };
+    
+    let sumX = 0, sumY = 0;
+    let count = 0;
+    
+    for (const vertIdx of verts) {
+      const point = points[vertIdx];
+      if (point && typeof point.x === 'number' && typeof point.y === 'number') {
+        sumX += point.x;
+        sumY += point.y;
+        count++;
+      }
+    }
+    
+    return count > 0 ? { x: sumX / count, y: sumY / count } : { x: 0, y: 0 };
+  }
+  
+  // Build quad adjacency map for border detection
+  // Two quads are adjacent if they share at least one vertex
+  function buildQuadAdjacencyMap(quads) {
+    const adjacencyMap = new Map(); // quadIndex -> Set of adjacent quad indices
+    
+    for (let i = 0; i < quads.length; i++) {
+      adjacencyMap.set(i, new Set());
+    }
+    
+    for (let i = 0; i < quads.length; i++) {
+      const quad1 = quads[i];
+      if (!quad1 || !quad1.verts) continue;
+      
+      const verts1 = new Set(quad1.verts);
+      
+      for (let j = i + 1; j < quads.length; j++) {
+        const quad2 = quads[j];
+        if (!quad2 || !quad2.verts) continue;
+        
+        // Check if quads share at least one vertex (adjacent)
+        const sharedVerts = quad2.verts.filter(v => verts1.has(v));
+        if (sharedVerts.length > 0) {
+          adjacencyMap.get(i).add(j);
+          adjacencyMap.get(j).add(i);
+        }
+      }
+    }
+    
+    return adjacencyMap;
   }
   
   // Build SVG layers
@@ -526,15 +583,23 @@ function renderDualGridSVG(data, options = {}) {
   // 1. Background
   layers.push(`<rect x="${viewBoxX}" y="${viewBoxY}" width="${viewBoxWidth}" height="${viewBoxHeight}" fill="#eef6fb" />`);
   
-  // 2. Draw Level 0 quads as polygons
+  // Build quad adjacency map for border detection
+  const quadAdjacencyMap = buildQuadAdjacencyMap(level0Quads);
+  
+  // 2. Draw Level 0 quads as polygons with state borders
   const quadPolygons = [];
+  const stateLabels = [];
+  const variantLabels = [];
+  const borderPaths = [];
   let quadsDrawn = 0;
   
-  for (const quad of level0Quads) {
+  for (let quadIdx = 0; quadIdx < level0Quads.length; quadIdx++) {
+    const quad = level0Quads[quadIdx];
     if (!quad || !quad.verts || quad.verts.length < 3) continue;
     
     // Get vertex coordinates
     const vertCoords = [];
+    const vertPoints = [];
     let valid = true;
     
     for (const vertIdx of quad.verts) {
@@ -544,64 +609,148 @@ function renderDualGridSVG(data, options = {}) {
         break;
       }
       vertCoords.push(`${point.x},${point.y}`);
+      vertPoints.push(point);
     }
     
     if (!valid || vertCoords.length < 3) continue;
     
-    // Get state color
+    // Get state color and info
     const stateId = quad.stateId !== undefined && quad.stateId >= 0 ? quad.stateId : -1;
     const fillColor = getStateColor(stateId);
     
-    // Create polygon
+    // Calculate quad center for labels
+    const center = calculateQuadCenter(quad.verts, points);
+    
+    // Create polygon with reduced opacity for organic look
     const pointsStr = vertCoords.join(' ');
     quadPolygons.push(
-      `<polygon points="${pointsStr}" fill="${fillColor}" stroke="#000" stroke-width="1" opacity="0.8" />`
+      `<polygon points="${pointsStr}" fill="${fillColor}" stroke="#000" stroke-width="1" opacity="0.75" />`
     );
     quadsDrawn++;
+    
+    // Add state name label (center, large text)
+    if (stateId >= 0) {
+      const stateName = getStateName(stateId);
+      if (stateName) {
+        stateLabels.push(
+          `<text x="${center.x}" y="${center.y}" font-size="14" fill="#000" text-anchor="middle" font-weight="bold" opacity="0.9">${stateName}</text>`
+        );
+      }
+    }
+    
+    // Add variant label (small text, offset from center)
+    if (quad.variantId !== undefined && quad.variantId !== null) {
+      variantLabels.push(
+        `<text x="${center.x}" y="${center.y + 12}" font-size="8" fill="#666" text-anchor="middle" opacity="0.7">${quad.variantId}</text>`
+      );
+    }
+    
+    // Detect borders: check adjacent quads with different stateId
+    const adjacentQuads = quadAdjacencyMap.get(quadIdx);
+    if (adjacentQuads) {
+      for (const adjQuadIdx of adjacentQuads) {
+        const adjQuad = level0Quads[adjQuadIdx];
+        if (!adjQuad) continue;
+        
+        const adjStateId = adjQuad.stateId !== undefined && adjQuad.stateId >= 0 ? adjQuad.stateId : -1;
+        
+        // If different states, draw border
+        if (stateId !== adjStateId && stateId >= 0 && adjStateId >= 0) {
+          // Find shared edge (vertices between the two quads)
+          const sharedVerts = quad.verts.filter(v => adjQuad.verts.includes(v));
+          if (sharedVerts.length >= 2) {
+            // Get coordinates of shared edge
+            const edgePoints = sharedVerts
+              .map(vIdx => points[vIdx])
+              .filter(p => p && typeof p.x === 'number' && typeof p.y === 'number')
+              .map(p => `${p.x},${p.y}`);
+            
+            if (edgePoints.length >= 2) {
+              const borderPath = `M${edgePoints[0]} L${edgePoints.slice(1).join(' ')}`;
+              borderPaths.push(
+                `<path d="${borderPath}" stroke="#000" stroke-width="3" fill="none" opacity="0.9" />`
+              );
+            }
+          }
+        }
+      }
+    }
   }
   
   console.log(`Quads drawn: ${quadsDrawn}/${level0Quads.length}`);
+  console.log(`State labels: ${stateLabels.length}, Variant labels: ${variantLabels.length}, Borders: ${borderPaths.length}`);
   
   if (quadPolygons.length > 0) {
     layers.push(`<g id="level0-quads">${quadPolygons.join('\n')}</g>`);
   }
   
-  // 3. Draw burgs as red dots
+  // Add state borders layer (on top of quads)
+  if (borderPaths.length > 0) {
+    layers.push(`<g id="state-borders">${borderPaths.join('\n')}</g>`);
+  }
+  
+  // Add labels layer (on top of borders)
+  if (stateLabels.length > 0) {
+    layers.push(`<g id="state-labels">${stateLabels.join('\n')}</g>`);
+  }
+  if (variantLabels.length > 0) {
+    layers.push(`<g id="variant-labels">${variantLabels.join('\n')}</g>`);
+  }
+  
+  // 3. Draw burgs as red dots (larger, with labels)
   const burgElements = [];
+  let burgsProcessed = 0;
   if (burgs && Array.isArray(burgs)) {
     for (const burg of burgs) {
-      if (!burg || !burg.x || !burg.y || burg.removed) continue;
+      if (!burg || burg.removed) continue;
       
-      // Check if burg is snapped to dual-grid
-      const pointId = burg.dualGridPointId;
+      // Get position - try multiple sources
       let x, y;
+      let hasPosition = false;
       
-      if (pointId !== undefined && points[pointId]) {
-        // Use snapped dual-grid point
-        x = points[pointId].x;
-        y = points[pointId].y;
-      } else {
-        // Use original burg position
+      // Priority 1: Snapped dual-grid point
+      if (burg.dualGridPointId !== undefined && points[burg.dualGridPointId]) {
+        const point = points[burg.dualGridPointId];
+        x = point.x;
+        y = point.y;
+        hasPosition = true;
+      }
+      // Priority 2: Original burg position
+      else if (burg.x !== undefined && burg.y !== undefined && isFinite(burg.x) && isFinite(burg.y)) {
         x = burg.x;
         y = burg.y;
+        hasPosition = true;
+      }
+      // Priority 3: Cell position from pack.cells.p
+      else if (burg.cell !== undefined && pack.cells && pack.cells.p && pack.cells.p[burg.cell]) {
+        const cellPos = pack.cells.p[burg.cell];
+        if (Array.isArray(cellPos) && cellPos.length >= 2) {
+          x = cellPos[0];
+          y = cellPos[1];
+          hasPosition = true;
+        }
       }
       
-      const radius = burg.capital ? 5 : 3;
+      if (!hasPosition) continue;
+      
+      // Larger burgs (r=8) for better visibility
+      const radius = 8;
       const color = burg.capital ? '#ff0000' : '#cc0000';
       burgElements.push(
-        `<circle cx="${x}" cy="${y}" r="${radius}" fill="${color}" stroke="#fff" stroke-width="1" />`
+        `<circle cx="${x}" cy="${y}" r="${radius}" fill="${color}" stroke="#fff" stroke-width="2" opacity="0.9" />`
       );
+      burgsProcessed++;
       
-      // Add label for capitals
-      if (burg.capital && burg.name) {
+      // Add label for all burgs (if name exists and position is valid)
+      if (burg.name && isFinite(x) && isFinite(y)) {
         burgElements.push(
-          `<text x="${x}" y="${y - radius - 5}" font-size="12" fill="#000" text-anchor="middle" font-weight="bold">${burg.name}</text>`
+          `<text x="${x}" y="${y - radius - 5}" font-size="10" fill="#000" text-anchor="middle" font-weight="${burg.capital ? 'bold' : 'normal'}" opacity="0.9">${burg.name}</text>`
         );
       }
     }
   }
   
-  console.log(`Burgs drawn: ${burgElements.length / 2}`); // Divide by 2 because we add circle + text for capitals
+  console.log(`Burgs drawn: ${burgsProcessed} (${burgElements.length} elements)`);
   
   if (burgElements.length > 0) {
     layers.push(`<g id="burgs">${burgElements.join('\n')}</g>`);
