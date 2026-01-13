@@ -309,11 +309,44 @@ async function testDualGridRelaxation() {
       console.log('');
     }
     
+    // Politics replacement verification
+    console.log('=== Politics Replacement Verification ===');
+    const packStates = data.pack.states || [];
+    const statesFromDualGrid = packStates.length > 0 && data.pack.dualGrid?.stateAssignments;
+    
+    console.log(`Total states in pack.states: ${packStates.length - 1} (excluding neutral)`);
+    console.log(`States from dual-grid: ${statesFromDualGrid ? '✅ Yes' : '❌ No (using Voronoi)'}`);
+    
+    if (statesFromDualGrid && packStates.length > 1) {
+      console.log('\nSample states from dual-grid (first 3):');
+      for (let i = 1; i < Math.min(4, packStates.length); i++) {
+        const state = packStates[i];
+        console.log(`  State ${state.i} (${state.name || 'unnamed'}):`);
+        console.log(`    Capital: ${state.capital || 'N/A'}`);
+        console.log(`    Color: ${state.color || 'N/A'}`);
+        console.log(`    Culture: ${state.culture || 'N/A'}`);
+        console.log(`    Quads: ${state.quads ? state.quads.length : 0}`);
+      }
+      console.log('');
+    }
+    
+    // Check cells.state array
+    const cellsWithStates = data.pack.cells.state ? 
+      Array.from(data.pack.cells.state).filter(s => s > 0).length : 0;
+    console.log(`Cells with state assigned: ${cellsWithStates}/${data.pack.cells.i.length}`);
+    console.log('');
+    
+    // Test with toggle false (Voronoi fallback)
+    console.log('=== Testing Voronoi Fallback ===');
+    console.log('(Re-run with useDualGridPolitics: false to verify fallback)');
+    console.log('');
+    
     // Export JSON for inspection
     const json = getMapData();
     console.log('\n=== JSON Export ===');
     console.log(`Full JSON size: ${JSON.stringify(json).length} bytes`);
     console.log(`Dual-grid points in JSON: ${json.pack.dualGrid?.points?.length || 0}`);
+    console.log(`States in JSON: ${json.pack.states?.length || 0}`);
     
   } catch (error) {
     console.error('❌ Test failed with error:', error);
