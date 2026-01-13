@@ -256,6 +256,59 @@ async function testDualGridRelaxation() {
       console.log('');
     }
     
+    // Variant selection verification
+    console.log('=== Variant Selection Verification ===');
+    const level0QuadsWithVariants = level0Quads.filter(q => q.variantId !== undefined);
+    const uniqueVariants = new Set(level0QuadsWithVariants.map(q => q.variantId));
+    
+    console.log(`Quads with variants: ${level0QuadsWithVariants.length}/${level0Quads.length} ${level0QuadsWithVariants.length > 0 ? '✅' : '⚠️'}`);
+    console.log(`Unique variants used: ${uniqueVariants.size}`);
+    console.log(`Variant list: ${Array.from(uniqueVariants).slice(0, 10).join(', ')}${uniqueVariants.size > 10 ? '...' : ''}`);
+    console.log('');
+    
+    if (level0QuadsWithVariants.length > 0) {
+      // Show sample quads with their pattern + variantId
+      console.log('Sample quads with patterns and variants (first 10):');
+      let sampleCount = 0;
+      for (const quad of level0QuadsWithVariants) {
+        if (sampleCount >= 10) break;
+        const patternId = quad.patternId || 'unknown';
+        const variantId = quad.variantId || 'none';
+        const stateId = quad.stateId !== -1 ? quad.stateId : 'unassigned';
+        console.log(`  Quad ${quad.i}: state=${stateId}, pattern=${patternId}, variant=${variantId}`);
+        sampleCount++;
+      }
+      console.log('');
+      
+      // Verify variant diversity within states
+      if (stateAssignments && stateAssignments.states) {
+        console.log('Variant diversity per state (first 3 states):');
+        for (let i = 0; i < Math.min(3, stateAssignments.states.length); i++) {
+          const state = stateAssignments.states[i];
+          const stateQuads = level0Quads.filter(q => q.stateId === state.i && q.variantId);
+          const stateVariants = new Set(stateQuads.map(q => q.variantId));
+          const patternCounts = {};
+          stateQuads.forEach(q => {
+            const pattern = q.patternId || 'unknown';
+            patternCounts[pattern] = (patternCounts[pattern] || 0) + 1;
+          });
+          
+          console.log(`  State ${state.i} (${state.name || 'unnamed'}):`);
+          console.log(`    Quads: ${stateQuads.length}, Unique variants: ${stateVariants.size}`);
+          console.log(`    Patterns: ${Object.keys(patternCounts).join(', ')}`);
+          console.log(`    Variants: ${Array.from(stateVariants).join(', ')}`);
+        }
+        console.log('');
+      }
+      
+      // Check reproducibility (would need to run twice with same seed to verify)
+      console.log('Reproducibility: Use same seed to verify variant consistency');
+      console.log('');
+    } else {
+      console.log('⚠️  No variants assigned! Check variant assignment function.');
+      console.log('');
+    }
+    
     // Export JSON for inspection
     const json = getMapData();
     console.log('\n=== JSON Export ===');
