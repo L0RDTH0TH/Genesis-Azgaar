@@ -10,9 +10,10 @@
  * Build Stålberg-inspired quad grid from hexagonal base
  * @param {number} hexLayers - Number of hex layers (default: 20)
  * @param {Object} rng - RNG instance for seeded randomness
+ * @param {Object} options - Options object with politicsMode (optional)
  * @returns {Object} Dual grid structure with points, level0Quads, level1Quads
  */
-export function buildStalbergQuadGrid(hexLayers, rng) {
+export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   // Global points array (will be populated)
   const points = [];
   
@@ -82,6 +83,28 @@ export function buildStalbergQuadGrid(hexLayers, rng) {
       });
       parentQuad.childQuadIds.push(childIndex);
     }
+  }
+  
+  // Step 7: Relaxation (per design v2 section 2)
+  // Relax Level 0 quads first
+  const relaxationIterations = options.politicsMode?.relaxationIterations ?? 200;
+  const dampingFactor = options.politicsMode?.dampingFactor ?? 0.3;
+  
+  const level0NeighborMap = buildNeighborMap(points, level0Quads);
+  relaxGrid(points, level0NeighborMap, relaxationIterations, dampingFactor);
+  
+  // Update Level 0 quad centers after relaxation
+  for (const quad of level0Quads) {
+    quad.center = calculateQuadCenter(quad.verts, points);
+  }
+  
+  // Relax Level 1 quads (re-build neighbor map for level 1)
+  const level1NeighborMap = buildNeighborMap(points, level1Quads);
+  relaxGrid(points, level1NeighborMap, relaxationIterations, dampingFactor);
+  
+  // Update Level 1 quad centers after relaxation
+  for (const quad of level1Quads) {
+    quad.center = calculateQuadCenter(quad.verts, points);
   }
   
   return {
@@ -293,34 +316,122 @@ function calculateQuadCenter(verts, points) {
 }
 
 /**
- * Build neighbor map for relaxation (for future use)
+ * Build neighbor map for relaxation (per design v2 section 2)
+ * Creates bidirectional connections: Map<pointIndex, neighborIndices[]>
  * @param {Array} points - Points array
- * @param {Array} quads - Quads array
+ * @param {Array} quads - Quads array (with verts property)
  * @returns {Map} Map from point index to array of connected point indices
  */
 export function buildNeighborMap(points, quads) {
   const neighbors = new Map();
   
-  // Initialize neighbors map
+  // Initialize neighbors map for all points
   for (let i = 0; i < points.length; i++) {
     neighbors.set(i, []);
   }
   
-  // Build connections from quads
+  // Build bidirectional connections from quads
+  // Each edge in a quad connects two vertices
   for (const quad of quads) {
     const verts = quad.verts;
-    for (let i = 0; i < verts.length; i++) {
+    const numVerts = verts.length;
+    
+    for (let i = 0; i < numVerts; i++) {
       const v0 = verts[i];
-      const v1 = verts[(i + 1) % verts.length];
+      const v1 = verts[(i + 1) % numVerts];
       
-      if (!neighbors.get(v0).includes(v1)) {
-        neighbors.get(v0).push(v1);
+      // Add bidirectional connection (avoid duplicates)
+      const v0Neighbors = neighbors.get(v0);
+      if (!v0Neighbors.includes(v1)) {
+        v0Neighbors.push(v1);
       }
-      if (!neighbors.get(v1).includes(v0)) {
-        neighbors.get(v1).push(v0);
+      
+      const v1Neighbors = neighbors.get(v1);
+      if (!v1Neighbors.includes(v0)) {
+        v1Neighbors.push(v0);
       }
     }
   }
   
   return neighbors;
+}
+
+/**
+ * Relax grid using Laplacian smoothing (per design v2 section 2)
+ * Iteratively moves points to average of neighbors with damping factor
+ * @param {Array} points - Points array (will be modified in place)
+ * @param {Map} neighborMap - Map from point index to neighbor indices
+ * @param {number} iterations - Number of relaxation iterations (default: 200)
+ * @param {number} damping - Damping factor (default: 0.3)
+ * @returns {Object} Stats object with iterations used and final movement
+ */
+export function relaxGrid(points, neighborMap, iterations = 200, damping = 0.3) {
+  let consecutiveLowMovement = 0;
+  const EARLY_TERMINATION_THRESHOLD = 0.001;
+  const MIN_ITERATIONS_FOR_EARLY_TERM = 50;
+  const CONSECUTIVE_LOW_MOVEMENT_LIMIT = 10;
+  
+  for (let iter = 0; iter < iterations; iter++) {
+    const forces = new Map(); // pointIndex -> {x, y}
+    let maxMovement = 0;
+    let totalMovement = 0;
+    let pointsMoved = 0;
+    
+    // Accumulate forces (Laplacian smoothing: move toward average of neighbors)
+    for (let i = 0; i < points.length; i++) {
+      const point = points[i];
+      const neighborIndices = neighborMap.get(i) || [];
+      
+      if (neighborIndices.length === 0) continue;
+      
+      // Calculate average position of neighbors
+      let avgX = 0;
+      let avgY = 0;
+      for (const neighborIdx of neighborIndices) {
+        const neighbor = points[neighborIdx];
+        avgX += neighbor.x;
+        avgY += neighbor.y;
+      }
+      avgX /= neighborIndices.length;
+      avgY /= neighborIndices.length;
+      
+      // Calculate force (damped movement toward average)
+      const forceX = (avgX - point.x) * damping;
+      const forceY = (avgY - point.y) * damping;
+      
+      forces.set(i, { x: forceX, y: forceY });
+      
+      const movement = Math.abs(forceX) + Math.abs(forceY);
+      maxMovement = Math.max(maxMovement, movement);
+      totalMovement += movement;
+      pointsMoved++;
+    }
+    
+    // Apply forces
+    for (const [pointIdx, force] of forces) {
+      points[pointIdx].x += force.x;
+      points[pointIdx].y += force.y;
+    }
+    
+    // Early termination check (per design v2 section 2)
+    const avgMovement = pointsMoved > 0 ? totalMovement / pointsMoved : 0;
+    if (iter >= MIN_ITERATIONS_FOR_EARLY_TERM && avgMovement < EARLY_TERMINATION_THRESHOLD) {
+      consecutiveLowMovement++;
+      if (consecutiveLowMovement >= CONSECUTIVE_LOW_MOVEMENT_LIMIT) {
+        return {
+          iterationsUsed: iter + 1,
+          finalAvgMovement: avgMovement,
+          earlyTerminated: true,
+        };
+      }
+    } else {
+      consecutiveLowMovement = 0;
+    }
+  }
+  
+  return {
+    iterationsUsed: iterations,
+    finalAvgMovement: 0, // Not calculated if we didn't early terminate
+    earlyTerminated: false,
+  };
 }

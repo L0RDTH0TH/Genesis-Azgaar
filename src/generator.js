@@ -196,7 +196,7 @@ function generateMapInternal(options, DelaunatorClass) {
   if (options.useDualGridPolitics) {
     const dualGridRng = new RNG(seed + PHASES.DUAL_GRID_STATES);
     const hexLayers = options.politicsMode?.hexLayers ?? 20;
-    pack.dualGrid = buildStalbergQuadGrid(hexLayers, dualGridRng);
+    pack.dualGrid = buildStalbergQuadGrid(hexLayers, dualGridRng, options);
   }
 
   // Phase 13: State generation
