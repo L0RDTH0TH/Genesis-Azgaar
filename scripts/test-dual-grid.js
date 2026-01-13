@@ -33,6 +33,7 @@ async function testDualGridRelaxation() {
         hexLayers: 20,
         relaxationIterations: 150,
         dampingFactor: 0.25,
+        dissolveProbability: 0.5,
       },
     };
     
@@ -60,6 +61,15 @@ async function testDualGridRelaxation() {
     console.log(`Points: ${points.length}`);
     console.log(`Level 0 quads: ${level0Quads.length}`);
     console.log(`Level 1 quads: ${level1Quads.length}`);
+    console.log('');
+    
+    // Edge dissolution verification
+    console.log('=== Edge Dissolution Verification ===');
+    console.log('Note: All shapes (triangles + quads) are eventually converted to quads via subdivision.');
+    console.log(`Final Level 0 quad count: ${level0Quads.length}`);
+    console.log(`Expected range: 100-150 quads ${level0Quads.length >= 100 && level0Quads.length <= 150 ? '✅' : '⚠️'}`);
+    console.log(`Dissolve probability used: ${testOptions.politicsMode.dissolveProbability}`);
+    console.log('(Higher dissolve probability should result in more organic shapes)');
     console.log('');
     
     // Check quad counts (per design v2: ~100-150 level0, ~400-600 level1)

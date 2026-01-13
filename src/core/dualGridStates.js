@@ -36,8 +36,9 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   // Step 2: Triangulate from hex centers (connect to neighbors)
   const triangles = triangulateFromHex(hexPoints, hexPointIndices);
   
-  // Step 3: Dissolve edges to form quads (simplified for MVP)
-  const quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng);
+  // Step 3: Dissolve edges to form quads (per design v2 section 1)
+  const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.5;
+  const quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability);
   
   // Step 4: Subdivide remaining triangles
   const allQuads = [];
@@ -201,17 +202,190 @@ function triangulateFromHex(hexPoints, hexPointIndices) {
 }
 
 /**
- * Dissolve edges to form quads (simplified MVP version)
- * @param {Array} triangles - Array of triangles
- * @param {Array} hexPointIndices - Hex point indices
+ * Dissolve edges to form quads (per design v2 section 1)
+ * Randomly dissolves internal edges to merge adjacent triangles into quads
+ * @param {Array} triangles - Array of triangles (will be modified)
+ * @param {Array} hexPointIndices - Hex point indices (unused, kept for compatibility)
  * @param {Array} points - Points array
- * @param {Object} rng - RNG instance
+ * @param {Object} rng - RNG instance for seeded randomness
+ * @param {number} dissolveProbability - Probability of attempting dissolution (0.0-1.0, default 0.5)
  * @returns {Array} Array of quads and remaining triangles
  */
-function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng) {
-  // Simplified: Just return triangles for MVP
-  // Full implementation would merge adjacent triangles into quads
-  return triangles;
+function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5) {
+  // Work with a mutable copy of triangles
+  const workingTriangles = triangles.map(t => ({ ...t, verts: [...t.verts] }));
+  const quads = [];
+  const maxAttempts = workingTriangles.length * 3;
+  let dissolveCount = 0;
+  let attempts = 0;
+  
+  // Build edge map: edge -> [triangle indices that share this edge]
+  // Edge is represented as sorted pair of vertex indices
+  function getEdgeKey(v1, v2) {
+    return v1 < v2 ? `${v1},${v2}` : `${v2},${v1}`;
+  }
+  
+  // Build initial edge map
+  function buildEdgeMap(triangles) {
+    const edgeMap = new Map();
+    triangles.forEach((tri, triIndex) => {
+      const [v0, v1, v2] = tri.verts;
+      const edges = [
+        getEdgeKey(v0, v1),
+        getEdgeKey(v1, v2),
+        getEdgeKey(v2, v0),
+      ];
+      edges.forEach(edgeKey => {
+        if (!edgeMap.has(edgeKey)) {
+          edgeMap.set(edgeKey, []);
+        }
+        edgeMap.get(edgeKey).push(triIndex);
+      });
+    });
+    return edgeMap;
+  }
+  
+  // Check if dissolving an edge creates a valid quad
+  function canDissolveEdge(edgeKey, edgeMap, triangles) {
+    const sharingTriangles = edgeMap.get(edgeKey);
+    if (!sharingTriangles || sharingTriangles.length !== 2) {
+      return false; // Not an internal edge (shared by exactly 2 triangles)
+    }
+    
+    const [tri1Idx, tri2Idx] = sharingTriangles;
+    const tri1 = triangles[tri1Idx];
+    const tri2 = triangles[tri2Idx];
+    
+    if (!tri1 || !tri2 || tri1.removed || tri2.removed) {
+      return false; // One of the triangles is already removed
+    }
+    
+    // Get all unique vertices from both triangles
+    const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
+    
+    // Must have exactly 4 unique vertices to form a quad
+    if (allVerts.length !== 4) {
+      return false;
+    }
+    
+    // Check for degenerate cases (collinear points, etc.)
+    // Simple check: ensure no three points are collinear
+    // For now, we'll accept any 4-vertex combination (can be refined later)
+    return true;
+  }
+  
+  // Merge two triangles into a quad
+  function mergeTrianglesToQuad(tri1, tri2, edgeKey) {
+    const [v1, v2] = edgeKey.split(',').map(Number);
+    const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
+    
+    // Order vertices to form a valid quad
+    // Strategy: Start with one vertex of the dissolved edge, then traverse
+    // We need to order the 4 vertices in a cycle
+    const orderedVerts = [];
+    const used = new Set();
+    
+    // Start with v1 (first vertex of dissolved edge)
+    orderedVerts.push(v1);
+    used.add(v1);
+    
+    // Find vertices connected to v1 in tri1 or tri2
+    function findConnected(vert, triangle) {
+      const idx = triangle.verts.indexOf(vert);
+      if (idx === -1) return [];
+      const prev = triangle.verts[(idx + 2) % 3];
+      const next = triangle.verts[(idx + 1) % 3];
+      return [prev, next].filter(v => !used.has(v));
+    }
+    
+    // Build ordered cycle
+    let current = v1;
+    while (orderedVerts.length < 4) {
+      const candidates = [];
+      const tri1Connected = findConnected(current, tri1);
+      const tri2Connected = findConnected(current, tri2);
+      candidates.push(...tri1Connected, ...tri2Connected);
+      
+      if (candidates.length === 0) {
+        // Fallback: just add remaining vertices
+        const remaining = allVerts.filter(v => !used.has(v));
+        if (remaining.length > 0) {
+          orderedVerts.push(remaining[0]);
+          used.add(remaining[0]);
+          current = remaining[0];
+        } else {
+          break;
+        }
+      } else {
+        const next = candidates[0];
+        orderedVerts.push(next);
+        used.add(next);
+        current = next;
+      }
+    }
+    
+    // If we didn't get 4 vertices, use simple ordering
+    if (orderedVerts.length !== 4) {
+      orderedVerts.length = 0;
+      orderedVerts.push(...allVerts);
+    }
+    
+    return {
+      type: 'quad',
+      verts: orderedVerts,
+    };
+  }
+  
+  // Main dissolution loop
+  while (attempts < maxAttempts && dissolveCount < maxAttempts) {
+    attempts++;
+    
+    // Rebuild edge map (triangles may have been removed)
+    const edgeMap = buildEdgeMap(workingTriangles.filter(t => !t.removed));
+    
+    // Get all internal edges (shared by exactly 2 triangles)
+    const internalEdges = Array.from(edgeMap.entries())
+      .filter(([edgeKey, triIndices]) => triIndices.length === 2)
+      .map(([edgeKey]) => edgeKey);
+    
+    if (internalEdges.length === 0) {
+      break; // No more internal edges to dissolve
+    }
+    
+    // Randomly select an edge (with probability check)
+    if (rng.random() > dissolveProbability) {
+      continue; // Skip this attempt based on probability
+    }
+    
+    const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
+    const selectedEdge = internalEdges[randomEdgeIndex];
+    
+    // Check if we can dissolve this edge
+    if (canDissolveEdge(selectedEdge, edgeMap, workingTriangles)) {
+      const sharingTriangles = edgeMap.get(selectedEdge);
+      const [tri1Idx, tri2Idx] = sharingTriangles;
+      const tri1 = workingTriangles[tri1Idx];
+      const tri2 = workingTriangles[tri2Idx];
+      
+      // Merge into quad
+      const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
+      quads.push(quad);
+      
+      // Mark triangles as removed
+      tri1.removed = true;
+      tri2.removed = true;
+      
+      dissolveCount++;
+    }
+  }
+  
+  // Collect remaining triangles (not dissolved)
+  const remainingTriangles = workingTriangles
+    .filter(t => !t.removed)
+    .map(t => ({ type: 'triangle', verts: t.verts }));
+  
+  // Return quads + remaining triangles
+  return [...quads, ...remainingTriangles];
 }
 
 /**
