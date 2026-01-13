@@ -63,6 +63,15 @@ const DEFAULT_OPTIONS = {
   // Rendering options (Phase 5)
   fullRendering: false, // Use full Voronoi pack for polygon rendering (slower but better quality)
 
+  // Dual-grid politics (experimental)
+  useDualGridPolitics: false, // Enable dual-grid politics mode (experimental)
+  politicsMode: {
+    relaxationIterations: 200, // Relaxation iterations (default: 200, range: 100-500)
+    dampingFactor: 0.3, // Damping factor (default: 0.3, range: 0.1-0.5)
+    dissolveProbability: 0.5, // Edge dissolve probability (default: 0.5, tuned for 60-70% quads)
+    hexLayers: 20, // Number of hex layers (default: 20, for ~100-150 base hexes)
+  },
+
   // Units (for display/export)
   distanceScale: 3, // Scale factor for distance calculations
   distanceUnit: 'km', // 'km' or 'mi'
@@ -194,6 +203,36 @@ function validateOption(key, value) {
       return value === '°C' || value === '°F' ? value : DEFAULT_OPTIONS.temperatureScale;
     case 'fullRendering':
       return value === true || value === false ? value : DEFAULT_OPTIONS.fullRendering;
+    case 'useDualGridPolitics':
+      return value === true || value === false ? value : DEFAULT_OPTIONS.useDualGridPolitics;
+    case 'politicsMode':
+      // Validate politicsMode object
+      if (!value || typeof value !== 'object') {
+        return DEFAULT_OPTIONS.politicsMode;
+      }
+      const defaultPoliticsMode = DEFAULT_OPTIONS.politicsMode;
+      return {
+        relaxationIterations: minmax(
+          value.relaxationIterations !== undefined ? value.relaxationIterations : defaultPoliticsMode.relaxationIterations,
+          100,
+          500
+        ),
+        dampingFactor: minmax(
+          value.dampingFactor !== undefined ? value.dampingFactor : defaultPoliticsMode.dampingFactor,
+          0.1,
+          0.5
+        ),
+        dissolveProbability: minmax(
+          value.dissolveProbability !== undefined ? value.dissolveProbability : defaultPoliticsMode.dissolveProbability,
+          0.1,
+          0.9
+        ),
+        hexLayers: minmax(
+          value.hexLayers !== undefined ? Math.round(value.hexLayers) : defaultPoliticsMode.hexLayers,
+          15,
+          30
+        ),
+      };
     default:
       return value;
   }
@@ -220,7 +259,13 @@ export function mergeOptions(userOptions = {}) {
   for (const key in userOptions) {
     if (userOptions.hasOwnProperty(key)) {
       if (key in DEFAULT_OPTIONS) {
-        merged[key] = validateOption(key, userOptions[key]);
+        // Special handling for nested objects (like politicsMode)
+        if (key === 'politicsMode' && typeof userOptions[key] === 'object' && userOptions[key] !== null) {
+          // Deep merge politicsMode object
+          merged[key] = validateOption(key, { ...DEFAULT_OPTIONS[key], ...userOptions[key] });
+        } else {
+          merged[key] = validateOption(key, userOptions[key]);
+        }
       } else {
         // Unknown option - include it but warn in development
         if (typeof console !== 'undefined' && console.warn) {
