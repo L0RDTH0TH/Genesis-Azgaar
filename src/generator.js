@@ -36,7 +36,9 @@ import {
   generateProvinces,
   generateReligions,
   generateEmblems,
+  buildStalbergQuadGrid,
 } from './core/index.js';
+import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
 import { renderMap } from './rendering/canvas.js';
 import { renderMapSVG } from './rendering/svg.js';
@@ -189,6 +191,13 @@ function generateMapInternal(options, DelaunatorClass) {
 
   // Phase 12: Burg (settlement) generation
   generateBurgs({ pack, grid, options, rng });
+
+  // Dual-grid generation (after burgs, before states)
+  if (options.useDualGridPolitics) {
+    const dualGridRng = new RNG(seed + PHASES.DUAL_GRID_STATES);
+    const hexLayers = options.politicsMode?.hexLayers ?? 20;
+    pack.dualGrid = buildStalbergQuadGrid(hexLayers, dualGridRng);
+  }
 
   // Phase 13: State generation
   generateStates({ pack, options, rng });
