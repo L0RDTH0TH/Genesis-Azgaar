@@ -406,9 +406,20 @@ async function testDualGridRelaxation() {
       console.log('');
     }
     
-    // Optionally generate and open SVG previews
-    // Uncomment the line below to auto-generate and open previews
-    // await generateDualGridPreviews();
+    // Generate and open SVG preview from this test data
+    if (process.argv.includes('--preview')) {
+      console.log('\n=== Generating SVG Preview ===');
+      try {
+        const filename = 'dual-grid-preview-test.svg';
+        const fullPath = await exportDualGridToSVG(data, filename, {
+          width: testOptions.mapWidth,
+          height: testOptions.mapHeight,
+        });
+        console.log(`✅ Preview generated and opened: ${fullPath}\n`);
+      } catch (e) {
+        console.error('⚠️  Could not generate preview:', e.message);
+      }
+    }
     
   } catch (error) {
     console.error('❌ Test failed with error:', error);
@@ -503,15 +514,22 @@ async function generateDualGridPreviews() {
     console.log(`\nGenerating variant ${i + 1}/${variants.length}: ${variant.description}...`);
     
     try {
-      // Initialize generator
-      initGenerator({ canvas: null });
+      // Initialize generator fresh for each variant (avoids state issues)
+      // Note: This will throw if already initialized, so we catch and continue
+      try {
+        initGenerator({ canvas: null });
+      } catch (e) {
+        // Already initialized, that's okay - we'll use resetGeneratorState
+        if (resetGeneratorState) {
+          resetGeneratorState();
+        }
+      }
       
       // Load options with variant-specific dissolve probability
       const testOptions = {
-        seed: '42',
+        seed: `42-${variant.name}`, // Different seed per variant for variety
         mapWidth: 960,
         mapHeight: 540,
-        cellsDesired: 10000,
         statesNumber: 18,
         useDualGridPolitics: true,
         politicsMode: {
@@ -540,12 +558,25 @@ async function generateDualGridPreviews() {
       
       openedFiles.push(fullPath);
       
+      // Reset state.data to allow next generation
+      if (resetGeneratorState) {
+        resetGeneratorState();
+      }
+      
       // Small delay between opens to avoid overwhelming browser
       if (i < variants.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
     } catch (error) {
       console.error(`  ❌ Error generating variant ${variant.name}:`, error.message);
+      // Try to reset and continue
+      if (resetGeneratorState) {
+        try {
+          resetGeneratorState();
+        } catch (e) {
+          // Ignore reset errors
+        }
+      }
     }
   }
   
@@ -564,7 +595,7 @@ async function generateDualGridPreviews() {
   return openedFiles;
 }
 
-// Run test
+// Run test (with optional preview generation)
 testDualGridRelaxation().catch(error => {
   console.error('Fatal error:', error);
   if (typeof process !== 'undefined') {
@@ -572,11 +603,3 @@ testDualGridRelaxation().catch(error => {
   }
   throw error;
 });
-
-// Also export the preview generation function for standalone use
-// If run directly with node, generate previews
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('test-dual-grid.js')) {
-  // Check if user wants to generate previews (could add CLI flag later)
-  // For now, just export the function
-  export { generateDualGridPreviews };
-}

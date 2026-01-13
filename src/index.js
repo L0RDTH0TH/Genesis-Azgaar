@@ -15,6 +15,7 @@ export {
   renderPreview,
   renderPreviewSVG,
   loadMapData,
+  resetGeneratorState,
 } from './generator.js';
 
 // Utility exports (for advanced usage)

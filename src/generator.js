@@ -253,6 +253,16 @@ function requireInitialized() {
 }
 
 /**
+ * Reset generator state (for multiple map generations)
+ * Clears generated data to allow new generation without reinitializing
+ * @throws {InitializationError} If generator not initialized
+ */
+export function resetGeneratorState() {
+  requireInitialized();
+  state.data = null; // Clear generated data to allow new generation
+}
+
+/**
  * Initialize the generator with optional canvas or container for rendering
  * @param {Object} params - Initialization parameters
  * @param {HTMLCanvasElement|null} params.canvas - Optional canvas element for canvas rendering
