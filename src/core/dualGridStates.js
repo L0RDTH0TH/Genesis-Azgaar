@@ -911,6 +911,7 @@ export function assignPatternsToQuads(dualGrid, pack, options) {
     assignedQuads.add(startQuadId);
     quadToState.set(startQuadId, stateId);
     level0Quads[startQuadId].stateId = stateId;
+    level0Quads[startQuadId].patternId = pattern.id; // Track pattern used
     
     // For multi-quad patterns, assign neighbors
     if (pattern.quads > 1) {
@@ -929,6 +930,7 @@ export function assignPatternsToQuads(dualGrid, pack, options) {
         assignedQuads.add(neighborId);
         quadToState.set(neighborId, stateId);
         level0Quads[neighborId].stateId = stateId;
+        level0Quads[neighborId].patternId = pattern.id; // Track pattern used
         assigned.push(neighborId);
       }
     }
@@ -991,6 +993,7 @@ export function assignPatternsToQuads(dualGrid, pack, options) {
       assignedQuads.add(quadId);
       quadToState.set(quadId, stateId);
       level0Quads[quadId].stateId = stateId;
+      level0Quads[quadId].patternId = 'single'; // Fallback pattern
       
       const state = states.find(s => s.i === stateId);
       if (state && !state.quads.includes(quadId)) {
@@ -1013,5 +1016,76 @@ export function assignPatternsToQuads(dualGrid, pack, options) {
     statesCreated: states.length,
     quadsAssigned: assignedQuads.size,
     unassignedQuads,
+  };
+}
+
+/**
+ * Variant definitions for pattern types (per design v2 section 6)
+ * Each pattern can have multiple visual variants to hide repetition
+ */
+const VARIANTS = {
+  single: ['basic', 'ruined', 'fortified', 'decorated', 'minimal'],
+  bar_horizontal: ['straight', 'curved', 'broken', 'reinforced'],
+  bar_vertical: ['straight', 'curved', 'broken', 'reinforced'],
+  block_2x2: ['solid', 'grid', 'checkered', 'fortress', 'plaza'],
+  l_shape: ['corner_standard', 'corner_rounded', 'corner_sharp', 'corner_fortified'],
+  t_shape: ['cross_standard', 'cross_ornate', 'cross_minimal', 'cross_heavy'],
+  border_chain: ['chain_straight', 'chain_wavy', 'chain_zigzag', 'chain_ornate'],
+  merge_bridge: ['bridge_simple', 'bridge_arched', 'bridge_solid', 'bridge_decorated'],
+  corner_2x2: ['corner_standard', 'corner_rounded', 'corner_sharp'],
+  diagonal: ['diagonal_standard', 'diagonal_wavy', 'diagonal_broken'],
+  // Default fallback variants
+  default: ['basic', 'standard', 'simple', 'plain'],
+};
+
+/**
+ * Assign variants to quads (per design v2 section 6)
+ * Randomly selects variants for each quad based on its pattern type
+ * @param {Object} dualGrid - Dual grid structure with stateAssignments
+ * @param {Object} options - Generation options
+ * @returns {Object} Variant stats {variantsAssigned, uniqueVariants}
+ */
+export function assignVariantsToQuads(dualGrid, options) {
+  if (!dualGrid || !dualGrid.level0Quads || !dualGrid.stateAssignments) {
+    return { variantsAssigned: 0, uniqueVariants: 0 };
+  }
+  
+  const { level0Quads, stateAssignments } = dualGrid;
+  const seed = options.seed || String(Date.now());
+  const rng = new RNG(seed + 'variants');
+  
+  let variantsAssigned = 0;
+  const uniqueVariants = new Set();
+  
+  // Assign variants to quads based on their pattern
+  for (const quad of level0Quads) {
+    if (quad.stateId === -1 || quad.stateId === undefined) {
+      continue; // Skip unassigned quads
+    }
+    
+    // Get pattern ID (fallback to 'single' if not set)
+    const patternId = quad.patternId || 'single';
+    
+    // Get variants for this pattern (fallback to default)
+    const patternVariants = VARIANTS[patternId] || VARIANTS.default;
+    
+    if (patternVariants && patternVariants.length > 0) {
+      // Select random variant
+      const variantIndex = Math.floor(rng.random() * patternVariants.length);
+      const selectedVariant = patternVariants[variantIndex];
+      
+      // Store variant on quad
+      quad.variantId = selectedVariant;
+      quad.patternId = patternId; // Ensure patternId is set
+      
+      uniqueVariants.add(selectedVariant);
+      variantsAssigned++;
+    }
+  }
+  
+  return {
+    variantsAssigned,
+    uniqueVariants: uniqueVariants.size,
+    variantList: Array.from(uniqueVariants),
   };
 }

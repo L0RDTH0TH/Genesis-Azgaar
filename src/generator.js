@@ -39,6 +39,7 @@ import {
   buildStalbergQuadGrid,
   snapBurgsToDualGrid,
   assignPatternsToQuads,
+  assignVariantsToQuads,
 } from './core/index.js';
 import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
@@ -205,6 +206,9 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Assign patterns to quads (simple adjacency-based matching)
     assignPatternsToQuads(pack.dualGrid, pack, options);
+    
+    // Assign variants to quads (random per chunk type)
+    assignVariantsToQuads(pack.dualGrid, options);
   }
 
   // Phase 13: State generation
