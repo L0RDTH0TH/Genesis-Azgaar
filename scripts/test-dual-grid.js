@@ -8,9 +8,13 @@
 
 import Delaunator from 'delaunator';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { writeFileSync, mkdirSync } from 'fs';
-import { initGenerator, loadOptions, generateMap, getMapData } from '../src/index.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { initGenerator, loadOptions, generateMap, getMapData, renderPreviewSVG } from '../src/index.js';
+
+const execAsync = promisify(exec);
 
 /**
  * Test dual-grid generation with relaxation
@@ -402,6 +406,10 @@ async function testDualGridRelaxation() {
       console.log('');
     }
     
+    // Optionally generate and open SVG previews
+    // Uncomment the line below to auto-generate and open previews
+    // await generateDualGridPreviews();
+    
   } catch (error) {
     console.error('❌ Test failed with error:', error);
     console.error(error.stack);
@@ -412,6 +420,150 @@ async function testDualGridRelaxation() {
   }
 }
 
+/**
+ * Open file in default browser (cross-platform)
+ * @param {string} filePath - Full path to file
+ * @returns {Promise<void>}
+ */
+async function openInBrowser(filePath) {
+  const platform = process.platform;
+  let command;
+  
+  if (platform === 'darwin') {
+    // macOS
+    command = `open "${filePath}"`;
+  } else if (platform === 'win32') {
+    // Windows
+    command = `start "" "${filePath}"`;
+  } else {
+    // Linux and others
+    command = `xdg-open "${filePath}"`;
+  }
+  
+  try {
+    await execAsync(command);
+    console.log(`Opening preview in browser: ${filePath}`);
+  } catch (error) {
+    // Fallback: just log the path
+    console.log(`Could not auto-open browser. Please open manually: ${filePath}`);
+  }
+}
+
+/**
+ * Export dual-grid map to SVG file and auto-open in browser
+ * @param {Object} data - Generated map data
+ * @param {string} filename - Output filename (without path)
+ * @param {Object} options - Rendering options
+ * @returns {Promise<string>} Full path to saved file
+ */
+async function exportDualGridToSVG(data, filename, options = {}) {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const samplesDir = join(__dirname, '..', 'samples');
+  
+  // Ensure samples directory exists
+  try {
+    mkdirSync(samplesDir, { recursive: true });
+  } catch (e) {
+    // Directory might already exist
+  }
+  
+  // Generate SVG
+  const svgString = renderPreviewSVG({
+    width: options.width || data.options.mapWidth || 960,
+    height: options.height || data.options.mapHeight || 540,
+  });
+  
+  // Save to file
+  const fullPath = join(samplesDir, filename);
+  writeFileSync(fullPath, svgString, 'utf8');
+  
+  // Auto-open in browser
+  await openInBrowser(fullPath);
+  
+  return fullPath;
+}
+
+/**
+ * Generate and export multiple dual-grid preview variants
+ */
+async function generateDualGridPreviews() {
+  console.log('=== Generating and Opening Dual-Grid Preview SVGs ===\n');
+  
+  const variants = [
+    { name: 'default', dissolveProbability: 0.5, description: 'Default (0.5 dissolve)' },
+    { name: 'high-dissolve', dissolveProbability: 0.7, description: 'High dissolve (0.7 - more organic)' },
+    { name: 'low-dissolve', dissolveProbability: 0.3, description: 'Low dissolve (0.3 - more regular)' },
+  ];
+  
+  const openedFiles = [];
+  
+  for (let i = 0; i < variants.length; i++) {
+    const variant = variants[i];
+    console.log(`\nGenerating variant ${i + 1}/${variants.length}: ${variant.description}...`);
+    
+    try {
+      // Initialize generator
+      initGenerator({ canvas: null });
+      
+      // Load options with variant-specific dissolve probability
+      const testOptions = {
+        seed: '42',
+        mapWidth: 960,
+        mapHeight: 540,
+        cellsDesired: 10000,
+        statesNumber: 18,
+        useDualGridPolitics: true,
+        politicsMode: {
+          hexLayers: 20,
+          relaxationIterations: 150,
+          dampingFactor: 0.25,
+          dissolveProbability: variant.dissolveProbability,
+        },
+      };
+      
+      loadOptions(testOptions);
+      
+      // Generate map
+      const startTime = Date.now();
+      const data = generateMap(Delaunator);
+      const generateTime = Date.now() - startTime;
+      
+      console.log(`  Generated in ${generateTime.toFixed(2)}ms`);
+      
+      // Export SVG
+      const filename = `dual-grid-preview-${variant.name}.svg`;
+      const fullPath = await exportDualGridToSVG(data, filename, {
+        width: testOptions.mapWidth,
+        height: testOptions.mapHeight,
+      });
+      
+      openedFiles.push(fullPath);
+      
+      // Small delay between opens to avoid overwhelming browser
+      if (i < variants.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } catch (error) {
+      console.error(`  ❌ Error generating variant ${variant.name}:`, error.message);
+    }
+  }
+  
+  console.log('\n=== Preview Generation Complete ===');
+  console.log(`All ${openedFiles.length} previews generated and opened in browser.`);
+  console.log('Review for:');
+  console.log('  - Organic shapes (should look less grid-like than Voronoi)');
+  console.log('  - State borders (should follow quad boundaries)');
+  console.log('  - Variant variety (different dissolve probabilities show different organicity)');
+  console.log('\nOpened files:');
+  openedFiles.forEach((path, i) => {
+    console.log(`  ${i + 1}. ${path}`);
+  });
+  console.log('');
+  
+  return openedFiles;
+}
+
 // Run test
 testDualGridRelaxation().catch(error => {
   console.error('Fatal error:', error);
@@ -420,3 +572,11 @@ testDualGridRelaxation().catch(error => {
   }
   throw error;
 });
+
+// Also export the preview generation function for standalone use
+// If run directly with node, generate previews
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('test-dual-grid.js')) {
+  // Check if user wants to generate previews (could add CLI flag later)
+  // For now, just export the function
+  export { generateDualGridPreviews };
+}
