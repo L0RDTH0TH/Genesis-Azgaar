@@ -40,6 +40,7 @@ import {
   snapBurgsToDualGrid,
   assignPatternsToQuads,
   assignVariantsToQuads,
+  mapDualGridStatesToPack,
 } from './core/index.js';
 import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
@@ -209,10 +210,13 @@ function generateMapInternal(options, DelaunatorClass) {
     
     // Assign variants to quads (random per chunk type)
     assignVariantsToQuads(pack.dualGrid, options);
+    
+    // Map dual-grid states to pack (replaces Voronoi state generation)
+    mapDualGridStatesToPack(pack.dualGrid, pack, grid, options, rng);
   }
 
-  // Phase 13: State generation
-  generateStates({ pack, options, rng });
+  // Phase 13: State generation (uses dual-grid if enabled, otherwise Voronoi)
+  generateStates({ pack, options, rng, grid });
 
   // Phase 14: Province generation
   generateProvinces({ pack, options, rng });

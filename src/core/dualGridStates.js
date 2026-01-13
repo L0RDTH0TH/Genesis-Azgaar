@@ -1089,3 +1089,144 @@ export function assignVariantsToQuads(dualGrid, options) {
     variantList: Array.from(uniqueVariants),
   };
 }
+
+/**
+ * Map dual-grid states to pack.states and pack.cells.state (per design v2 section 5)
+ * Replaces Voronoi-based state generation when useDualGridPolitics is enabled
+ * @param {Object} dualGrid - Dual grid structure with stateAssignments
+ * @param {Object} pack - Pack object (will be modified)
+ * @param {Object} grid - Grid object (for Voronoi cell positions)
+ * @param {Object} options - Generation options
+ * @param {Object} rng - RNG instance for colors
+ * @returns {Object} Mapping stats {statesMapped, cellsMapped}
+ */
+export function mapDualGridStatesToPack(dualGrid, pack, grid, options, rng) {
+  if (!dualGrid || !dualGrid.stateAssignments || !pack || !pack.cells || !grid) {
+    return { statesMapped: 0, cellsMapped: 0 };
+  }
+  
+  const { stateAssignments } = dualGrid;
+  const { states: dualStates } = stateAssignments;
+  const { cells, burgs, cultures } = pack;
+  
+  // Initialize cells.state array if needed
+  if (!cells.state) {
+    cells.state = createTypedArray({ maxValue: 65535, length: cells.i.length });
+  }
+  
+  // Clear existing state assignments
+  for (let i = 0; i < cells.i.length; i++) {
+    cells.state[i] = 0;
+  }
+  
+  // Create pack.states array from dual-grid states
+  const packStates = [{ i: 0, name: 'Neutrals' }];
+  const colors = ['#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854', '#ffd92f'];
+  
+  // Helper: Check if a point is inside a quad (simple bounding box check)
+  function pointInQuadBounds(point, quad, dualGridPoints) {
+    const quadVerts = quad.verts.map(vIdx => dualGridPoints[vIdx]);
+    if (quadVerts.length < 3) return false;
+    
+    let minX = Infinity, minY = Infinity;
+    let maxX = -Infinity, maxY = -Infinity;
+    for (const v of quadVerts) {
+      minX = Math.min(minX, v.x);
+      minY = Math.min(minY, v.y);
+      maxX = Math.max(maxX, v.x);
+      maxY = Math.max(maxY, v.y);
+    }
+    
+    return point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY;
+  }
+  
+  // Map each dual-grid state to pack state
+  for (const dualState of dualStates) {
+    if (!dualState.i || dualState.removed) continue;
+    
+    const stateId = dualState.i;
+    const capitalBurg = burgs && burgs[dualState.capital];
+    
+    // Get state properties from burg
+    const culture = capitalBurg ? (capitalBurg.culture || 0) : 0;
+    const cultureData = cultures && cultures[culture];
+    const type = cultureData ? cultureData.type : 'Generic';
+    const name = capitalBurg ? (capitalBurg.name || `State${stateId}`) : `State${stateId}`;
+    
+    // Create pack state object
+    const packState = {
+      i: stateId,
+      name,
+      capital: dualState.capital || 0,
+      center: capitalBurg ? capitalBurg.cell : 0,
+      culture: culture,
+      type,
+      color: colors[(stateId - 1) % colors.length],
+      expansionism: 1.0, // Default
+      form: 'Monarchy', // Default
+      coa: null,
+      quads: dualState.quads || [],
+    };
+    
+    packStates.push(packState);
+    
+    // Map quads to Voronoi cells
+    // For each quad in this state, find Voronoi cells that overlap with it
+    const quadIds = dualState.quads || [];
+    for (const quadId of quadIds) {
+      const quad = dualGrid.level0Quads[quadId];
+      if (!quad) continue;
+      
+      // Find Voronoi cells whose centers are within this quad's bounds
+      for (let cellId = 0; cellId < cells.i.length; cellId++) {
+        const cellPos = cells.p[cellId];
+        if (!cellPos) continue;
+        
+        // Check if cell center is within quad bounds
+        if (pointInQuadBounds({ x: cellPos[0], y: cellPos[1] }, quad, dualGrid.points)) {
+          // Only assign to land cells (height > 20)
+          if (cells.h && cells.h[cellId] > 20) {
+            cells.state[cellId] = stateId;
+          }
+        }
+      }
+    }
+  }
+  
+  // Assign colors using greedy coloring (similar to original)
+  const usedColors = new Set();
+  for (const state of packStates) {
+    if (!state.i || state.removed) continue;
+    
+    // Try to find a color that doesn't conflict with neighbors
+    // For now, use simple rotation (can be enhanced with neighbor checking)
+    if (!usedColors.has(state.color)) {
+      usedColors.add(state.color);
+    } else {
+      // Find unused color
+      for (const color of colors) {
+        if (!usedColors.has(color)) {
+          state.color = color;
+          usedColors.add(color);
+          break;
+        }
+      }
+    }
+  }
+  
+  // Store states in pack
+  pack.states = packStates;
+  
+  // Count mapped cells
+  let cellsMapped = 0;
+  for (let i = 0; i < cells.i.length; i++) {
+    if (cells.state[i] > 0) {
+      cellsMapped++;
+    }
+  }
+  
+  return {
+    statesMapped: packStates.length - 1, // Exclude neutral state
+    cellsMapped,
+  };
+}

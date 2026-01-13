@@ -352,7 +352,7 @@ export function assignColors({ pack, rng }) {
  * @param {Object} params.rng - RNG instance
  * @returns {Array} States array
  */
-export function generateStates({ pack, options, rng }) {
+export function generateStates({ pack, options, rng, grid = null }) {
   if (!pack || !pack.cells || !pack.burgs) {
     throw new Error('Pack object with cells and burgs is required');
   }
@@ -360,6 +360,18 @@ export function generateStates({ pack, options, rng }) {
     throw new Error('RNG instance is required');
   }
 
+  // Check if dual-grid politics is enabled
+  // Note: mapDualGridStatesToPack is called in generator.js before this function
+  // So if dual-grid is enabled, pack.states should already be populated
+  if (options.useDualGridPolitics && pack.dualGrid && pack.states && pack.states.length > 0) {
+    // Dual-grid states already mapped, just run normalization and statistics
+    normalizeStates({ pack });
+    collectStatistics({ pack });
+    // Colors already assigned in mapDualGridStatesToPack
+    return pack.states;
+  }
+
+  // Original Voronoi-based generation (fallback)
   const states = createStates({ pack, options, rng });
   pack.states = states;
 

@@ -108,12 +108,21 @@ function isPassable(from, to, pack) {
  * @param {Object} params.rng - RNG instance
  * @returns {Array} Provinces array
  */
-export function generateProvinces({ pack, options, rng }) {
+export function generateProvinces({ pack, options, rng, grid = null }) {
   if (!pack || !pack.cells || !pack.states || !pack.burgs) {
     throw new Error('Pack object with cells, states, and burgs is required');
   }
   if (!rng) {
     throw new Error('RNG instance is required');
+  }
+
+  // Check if dual-grid politics is enabled
+  // For now, provinces are stubbed (can be enhanced later with Level 1 quad assignments)
+  if (options.useDualGridPolitics && pack.dualGrid) {
+    // Stub: Create empty provinces array for compatibility
+    // Future: Map Level 1 quads to provinces similar to states
+    pack.provinces = [];
+    return [];
   }
 
   const { cells, states, burgs } = pack;
