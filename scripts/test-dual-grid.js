@@ -201,6 +201,61 @@ async function testDualGridRelaxation() {
       console.log('⚠️  Some checks failed. Review output above.');
     }
     
+    // Pattern matching verification
+    console.log('=== Pattern Matching Verification ===');
+    const stateAssignments = data.pack.dualGrid?.stateAssignments;
+    if (stateAssignments) {
+      const states = stateAssignments.states || [];
+      console.log(`States created: ${states.length} ${states.length > 0 ? '✅' : '⚠️'}`);
+      
+      if (states.length > 0) {
+        console.log('\nSample states (first 3):');
+        for (let i = 0; i < Math.min(3, states.length); i++) {
+          const state = states[i];
+          const quadCount = state.quads ? state.quads.length : 0;
+          console.log(`  State ${state.i} (${state.name || 'unnamed'}):`);
+          console.log(`    Capital burg: ${state.capital || 'N/A'}`);
+          console.log(`    Quads assigned: ${quadCount}`);
+          console.log(`    Quad IDs: ${state.quads ? state.quads.slice(0, 5).join(', ') : 'none'}${quadCount > 5 ? '...' : ''}`);
+        }
+        console.log('');
+      }
+      
+      // Check for unassigned quads
+      const unassignedQuads = level0Quads.filter(q => q.stateId === -1 || q.stateId === undefined);
+      console.log(`Unassigned quads: ${unassignedQuads.length} ${unassignedQuads.length === 0 ? '✅' : '⚠️'}`);
+      
+      // Verify burg-seeded quads start patterns
+      const capitalBurgs = data.pack.burgs.filter(b => b && b.capital && b.dualQuadId !== undefined);
+      let burgSeededCount = 0;
+      for (const burg of capitalBurgs) {
+        const quadId = burg.dualQuadId;
+        if (quadId !== undefined && level0Quads[quadId] && level0Quads[quadId].stateId !== -1) {
+          burgSeededCount++;
+        }
+      }
+      console.log(`Burg-seeded quads with states: ${burgSeededCount}/${capitalBurgs.length} ${burgSeededCount === capitalBurgs.length ? '✅' : '⚠️'}`);
+      console.log('');
+      
+      // Check for overlapping assignments
+      const quadStateMap = new Map();
+      let overlaps = 0;
+      for (const quad of level0Quads) {
+        if (quad.stateId !== -1 && quad.stateId !== undefined) {
+          if (quadStateMap.has(quad.i)) {
+            overlaps++;
+          } else {
+            quadStateMap.set(quad.i, quad.stateId);
+          }
+        }
+      }
+      console.log(`Overlapping assignments: ${overlaps} ${overlaps === 0 ? '✅' : '❌'}`);
+      console.log('');
+    } else {
+      console.log('⚠️  No state assignments found in dualGrid.stateAssignments');
+      console.log('');
+    }
+    
     // Export JSON for inspection
     const json = getMapData();
     console.log('\n=== JSON Export ===');
