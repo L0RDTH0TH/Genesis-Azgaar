@@ -413,10 +413,74 @@ export function getMapData() {
       cultures: pack.cultures ? deepCopy(pack.cultures) : [],
       religions: pack.religions ? deepCopy(pack.religions) : [],
       provinces: pack.provinces ? deepCopy(pack.provinces) : [],
+      // Dual-grid data (when useDualGridPolitics is enabled)
+      dualGrid: pack.dualGrid ? serializeDualGrid(pack.dualGrid) : null,
     },
+    // Top-level flag for dual-grid
+    dualGridEnabled: options.useDualGridPolitics === true,
   };
 
   return json;
+}
+
+/**
+ * Serialize dual-grid data for JSON export (removes circular refs, flattens structures)
+ * @param {Object} dualGrid - Dual grid structure
+ * @returns {Object} Serialized dual-grid data
+ */
+function serializeDualGrid(dualGrid) {
+  if (!dualGrid) return null;
+  
+  // Serialize points (flatten to array of {x, y})
+  const points = dualGrid.points ? dualGrid.points.map(p => ({ x: p.x, y: p.y })) : [];
+  
+  // Serialize Level 0 quads
+  const level0Quads = dualGrid.level0Quads ? dualGrid.level0Quads.map(q => ({
+    i: q.i,
+    level: q.level,
+    verts: q.verts ? [...q.verts] : [],
+    center: q.center ? { x: q.center.x, y: q.center.y } : null,
+    parentQuadId: q.parentQuadId,
+    childQuadIds: q.childQuadIds ? [...q.childQuadIds] : [],
+    stateId: q.stateId !== undefined ? q.stateId : -1,
+    provinceId: q.provinceId !== undefined ? q.provinceId : -1,
+    patternId: q.patternId || null,
+    variantId: q.variantId || null,
+  })) : [];
+  
+  // Serialize Level 1 quads
+  const level1Quads = dualGrid.level1Quads ? dualGrid.level1Quads.map(q => ({
+    i: q.i,
+    level: q.level,
+    verts: q.verts ? [...q.verts] : [],
+    center: q.center ? { x: q.center.x, y: q.center.y } : null,
+    parentQuadId: q.parentQuadId !== undefined ? q.parentQuadId : null,
+    childQuadIds: q.childQuadIds,
+    stateId: q.stateId !== undefined ? q.stateId : -1,
+    provinceId: q.provinceId !== undefined ? q.provinceId : -1,
+    patternId: q.patternId || null,
+    variantId: q.variantId || null,
+  })) : [];
+  
+  // Serialize state assignments
+  const stateAssignments = dualGrid.stateAssignments ? {
+    states: dualGrid.stateAssignments.states ? dualGrid.stateAssignments.states.map(s => ({
+      i: s.i,
+      name: s.name || null,
+      capital: s.capital || null,
+      center: s.center !== undefined ? s.center : null,
+      quads: s.quads ? [...s.quads] : [],
+    })) : [],
+    quadToState: dualGrid.stateAssignments.quadToState ? 
+      Array.from(dualGrid.stateAssignments.quadToState).map(([quadId, stateId]) => [quadId, stateId]) : [],
+  } : null;
+  
+  return {
+    points,
+    level0Quads,
+    level1Quads,
+    stateAssignments,
+  };
 }
 
 /**

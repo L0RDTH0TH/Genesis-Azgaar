@@ -9,6 +9,7 @@
 import Delaunator from 'delaunator';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { writeFileSync, mkdirSync } from 'fs';
 import { initGenerator, loadOptions, generateMap, getMapData } from '../src/index.js';
 
 /**
@@ -345,8 +346,61 @@ async function testDualGridRelaxation() {
     const json = getMapData();
     console.log('\n=== JSON Export ===');
     console.log(`Full JSON size: ${JSON.stringify(json).length} bytes`);
+    console.log(`Dual-grid enabled flag: ${json.dualGridEnabled ? '✅' : '❌'}`);
     console.log(`Dual-grid points in JSON: ${json.pack.dualGrid?.points?.length || 0}`);
     console.log(`States in JSON: ${json.pack.states?.length || 0}`);
+    console.log('');
+    
+    // Export verification
+    console.log('=== Dual-Grid Export Verification ===');
+    if (json.dualGridEnabled && json.pack.dualGrid) {
+      const dg = json.pack.dualGrid;
+      console.log('✅ Dual-grid data found in export');
+      console.log(`  Points: ${dg.points?.length || 0}`);
+      console.log(`  Level 0 quads: ${dg.level0Quads?.length || 0}`);
+      console.log(`  Level 1 quads: ${dg.level1Quads?.length || 0}`);
+      console.log(`  State assignments: ${dg.stateAssignments ? '✅' : '❌'}`);
+      
+      if (dg.stateAssignments) {
+        console.log(`    States: ${dg.stateAssignments.states?.length || 0}`);
+        console.log(`    Quad-to-state mappings: ${dg.stateAssignments.quadToState?.length || 0}`);
+      }
+      
+      // Check for variants
+      const quadsWithVariants = dg.level0Quads?.filter(q => q.variantId) || [];
+      console.log(`  Quads with variants: ${quadsWithVariants.length}`);
+      console.log('');
+      
+      // Verify JSON serialization (round-trip)
+      try {
+        const jsonString = JSON.stringify(json);
+        const parsed = JSON.parse(jsonString);
+        console.log('✅ JSON serialization valid (round-trip successful)');
+        console.log(`  Serialized size: ${jsonString.length} bytes`);
+        console.log(`  Parsed keys: ${Object.keys(parsed).join(', ')}`);
+        console.log('');
+        
+        // Save to file
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = dirname(__filename);
+        const samplesDir = `${__dirname}/../samples`;
+        try {
+          mkdirSync(samplesDir, { recursive: true });
+        } catch (e) {
+          // Directory might already exist
+        }
+        const exportPath = `${samplesDir}/dual-grid-export.json`;
+        writeFileSync(exportPath, jsonString, 'utf8');
+        console.log(`✅ Exported to: ${exportPath}`);
+        console.log('');
+      } catch (e) {
+        console.error('❌ JSON serialization failed:', e.message);
+        console.log('');
+      }
+    } else {
+      console.log('⚠️  Dual-grid data not found in export (expected when useDualGridPolitics: true)');
+      console.log('');
+    }
     
   } catch (error) {
     console.error('❌ Test failed with error:', error);
