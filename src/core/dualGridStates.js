@@ -435,3 +435,104 @@ export function relaxGrid(points, neighborMap, iterations = 200, damping = 0.3) 
     earlyTerminated: false,
   };
 }
+
+/**
+ * Snap burgs to nearest dual-grid points (per design v2 section 5)
+ * Maps Voronoi burg positions to dual-grid Level 1 quad centers
+ * @param {Object} pack - Pack object (will be modified)
+ * @param {Object} dualGrid - Dual grid structure with points and level1Quads
+ * @param {Object} options - Generation options
+ * @returns {Object} Mapping stats {snappedCount, totalBurgs}
+ */
+export function snapBurgsToDualGrid(pack, dualGrid, options) {
+  if (!pack || !pack.burgs) {
+    return { snappedCount: 0, totalBurgs: 0 };
+  }
+  
+  if (!dualGrid || !dualGrid.points || !dualGrid.level1Quads) {
+    console.warn('Dual grid missing points or level1Quads, skipping burg snapping');
+    return { snappedCount: 0, totalBurgs: 0 };
+  }
+  
+  const { points, level1Quads } = dualGrid;
+  let snappedCount = 0;
+  let totalBurgs = 0;
+  
+  // Helper: Calculate Euclidean distance between two points
+  function distance(p1, p2) {
+    const dx = p1.x - p2.x;
+    const dy = p1.y - p2.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  
+  // Find nearest point in dualGrid.points
+  function findNearestPoint(burgX, burgY) {
+    let nearestIndex = -1;
+    let minDistance = Infinity;
+    
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const dist = distance({ x: burgX, y: burgY }, p);
+      if (dist < minDistance) {
+        minDistance = dist;
+        nearestIndex = i;
+      }
+    }
+    
+    return { index: nearestIndex, distance: minDistance };
+  }
+  
+  // Find nearest Level 1 quad center
+  function findNearestQuad(burgX, burgY) {
+    let nearestIndex = -1;
+    let minDistance = Infinity;
+    
+    for (let i = 0; i < level1Quads.length; i++) {
+      const quad = level1Quads[i];
+      if (!quad.center) continue;
+      
+      const dist = distance({ x: burgX, y: burgY }, quad.center);
+      if (dist < minDistance) {
+        minDistance = dist;
+        nearestIndex = i;
+      }
+    }
+    
+    return { index: nearestIndex, distance: minDistance };
+  }
+  
+  // Snap each burg
+  for (const burg of pack.burgs) {
+    if (!burg || !burg.i || burg.removed) continue;
+    
+    // Burg must have valid position
+    if (burg.x === undefined || burg.y === undefined || 
+        !isFinite(burg.x) || !isFinite(burg.y)) {
+      continue;
+    }
+    
+    totalBurgs++;
+    
+    // Find nearest point
+    const nearestPoint = findNearestPoint(burg.x, burg.y);
+    if (nearestPoint.index >= 0) {
+      burg.dualGridPointId = nearestPoint.index;
+      burg.dualGridPointDistance = nearestPoint.distance;
+    }
+    
+    // Find nearest Level 1 quad
+    const nearestQuad = findNearestQuad(burg.x, burg.y);
+    if (nearestQuad.index >= 0) {
+      burg.dualQuadId = nearestQuad.index;
+      burg.dualQuadDistance = nearestQuad.distance;
+      // Also store reference to the quad's parent (Level 0)
+      if (level1Quads[nearestQuad.index].parentQuadId !== undefined) {
+        burg.dualQuadParentId = level1Quads[nearestQuad.index].parentQuadId;
+      }
+    }
+    
+    snappedCount++;
+  }
+  
+  return { snappedCount, totalBurgs };
+}

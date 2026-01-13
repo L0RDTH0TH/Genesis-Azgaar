@@ -37,6 +37,7 @@ import {
   generateReligions,
   generateEmblems,
   buildStalbergQuadGrid,
+  snapBurgsToDualGrid,
 } from './core/index.js';
 import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
@@ -197,6 +198,9 @@ function generateMapInternal(options, DelaunatorClass) {
     const dualGridRng = new RNG(seed + PHASES.DUAL_GRID_STATES);
     const hexLayers = options.politicsMode?.hexLayers ?? 20;
     pack.dualGrid = buildStalbergQuadGrid(hexLayers, dualGridRng, options);
+    
+    // Snap burgs to dual-grid points
+    snapBurgsToDualGrid(pack, pack.dualGrid, options);
   }
 
   // Phase 13: State generation
