@@ -90,7 +90,7 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   const delaunayObj = d3.Delaunay.from(allPoints);
   for (let i = 0; i < newCells.p.length; i++) {
     const neighbors = delaunayObj.neighbors(i).filter((n) => n < newCells.p.length);
-    packCells.c[i] = neighbors;
+    packCells.c[i] = Array.isArray(neighbors) ? neighbors : [];
     
     // Get polygon vertices for this cell from Voronoi diagram
     const cellPolygon = Voronoi.renderCell(i);

@@ -7,6 +7,7 @@
  */
 
 import { RNG } from '../utils/rng.js';
+import { createTypedArray } from '../utils/array.js';
 
 /**
  * Build Stålberg-inspired quad grid from hexagonal base

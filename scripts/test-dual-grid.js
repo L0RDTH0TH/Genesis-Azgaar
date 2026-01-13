@@ -27,12 +27,13 @@ async function testDualGridRelaxation() {
     initGenerator({ canvas: null });
     
     // Load options with dual-grid enabled
+    // Note: fullRendering: true needed for SVG export
     const testOptions = {
       seed: '42',
       mapWidth: 960,
       mapHeight: 540,
-      cellsDesired: 10000,
       statesNumber: 18,
+      fullRendering: true, // Required for SVG rendering
       useDualGridPolitics: true,
       politicsMode: {
         hexLayers: 20,

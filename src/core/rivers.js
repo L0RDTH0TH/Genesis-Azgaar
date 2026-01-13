@@ -159,7 +159,9 @@ export function generateRivers({
 
       // Find downhill cell
       if (!cells.c[i] || cells.c[i].length === 0) return;
-      const min = cells.c[i].sort((a, b) => h[a] - h[b])[0];
+      const neighbors = cells.c[i];
+      if (!Array.isArray(neighbors) || neighbors.length === 0) return;
+      const min = neighbors.sort((a, b) => h[a] - h[b])[0];
 
       // Cell is depressed (no downhill)
       if (h[i] <= h[min]) return;
