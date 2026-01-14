@@ -46,6 +46,13 @@ import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
 import { renderMap } from './rendering/canvas.js';
 import { renderMapSVG } from './rendering/svg.js';
+import {
+  validateSkipPhases,
+  validatePhaseDependencies,
+  resolvePhaseDependencies,
+  executePhaseWithWrapper,
+  PHASE_DEPENDENCIES,
+} from './partials.js';
 
 /**
  * Singleton state for the generator
@@ -55,6 +62,7 @@ let state = {
   container: null, // SVG container element (optional)
   options: getDefaultOptions(),
   data: null, // { grid, pack, seed }
+  cached: {}, // Phase cache for partial generation
   initialized: false,
 };
 
@@ -107,139 +115,275 @@ function createSimplifiedPack(grid, options) {
  * Internal function: Generate map data using provided options
  * @param {Object} options - Generation options
  * @param {Function} DelaunatorClass - Delaunator class (required as peer dependency)
+ * @param {Array<string>} phasesToRun - Optional: specific phases to run (for partial generation)
  * @returns {Object} Generated map data {grid, pack, options, seed}
  */
-function generateMapInternal(options, DelaunatorClass) {
+function generateMapInternal(options, DelaunatorClass, phasesToRun = null) {
   // Initialize RNG with seed
   const seed = options.seed || String(Date.now());
-  const rng = new RNG(seed);
+  
+  // Validate skipPhases if provided
+  const skipPhases = options.skipPhases || [];
+  if (skipPhases.length > 0) {
+    validateSkipPhases(skipPhases);
+  }
+  
+  // Determine which phases to run
+  let phases;
+  if (phasesToRun) {
+    // Partial generation: resolve dependencies and validate
+    phases = resolvePhaseDependencies(phasesToRun, skipPhases);
+    validatePhaseDependencies(phases, skipPhases);
+  } else {
+    // Full generation: all phases except skipped ones
+    phases = Object.values(PHASES).filter(p => !skipPhases.includes(p));
+  }
+  
+  // Initialize state data
+  let stateData = {
+    grid: null,
+    pack: null,
+    options,
+    seed,
+    mapCoordinates: null,
+  };
 
-  // Phase 1: Voronoi diagram generation
-  // Delaunator is required as a peer dependency
-  if (!DelaunatorClass) {
+  // Delaunator is required as a peer dependency for Voronoi phase
+  if (!DelaunatorClass && phases.includes(PHASES.VORONOI)) {
     throw new GenerationError(
       'Delaunator is required as a peer dependency. Install: npm install delaunator, then pass Delaunator as the second parameter to generateMap()'
     );
   }
   
-  const grid = createVoronoiDiagram(
-    {
-      mapWidth: options.mapWidth,
-      mapHeight: options.mapHeight,
-      cellsDesired: options.cellsDesired,
-    },
-    rng,
-    DelaunatorClass
-  );
-
-  // Phase 2: Heightmap generation
-  const heights = generateHeightmap({ grid, options, rng, template: options.template });
-  grid.cells.h = heights;
-
-  // Phase 3: Grid-level feature detection
-  markupGrid({ grid });
-
-  // Phase 4: Calculate map coordinates
-  const mapCoordinates = calculateMapCoordinates(options, options.mapWidth, options.mapHeight);
-
-  // Phase 5: Temperature calculation
-  const temperatures = calculateTemperatures({ grid, options, mapCoordinates });
-  grid.cells.temp = temperatures;
-
-  // Phase 6: Precipitation generation
-  const precipitation = generatePrecipitation({ grid, options, rng, mapCoordinates });
-  grid.cells.prec = precipitation;
-
-  // Phase 7: Create pack from grid
-  // Use full Voronoi pack if fullRendering is enabled or if canvas is provided
-  const useFullPack = options.fullRendering === true || state.canvas !== null;
-  let pack;
+  // Execute phases in order
+  const phaseOrder = [
+    PHASES.VORONOI,
+    PHASES.HEIGHTMAP,
+    PHASES.MARKUP_GRID,
+    PHASES.MAP_COORDINATES,
+    PHASES.TEMPERATURE,
+    PHASES.PRECIPITATION,
+    PHASES.PACK_CREATION,
+    PHASES.RIVERS,
+    PHASES.BIOMES,
+    PHASES.MARKUP_PACK,
+    PHASES.FEATURES,
+    PHASES.CULTURES,
+    PHASES.BURGS,
+    PHASES.DUAL_GRID_STATES,
+    PHASES.STATES,
+    PHASES.PROVINCES,
+    PHASES.RELIGIONS,
+    PHASES.EMBLEMS,
+  ];
   
-  if (useFullPack) {
-    // Full Voronoi pack with polygon vertices (for rendering)
-    pack = createPackFromGrid({ grid, options, DelaunatorClass });
-    // Ensure pack has height data from grid (pack may have fewer cells than grid)
-    // Height data will be mapped via pack.cells.g (grid cell index)
-  } else {
-    // Simplified pack (faster, for headless/data-only use)
-    pack = createSimplifiedPack(grid, options);
-    // Ensure pack has data from grid
-    pack.cells.h = grid.cells.h;
-    // Ensure pack.cells.g maps pack cells to grid cells (for simplified version, 1:1 mapping)
-    for (let i = 0; i < pack.cells.i.length; i++) {
-      pack.cells.g[i] = i;
+  for (const phase of phaseOrder) {
+    if (!phases.includes(phase)) {
+      continue; // Skip phases not in phasesToRun
     }
+    
+    // Execute phase with wrapper
+    stateData = executePhaseWithWrapper({
+      phase,
+      phaseFunction: getPhaseFunction(phase),
+      state,
+      stateData,
+      skipPhases,
+      DelaunatorClass,
+    });
   }
-
-  // Phase 8: River generation
-  generateRivers({
-    grid,
-    pack,
-    options,
-    rng,
-    precipitation: grid.cells.prec,
-    allowErosion: options.allowErosion !== false,
-  });
-
-  // Phase 9: Biome assignment
-  const biomesData = getDefaultBiomes();
-  assignBiomes({ pack, grid, options, biomesData });
-
-  // Phase 10: Pack-level feature detection
-  markupPack({ pack });
-  specifyFeatures({ pack, grid, options });
-
-  // Phase 11: Culture generation
-  generateCultures({ pack, grid, options, rng, biomesData });
-  expandCultures({ pack, options, biomesData });
-
-  // Phase 12: Burg (settlement) generation
-  generateBurgs({ pack, grid, options, rng });
-
-  // Dual-grid generation (after burgs, before states)
-  if (options.useDualGridPolitics) {
-    const dualGridRng = new RNG(seed + PHASES.DUAL_GRID_STATES);
-    const hexLayers = options.politicsMode?.hexLayers ?? 20;
-    pack.dualGrid = buildStalbergQuadGrid(hexLayers, dualGridRng, options);
-    
-    // Snap burgs to dual-grid points
-    snapBurgsToDualGrid(pack, pack.dualGrid, options);
-    
-    // Assign patterns to quads (simple adjacency-based matching)
-    assignPatternsToQuads(pack.dualGrid, pack, options);
-    
-    // Assign variants to quads (random per chunk type)
-    assignVariantsToQuads(pack.dualGrid, options);
-    
-    // Map dual-grid states to pack (replaces Voronoi state generation)
-    mapDualGridStatesToPack(pack.dualGrid, pack, grid, options, rng);
-  }
-
-  // Phase 13: State generation (uses dual-grid if enabled, otherwise Voronoi)
-  generateStates({ pack, options, rng, grid });
-
-  // Phase 14: Province generation
-  generateProvinces({ pack, options, rng });
-
-  // Phase 15: Religion generation (optional)
-  if (options.religionsNumber > 0) {
-    generateReligions({ pack, options, rng });
-  } else {
-    pack.religions = [{ name: 'No religion', i: 0 }];
-    if (!pack.cells.religion) {
-      pack.cells.religion = createTypedArray({ maxValue: 65535, length: pack.cells.i.length });
-    }
-  }
-
-  // Phase 16: Emblem generation
-  generateEmblems({ pack, options, rng });
-
+  
   return {
-    grid,
-    pack,
-    options,
-    seed,
+    grid: stateData.grid,
+    pack: stateData.pack,
+    options: stateData.options,
+    seed: stateData.seed,
   };
+}
+
+/**
+ * Get phase function for a given phase
+ * @param {string} phase - Phase name
+ * @returns {Function} Phase function
+ */
+function getPhaseFunction(phase) {
+  switch (phase) {
+    case PHASES.VORONOI:
+      return ({ stateData, rng, DelaunatorClass }) => {
+        const grid = createVoronoiDiagram(
+          {
+            mapWidth: stateData.options.mapWidth,
+            mapHeight: stateData.options.mapHeight,
+            cellsDesired: stateData.options.cellsDesired,
+          },
+          rng,
+          DelaunatorClass
+        );
+        return { ...stateData, grid };
+      };
+      
+    case PHASES.HEIGHTMAP:
+      return ({ stateData, rng }) => {
+        const heights = generateHeightmap({
+          grid: stateData.grid,
+          options: stateData.options,
+          rng,
+          template: stateData.options.template,
+        });
+        stateData.grid.cells.h = heights;
+        return stateData;
+      };
+      
+    case PHASES.MARKUP_GRID:
+      return ({ stateData }) => {
+        markupGrid({ grid: stateData.grid });
+        return stateData;
+      };
+      
+    case PHASES.MAP_COORDINATES:
+      return ({ stateData }) => {
+        const mapCoordinates = calculateMapCoordinates(
+          stateData.options,
+          stateData.options.mapWidth,
+          stateData.options.mapHeight
+        );
+        return { ...stateData, mapCoordinates };
+      };
+      
+    case PHASES.TEMPERATURE:
+      return ({ stateData }) => {
+        const temperatures = calculateTemperatures({
+          grid: stateData.grid,
+          options: stateData.options,
+          mapCoordinates: stateData.mapCoordinates,
+        });
+        stateData.grid.cells.temp = temperatures;
+        return stateData;
+      };
+      
+    case PHASES.PRECIPITATION:
+      return ({ stateData, rng }) => {
+        const precipitation = generatePrecipitation({
+          grid: stateData.grid,
+          options: stateData.options,
+          rng,
+          mapCoordinates: stateData.mapCoordinates,
+        });
+        stateData.grid.cells.prec = precipitation;
+        return stateData;
+      };
+      
+    case PHASES.PACK_CREATION:
+      return ({ stateData, DelaunatorClass }) => {
+        const useFullPack = stateData.options.fullRendering === true || state.canvas !== null;
+        let pack;
+        
+        if (useFullPack) {
+          pack = createPackFromGrid({ grid: stateData.grid, options: stateData.options, DelaunatorClass });
+        } else {
+          pack = createSimplifiedPack(stateData.grid, stateData.options);
+          pack.cells.h = stateData.grid.cells.h;
+          for (let i = 0; i < pack.cells.i.length; i++) {
+            pack.cells.g[i] = i;
+          }
+        }
+        return { ...stateData, pack };
+      };
+      
+    case PHASES.RIVERS:
+      return ({ stateData, rng }) => {
+        generateRivers({
+          grid: stateData.grid,
+          pack: stateData.pack,
+          options: stateData.options,
+          rng,
+          precipitation: stateData.grid.cells.prec,
+          allowErosion: stateData.options.allowErosion !== false,
+        });
+        return stateData;
+      };
+      
+    case PHASES.BIOMES:
+      return ({ stateData }) => {
+        const biomesData = getDefaultBiomes();
+        assignBiomes({ pack: stateData.pack, grid: stateData.grid, options: stateData.options, biomesData });
+        return stateData;
+      };
+      
+    case PHASES.MARKUP_PACK:
+      return ({ stateData }) => {
+        markupPack({ pack: stateData.pack });
+        return stateData;
+      };
+      
+    case PHASES.FEATURES:
+      return ({ stateData }) => {
+        specifyFeatures({ pack: stateData.pack, grid: stateData.grid, options: stateData.options });
+        return stateData;
+      };
+      
+    case PHASES.CULTURES:
+      return ({ stateData, rng }) => {
+        const biomesData = getDefaultBiomes();
+        generateCultures({ pack: stateData.pack, grid: stateData.grid, options: stateData.options, rng, biomesData });
+        expandCultures({ pack: stateData.pack, options: stateData.options, biomesData });
+        return stateData;
+      };
+      
+    case PHASES.BURGS:
+      return ({ stateData, rng }) => {
+        generateBurgs({ pack: stateData.pack, grid: stateData.grid, options: stateData.options, rng });
+        return stateData;
+      };
+      
+    case PHASES.DUAL_GRID_STATES:
+      return ({ stateData, rng }) => {
+        if (stateData.options.useDualGridPolitics) {
+          const dualGridRng = new RNG(stateData.seed + PHASES.DUAL_GRID_STATES);
+          const hexLayers = stateData.options.politicsMode?.baseHexRings ?? stateData.options.politicsMode?.hexLayers ?? 7;
+          stateData.pack.dualGrid = buildStalbergQuadGrid(hexLayers, dualGridRng, stateData.options);
+          snapBurgsToDualGrid(stateData.pack, stateData.pack.dualGrid, stateData.options);
+          assignPatternsToQuads(stateData.pack.dualGrid, stateData.pack, stateData.options);
+          assignVariantsToQuads(stateData.pack.dualGrid, stateData.options);
+          mapDualGridStatesToPack(stateData.pack.dualGrid, stateData.pack, stateData.grid, stateData.options, rng);
+        }
+        return stateData;
+      };
+      
+    case PHASES.STATES:
+      return ({ stateData, rng }) => {
+        generateStates({ pack: stateData.pack, options: stateData.options, rng, grid: stateData.grid });
+        return stateData;
+      };
+      
+    case PHASES.PROVINCES:
+      return ({ stateData, rng }) => {
+        generateProvinces({ pack: stateData.pack, options: stateData.options, rng });
+        return stateData;
+      };
+      
+    case PHASES.RELIGIONS:
+      return ({ stateData, rng }) => {
+        if (stateData.options.religionsNumber > 0) {
+          generateReligions({ pack: stateData.pack, options: stateData.options, rng });
+        } else {
+          stateData.pack.religions = [{ name: 'No religion', i: 0 }];
+          if (!stateData.pack.cells.religion) {
+            stateData.pack.cells.religion = createTypedArray({ maxValue: 65535, length: stateData.pack.cells.i.length });
+          }
+        }
+        return stateData;
+      };
+      
+    case PHASES.EMBLEMS:
+      return ({ stateData, rng }) => {
+        generateEmblems({ pack: stateData.pack, options: stateData.options, rng });
+        return stateData;
+      };
+      
+    default:
+      return ({ stateData }) => stateData;
+  }
 }
 
 /**
@@ -351,6 +495,38 @@ export function generateMap(DelaunatorClass = null) {
     }
     // Wrap other errors
     throw new GenerationError(`Map generation failed: ${error.message}`);
+  }
+}
+
+/**
+ * Generate partial map data by running only specified phases
+ * Dependencies are automatically resolved and validated
+ * @param {Array<string>} phasesToRun - Array of phase names to run (from PHASES constant)
+ * @param {Function} DelaunatorClass - Delaunator class (required if VORONOI phase is included)
+ * @returns {Object} Reference to generated data {grid, pack, seed}
+ * @throws {InitializationError} If generator not initialized
+ * @throws {GenerationError} If generation fails or dependencies are missing
+ */
+export function generatePartial(phasesToRun, DelaunatorClass = null) {
+  requireInitialized();
+  
+  if (!Array.isArray(phasesToRun) || phasesToRun.length === 0) {
+    throw new GenerationError('phasesToRun must be a non-empty array of phase names');
+  }
+  
+  // Validate phase names
+  validatePhaseNames(phasesToRun, 'phasesToRun');
+  
+  try {
+    const data = generateMapInternal(state.options, DelaunatorClass, phasesToRun);
+    state.data = data;
+    return data;
+  } catch (error) {
+    if (error instanceof GenerationError || error instanceof InitializationError) {
+      throw error;
+    }
+    // Wrap other errors
+    throw new GenerationError(`Partial map generation failed: ${error.message}`);
   }
 }
 
