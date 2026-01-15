@@ -1331,7 +1331,7 @@ function triangulateFromHex(hexPoints, hexPointIndices) {
  * @param {number} dissolveProbability - Probability of attempting dissolution (0.0-1.0, default 0.5)
  * @returns {Array} Array of quads and remaining triangles
  */
-function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false, trueBoundaryEdges = null) {
+function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false, trueBoundaryEdges = null, hullIndices = null) {
   // STEP-BY-STEP DEBUG: Detailed logging
   if (debugMode) {
     console.log(`[dissolveEdgesToQuads] STARTING: ${triangles.length} input triangles, ${points.length} points, dissolveProbability=${dissolveProbability}`);
@@ -1340,6 +1340,25 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     } else {
       console.log(`[dissolveEdgesToQuads] WARNING: No true boundary edges provided - using legacy boundary detection`);
     }
+    if (hullIndices) {
+      console.log(`[dissolveEdgesToQuads] Hull indices provided: ${hullIndices.length} hull points`);
+    }
+  }
+  
+  // Helper: Check if an edge is border-adjacent (has at least one vertex on hull)
+  function isBorderAdjacentEdge(edgeKey) {
+    if (!hullIndices || hullIndices.length === 0) {
+      // Fallback: Check if edge is in trueBoundaryEdges or has boundary vertices
+      if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
+        return true;
+      }
+      const [v1, v2] = edgeKey.split(',').map(Number);
+      const p1 = points[v1];
+      const p2 = points[v2];
+      return (p1?.isBoundary || p2?.isBoundary) || false;
+    }
+    const [v1, v2] = edgeKey.split(',').map(Number);
+    return hullIndices.includes(v1) || hullIndices.includes(v2);
   }
   
   // REFINEMENT FIX 1: Epsilon tolerance for floating-point vertex comparison
@@ -1351,7 +1370,35 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   // Work with a mutable copy of triangles
   const workingTriangles = triangles.map(t => ({ ...t, verts: [...t.verts] }));
   const quads = [];
-  const maxAttempts = workingTriangles.length * 3;
+  
+  // BORDER ISOLATION FIX: Increase maxAttempts dynamically based on initial candidate count
+  // Calculate initial candidate count inline (buildEdgeMap is defined later)
+  const getEdgeKeyForMaxAttempts = (v1, v2) => v1 < v2 ? `${v1},${v2}` : `${v2},${v1}`;
+  const tempEdgeMap = new Map();
+  workingTriangles.forEach((tri) => {
+    if (tri.removed) return;
+    const [v0, v1, v2] = tri.verts;
+    const edges = [
+      getEdgeKeyForMaxAttempts(v0, v1),
+      getEdgeKeyForMaxAttempts(v1, v2),
+      getEdgeKeyForMaxAttempts(v2, v0),
+    ];
+    edges.forEach(edgeKey => {
+      if (!tempEdgeMap.has(edgeKey)) {
+        tempEdgeMap.set(edgeKey, []);
+      }
+      tempEdgeMap.get(edgeKey).push(tri);
+    });
+  });
+  const initialCandidateCount = Array.from(tempEdgeMap.entries())
+    .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
+    .length;
+  const maxAttempts = Math.max(workingTriangles.length * 3, initialCandidateCount * 2);
+  
+  if (debugMode) {
+    console.log(`[dissolveEdgesToQuads] Initial candidates: ${initialCandidateCount}, maxAttempts: ${maxAttempts} (base: ${workingTriangles.length * 3})`);
+  }
+  
   let dissolveCount = 0;
   let attempts = 0;
   let edgesDissolved = 0;
@@ -1365,6 +1412,12 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   const attemptedEdges = new Set(); // Edges that were actually selected and attempted
   const mergedEdges = new Set(); // Edges that were successfully merged
   const skippedEdgesLog = []; // Detailed log of why edges were skipped
+  
+  // BORDER ISOLATION AUDIT: Track border vs interior candidates
+  const borderCandidates = new Set(); // Border-adjacent candidate edges
+  const borderAttempted = new Set(); // Border edges attempted
+  const borderMerged = new Set(); // Border edges successfully merged
+  const borderSkipped = []; // Border edges skipped with reasons
   
   // Build edge map: edge -> [triangle indices that share this edge]
   // Edge is represented as sorted pair of vertex indices
@@ -1609,6 +1662,8 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     // Allow merges of shared edges even if one endpoint is on hull (as long as edge itself isn't a hull segment)
     const internalEdges = [];
     const skippedEdges = [];
+    let borderCandidateCount = 0;
+    let interiorCandidateCount = 0;
     
     for (const [edgeKey, triObjects] of edgeMap.entries()) {
       // AUDIT: Log ALL edges with their sharing count and protection status
@@ -1654,6 +1709,15 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       // TARGETED DEBUG: Track all candidate edges
       allCandidateEdges.add(edgeKey);
       
+      // BORDER ISOLATION AUDIT: Track border vs interior candidates
+      const isBorder = isBorderAdjacentEdge(edgeKey);
+      if (isBorder) {
+        borderCandidates.add(edgeKey);
+        borderCandidateCount++;
+      } else {
+        interiorCandidateCount++;
+      }
+      
       // TARGETED DEBUG: Log all internal edges being considered
       if (debugMode && attempts <= 20) {
         const [v1, v2] = edgeKey.split(',').map(Number);
@@ -1665,6 +1729,11 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       }
       
       internalEdges.push(edgeKey); // Allow merge (shared edge, not on true boundary)
+    }
+    
+    // BORDER ISOLATION AUDIT: Log candidate stats at start of iteration
+    if (debugMode && attempts <= 10) {
+      console.log(`[dissolveEdgesToQuads] ITERATION ${attempts}: ${internalEdges.length} total candidates (${borderCandidateCount} border, ${interiorCandidateCount} interior), ${activeTriangles.length} active triangles`);
     }
     
     // TARGETED DEBUG: Log skipped edges summary
@@ -1685,13 +1754,19 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       probabilitySkips++;
       // TARGETED DEBUG: Track probability skips (but don't log which edge was skipped since we haven't selected yet)
       if (debugMode && probabilitySkips <= 10) {
-        console.log(`[dissolveEdgesToQuads] Skipped merge due to probability (rand=${rand.toFixed(3)}, threshold=${dissolveProbability}, internalEdges=${internalEdges.length})`);
+        console.log(`[dissolveEdgesToQuads] Skipped merge due to probability (rand=${rand.toFixed(3)}, threshold=${dissolveProbability}, internalEdges=${internalEdges.length}, border=${borderCandidateCount})`);
       }
       continue; // Skip this attempt based on probability
     }
     
     const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
     const selectedEdge = internalEdges[randomEdgeIndex];
+    const isSelectedBorder = isBorderAdjacentEdge(selectedEdge);
+    
+    // BORDER ISOLATION AUDIT: Track attempted edges
+    if (isSelectedBorder) {
+      borderAttempted.add(selectedEdge);
+    }
     
     // Log allowed merge near boundary (if edge has boundary vertices but isn't a true boundary edge)
     if (debugMode && attempts <= 10 && trueBoundaryEdges) {
@@ -1768,14 +1843,27 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       edgesDissolved++;
       mergedEdges.add(selectedEdge); // TARGETED DEBUG: Track successfully merged edges
       
-      if (debugMode && edgesDissolved <= 5) {
-        console.log(`[dissolveEdgesToQuads] Successfully dissolved edge ${selectedEdge} into quad with verts: [${quad.verts.join(',')}]`);
+      // BORDER ISOLATION AUDIT: Track successful merges
+      if (isSelectedBorder) {
+        borderMerged.add(selectedEdge);
+      }
+      
+      if (debugMode && edgesDissolved <= 10) {
+        console.log(`[dissolveEdgesToQuads] SUCCESS: Dissolved edge ${selectedEdge} (border=${isSelectedBorder}) into quad with verts: [${quad.verts.join(',')}]`);
+        const remainingActive = workingTriangles.filter(t => !t.removed).length;
+        const remainingCandidates = internalEdges.length - 1; // Approximate
+        console.log(`  Remaining: ${remainingActive} triangles, ~${remainingCandidates} candidates`);
       }
     } else {
       invalidEdgeAttempts++;
-      // TARGETED DEBUG: Track why edge was rejected
-      if (debugMode && attempts <= 20) {
-        skippedEdgesLog.push({ edge: selectedEdge, reason: 'canDissolveEdge_rejected', attempt: attempts });
+      // BORDER ISOLATION AUDIT: Track why edge was rejected
+      if (debugMode && attempts <= 30) {
+        const reason = 'canDissolveEdge_rejected';
+        skippedEdgesLog.push({ edge: selectedEdge, reason: reason, attempt: attempts, isBorder: isSelectedBorder });
+        if (isSelectedBorder) {
+          borderSkipped.push({ edge: selectedEdge, reason: reason, attempt: attempts });
+          console.log(`[dissolveEdgesToQuads] BORDER EDGE REJECTED: ${selectedEdge}, reason=${reason}`);
+        }
       }
       // Note: canDissolveEdge() already logs rejection reasons, so we don't duplicate here
     }
@@ -1913,6 +2001,116 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   if (debugMode && finalPassMerges > 0) {
     const remainingAfterFinal = workingTriangles.filter(t => !t.removed).length;
     console.log(`[dissolveEdgesToQuads] Final pass complete: ${finalPassMerges} additional merges (${finalPassAttempts} attempts), ${remainingAfterFinal} triangles remaining`);
+  }
+  
+  // DETERMINISTIC FINAL CLEANUP PASS: Try ALL remaining candidates, prioritizing border edges
+  // BORDER ISOLATION FIX: This ensures all eligible pairs are attempted, especially border ones
+  let finalCleanupMerges = 0;
+  let finalCleanupAttempts = 0;
+  
+  const activeTrianglesForCleanup = workingTriangles.filter(t => !t.removed);
+  if (activeTrianglesForCleanup.length >= 2) {
+    if (debugMode) {
+      console.log(`[dissolveEdgesToQuads] Starting deterministic final cleanup pass (${activeTrianglesForCleanup.length} triangles remaining)`);
+    }
+    
+    let cleanupEdgeMap = buildEdgeMap(activeTrianglesForCleanup);
+    
+    // Get all remaining candidates (shared by exactly 2 triangles)
+    let remainingCandidates = Array.from(cleanupEdgeMap.entries())
+      .filter(([edgeKey, triObjects]) => {
+        const sharingCount = triObjects.length;
+        const isInTrueBoundary = trueBoundaryEdges && trueBoundaryEdges.has(edgeKey);
+        
+        // Skip if not shared by exactly 2 triangles
+        if (sharingCount !== 2 || triObjects[0].removed || triObjects[1].removed) {
+          return false;
+        }
+        
+        // Only protect if shared by 1 triangle AND on hull
+        if (sharingCount === 1 && isInTrueBoundary) {
+          return false; // True boundary edge - protect
+        }
+        
+        return true; // Allow merge
+      })
+      .map(([edgeKey, triObjects]) => ({
+        edge: edgeKey,
+        isBorder: isBorderAdjacentEdge(edgeKey),
+        triObjects: triObjects
+      }));
+    
+    // Sort: Border edges first, then interior
+    remainingCandidates.sort((a, b) => {
+      if (a.isBorder && !b.isBorder) return -1;
+      if (!a.isBorder && b.isBorder) return 1;
+      return 0; // Same type, keep original order
+    });
+    
+    if (debugMode && remainingCandidates.length > 0) {
+      const borderCount = remainingCandidates.filter(c => c.isBorder).length;
+      console.log(`[dissolveEdgesToQuads] Final cleanup: ${remainingCandidates.length} remaining candidates (${borderCount} border, ${remainingCandidates.length - borderCount} interior)`);
+    }
+    
+    // Try all remaining candidates (deterministic, no probability check)
+    for (const candidate of remainingCandidates) {
+      finalCleanupAttempts++;
+      const selectedEdge = candidate.edge;
+      
+      // Skip true boundary edges (safety check)
+      const edgeInfo = cleanupEdgeMap.get(selectedEdge);
+      if (edgeInfo && edgeInfo.length === 1) {
+        if (debugMode && finalCleanupAttempts <= 5) {
+          console.log(`[dissolveEdgesToQuads] Final cleanup: Skipped true boundary edge: ${selectedEdge}`);
+        }
+        continue;
+      }
+      
+      const canDissolve = canDissolveEdge(selectedEdge, cleanupEdgeMap, activeTrianglesForCleanup.map(t => ({ ...t, removed: false })));
+      
+      if (canDissolve) {
+        const [tri1, tri2] = candidate.triObjects;
+        
+        // Merge into quad
+        const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
+        
+        // Validate quad (must have 4 vertices)
+        if (quad.verts.length !== 4) {
+          if (debugMode && finalCleanupMerges < 5) {
+            console.log(`[dissolveEdgesToQuads] Final cleanup: Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices`);
+          }
+          continue; // Invalid quad
+        }
+        
+        // Mark triangles as removed
+        tri1.removed = true;
+        tri2.removed = true;
+        
+        // Add quad
+        quads.push(quad);
+        edgesDissolved++;
+        finalCleanupMerges++;
+        
+        if (debugMode && finalCleanupMerges <= 10) {
+          console.log(`[dissolveEdgesToQuads] Final cleanup: Merged edge ${selectedEdge} (border=${candidate.isBorder}) into quad with verts: [${quad.verts.join(',')}]`);
+        }
+        
+        // Rebuild edge map after each merge (triangles removed)
+        const remainingActive = workingTriangles.filter(t => !t.removed);
+        if (remainingActive.length < 2) break; // No more pairs
+        cleanupEdgeMap = buildEdgeMap(remainingActive);
+        
+        // Update remaining candidates (remove merged edge)
+        remainingCandidates = remainingCandidates.filter(c => c.edge !== selectedEdge);
+      }
+    }
+    
+    if (debugMode && finalCleanupMerges > 0) {
+      const remainingAfterCleanup = workingTriangles.filter(t => !t.removed).length;
+      console.log(`[dissolveEdgesToQuads] Final cleanup complete: ${finalCleanupMerges} additional merges (${finalCleanupAttempts} attempts), ${remainingAfterCleanup} triangles remaining`);
+    } else if (debugMode && remainingCandidates.length === 0) {
+      console.log(`[dissolveEdgesToQuads] Final cleanup: No remaining candidates (all triangles are isolated)`);
+    }
   }
   
   // Collect remaining triangles (not dissolved)
