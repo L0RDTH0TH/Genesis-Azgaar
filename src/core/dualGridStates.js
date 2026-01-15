@@ -1167,6 +1167,10 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   // Build initial edge map
   function buildEdgeMap(triangles) {
     const edgeMap = new Map();
+    let boundaryEdges = 0;
+    let multiSharedEdges = 0;
+    const problematicEdges = [];
+    
     triangles.forEach((tri, triIndex) => {
       const [v0, v1, v2] = tri.verts;
       const edges = [
@@ -1181,6 +1185,39 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         edgeMap.get(edgeKey).push(triIndex);
       });
     });
+    
+    // AUDIT: Validate edge map
+    edgeMap.forEach((triIndices, edgeKey) => {
+      if (triIndices.length === 1) {
+        boundaryEdges++;
+      } else if (triIndices.length > 2) {
+        multiSharedEdges++;
+        if (problematicEdges.length < 10) {
+          problematicEdges.push({
+            edge: edgeKey,
+            count: triIndices.length,
+            triangles: triIndices,
+            triangleVerts: triIndices.map(idx => triangles[idx]?.verts || 'missing')
+          });
+        }
+      }
+    });
+    
+    if (debugMode) {
+      console.log(`[buildEdgeMap] AUDIT: Total edges: ${edgeMap.size}, boundary: ${boundaryEdges}, multi-shared (>2): ${multiSharedEdges}`);
+      if (problematicEdges.length > 0) {
+        console.log(`[buildEdgeMap] AUDIT: Sample problematic edges:`, JSON.stringify(problematicEdges, null, 2));
+      }
+      
+      // Log sample of first 10 edges
+      const sampleEdges = Array.from(edgeMap.entries()).slice(0, 10).map(([edgeKey, triIndices]) => ({
+        edge: edgeKey,
+        triangles: triIndices,
+        triangleVerts: triIndices.map(idx => triangles[idx]?.verts || 'missing')
+      }));
+      console.log(`[buildEdgeMap] AUDIT: Sample edges (first 10):`, JSON.stringify(sampleEdges, null, 2));
+    }
+    
     return edgeMap;
   }
   
@@ -1307,9 +1344,12 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const sharingTriangles = edgeMap.get(selectedEdge);
     let canDissolve = true;
     let failureReason = '';
+    let failureCategory = '';
     
+    // AUDIT: Track failure reasons
     if (!sharingTriangles || sharingTriangles.length !== 2) {
       canDissolve = false;
+      failureCategory = 'edge_map_invalid';
       failureReason = `edge shared by ${sharingTriangles?.length || 0} triangles (expected 2)`;
     } else {
       const [tri1Idx, tri2Idx] = sharingTriangles;
@@ -1318,17 +1358,64 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       
       if (!tri1 || !tri2) {
         canDissolve = false;
+        failureCategory = 'triangle_missing';
         failureReason = 'triangle missing';
       } else if (tri1.removed || tri2.removed) {
         canDissolve = false;
+        failureCategory = 'triangle_removed';
         failureReason = 'triangle already removed';
       } else {
-        const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
-        if (allVerts.length !== 4) {
+        // AUDIT: Verify edge vertices actually exist in both triangles
+        const [v1, v2] = selectedEdge.split(',').map(Number);
+        const tri1HasEdge = tri1.verts.includes(v1) && tri1.verts.includes(v2);
+        const tri2HasEdge = tri2.verts.includes(v1) && tri2.verts.includes(v2);
+        
+        if (!tri1HasEdge || !tri2HasEdge) {
           canDissolve = false;
-          failureReason = `${allVerts.length} unique vertices (expected 4), tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}]`;
+          failureCategory = 'edge_not_shared';
+          failureReason = `edge [${v1},${v2}] not actually in triangles: tri1 has edge: ${tri1HasEdge}, tri2 has edge: ${tri2HasEdge}`;
+        } else {
+          // Check unique vertices
+          const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
+          if (allVerts.length !== 4) {
+            canDissolve = false;
+            failureCategory = 'wrong_vertex_count';
+            failureReason = `${allVerts.length} unique vertices (expected 4), tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}], shared: [${v1},${v2}]`;
+            
+            // AUDIT: Analyze why vertex count is wrong
+            const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+            if (sharedVerts.length !== 2) {
+              failureReason += `, shared verts: [${sharedVerts.join(',')}] (expected 2)`;
+            }
+          }
         }
       }
+    }
+    
+    // AUDIT: Log detailed attempt info
+    if (debugMode && attempts <= 20) {
+      const auditInfo = {
+        attempt: attempts,
+        selectedEdge: selectedEdge,
+        sharingTriangles: sharingTriangles,
+        canDissolve: canDissolve,
+        failureCategory: failureCategory || 'success',
+        failureReason: failureReason || 'none',
+        edgeMapSize: edgeMap.size,
+        activeTriangles: activeTriangles.length
+      };
+      
+      if (sharingTriangles && sharingTriangles.length === 2) {
+        const [tri1Idx, tri2Idx] = sharingTriangles;
+        const tri1 = workingTriangles[tri1Idx];
+        const tri2 = workingTriangles[tri2Idx];
+        auditInfo.tri1Verts = tri1?.verts;
+        auditInfo.tri2Verts = tri2?.verts;
+        auditInfo.tri1Removed = tri1?.removed;
+        auditInfo.tri2Removed = tri2?.removed;
+      }
+      
+      console.log(`[dissolveEdgesToQuads] AUDIT attempt ${attempts}:`, JSON.stringify(auditInfo, null, 2));
     }
     
     if (canDissolve) {
@@ -1383,6 +1470,22 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     console.log(`[dissolveEdgesToQuads] DISSOLUTION RATE: ${attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) : 0}% success rate`);
     console.log(`[dissolveEdgesToQuads] TRIANGLE-TO-QUAD CONVERSION: ${finalQuadCount} quads from ${triangles.length} triangles = ${((finalQuadCount / triangles.length) * 100).toFixed(1)}% conversion rate`);
     console.log(`[dissolveEdgesToQuads] FAILURE BREAKDOWN: ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
+    
+    // AUDIT: Export failure statistics
+    const auditSummary = {
+      totalAttempts: attempts,
+      successful: edgesDissolved,
+      failed: invalidEdgeAttempts,
+      degenerate: degenerateQuadAttempts,
+      successRate: attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) + '%' : '0%',
+      conversionRate: ((finalQuadCount / triangles.length) * 100).toFixed(1) + '%',
+      finalShapes: {
+        quads: finalQuadCount,
+        triangles: finalTriangleCount,
+        total: totalShapes
+      }
+    };
+    console.log(`[dissolveEdgesToQuads] AUDIT SUMMARY:`, JSON.stringify(auditSummary, null, 2));
     
     // Export Stage 2/3 data summary for debugging
     if (debugMode) {
