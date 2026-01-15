@@ -45,7 +45,7 @@ async function generateInteractiveTerrain() {
         earlyTerminationThreshold: 0.0001,
         lockBoundaries: true, // Lock boundary points during relaxation (immutable hex border)
         progressiveDamping: true,
-        dissolveProbability: 1.0, // BORDER ISOLATION FIX: Set to 1.0 to eliminate probability skips (was 0.95, causing 5% skips)
+        dissolveProbability: 1.0, // ITERATION 35 FIX: Set to 1.0 to eliminate probability skips (was 0.95, causing 5% skips)
         relaxationIterations: 100, // Optimized for convergence without over-movement (prevents line crossings)
         dampingFactor: 0.5, // Increased damping for stability (prevents oscillation/crossing)
         dualOffsetFactor: 0.35, // Reduced offset for less aggressive rounding (prevents edge crossings)
@@ -62,7 +62,7 @@ async function generateInteractiveTerrain() {
         stepByStepDensityMultiplier: 0.125, // DENSITY REDUCTION: 0.125 = 12.5% density (4x spacing, ~8x larger triangles) - PRIORITY over targetPoints
         targetPoints: null, // Disabled - using densityMultiplier instead for spacing-based reduction
         skipDissolution: false, // FIX 5: Enable dissolution for quad rendering
-        dissolveProbability: 0.85, // REFINEMENT FIX 1: Higher probability threshold (0.85) for better conversion rate
+        // dissolveProbability: 1.0, // ITERATION 35 FIX: Set above (line 48) to eliminate probability skips
         skipLevel1Subdivision: true, // Skip Level 1 to reduce density (preview mode)
       },
     };

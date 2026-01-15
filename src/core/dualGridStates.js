@@ -488,7 +488,8 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     console.log(`[buildStalbergQuadGrid] Skipping dissolution (rendering raw triangles)`);
     quads = triangles; // Use triangles directly
   } else {
-    const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.85; // REFINEMENT FIX 1: Higher default (0.85) for better conversion
+    // ITERATION 35 FIX: Set dissolveProbability to 1.0 to eliminate probability skips
+    const dissolveProbability = options.politicsMode?.dissolveProbability ?? 1.0; // ITERATION 35: Default to 1.0 for maximum conversion
     const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
     // Pass true boundary edges to dissolution function
     quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender, trueBoundaryEdges);
@@ -1537,7 +1538,8 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   const initialCandidateCount = Array.from(tempEdgeMap.entries())
     .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
     .length;
-  const maxAttempts = Math.max(workingTriangles.length * 3, initialCandidateCount * 2);
+  // ITERATION 35 FIX: Increase maxAttempts significantly for better coverage
+  const maxAttempts = Math.max(workingTriangles.length * 5, initialCandidateCount * 3);
   
   if (debugMode) {
     console.log(`[dissolveEdgesToQuads] Initial candidates: ${initialCandidateCount}, maxAttempts: ${maxAttempts} (base: ${workingTriangles.length * 3})`);
@@ -1802,77 +1804,51 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const edgeMap = buildEdgeMap(activeTriangles);
     
     // Get all internal edges (shared by exactly 2 triangles)
-    // REFINED BOUNDARY PROTECTION: Only protect edges where BOTH endpoints are hull vertices AND edge is on hull segment
-    // Allow merges of shared edges even if one endpoint is on hull (as long as edge itself isn't a hull segment)
+    // ITERATION 35 FIX: Simplified boundary protection - only protect edges shared by 1 triangle AND on hull
     const internalEdges = [];
     const skippedEdges = [];
     let borderCandidateCount = 0;
     let interiorCandidateCount = 0;
     
+    // Helper function to get edge vertices
+    function getEdgeVerts(edgeKey) {
+      return edgeKey.split(',').map(Number);
+    }
+    
     for (const [edgeKey, triObjects] of edgeMap.entries()) {
-      // AUDIT: Log ALL edges with their sharing count and protection status
       const sharingCount = triObjects.length;
       const isInTrueBoundary = trueBoundaryEdges && trueBoundaryEdges.has(edgeKey);
       
-      // CRITICAL BUG IDENTIFIED: Current logic protects edges in trueBoundaryEdges even if shared by 2 triangles
-      // CORRECT LOGIC: Only protect edges that are:
-      //   1. Shared by exactly 1 triangle (true boundary) AND
-      //   2. On the convex hull (in trueBoundaryEdges)
-      // If shared by 2 triangles, allow dissolution even if on hull (it's an internal edge near border)
-      
-      if (sharingCount === 1) {
-        // True boundary edge (shared by only 1 triangle) - protect if on hull
-        if (isInTrueBoundary) {
-          if (debugMode && attempts <= 10) {
-            console.log(`[dissolveEdgesToQuads] AUDIT: Protected true boundary edge: ${edgeKey} (shared by 1 triangle, on hull)`);
-          }
-          skippedEdges.push({ edge: edgeKey, reason: 'true_boundary_single_triangle', sharingCount: 1, isInTrueBoundary: true });
-          continue; // Skip true boundary edges (shared by 1 triangle, on hull)
-        }
-        // Not on hull but shared by 1 - still protect (boundary edge)
+      // ITERATION 35 FIX: Protect ONLY if: shared by 1 triangle AND on hull
+      if (sharingCount === 1 && isInTrueBoundary) {
         if (debugMode && attempts <= 10) {
-          console.log(`[dissolveEdgesToQuads] AUDIT: Protected boundary edge: ${edgeKey} (shared by 1 triangle, not on hull)`);
+          console.log(`[BOUNDARY FIX] Protected true boundary edge: ${edgeKey} (shared by 1 triangle, on hull)`);
         }
-        skippedEdges.push({ edge: edgeKey, reason: 'boundary_single_triangle', sharingCount: 1, isInTrueBoundary: false });
-        continue;
+        skippedEdges.push({ edge: edgeKey, reason: 'true_boundary_single_triangle', sharingCount: 1 });
+        continue; // Skip true boundary edge
       }
       
-      // Must be shared by exactly 2 triangles to be a candidate
-      if (sharingCount !== 2 || triObjects[0].removed || triObjects[1].removed) {
-        continue;
+      // ITERATION 35 FIX: Allow if shared by 2 triangles (internal edge)
+      if (sharingCount === 2 && !triObjects[0].removed && !triObjects[1].removed) {
+        // Log allowed sharing=2 edges on hull
+        if (isInTrueBoundary && debugMode && attempts <= 20) {
+          console.log(`[BOUNDARY FIX] Allowed sharing=2 edge on hull: ${edgeKey} (internal edge, can be dissolved)`);
+        }
+        
+        // TARGETED DEBUG: Track all candidate edges
+        allCandidateEdges.add(edgeKey);
+        
+        // BORDER ISOLATION AUDIT: Track border vs interior candidates
+        const isBorder = isBorderAdjacentEdge(edgeKey);
+        if (isBorder) {
+          borderCandidates.add(edgeKey);
+          borderCandidateCount++;
+        } else {
+          interiorCandidateCount++;
+        }
+        
+        internalEdges.push(edgeKey); // Allow merge
       }
-      
-      // CRITICAL FIX: If shared by 2 triangles, allow dissolution even if in trueBoundaryEdges
-      // The edge is internal (shared by 2 triangles), so it can be dissolved
-      // Previous bug: We were protecting edges in trueBoundaryEdges even if shared by 2 triangles
-      if (isInTrueBoundary && debugMode && attempts <= 20) {
-        console.log(`[dissolveEdgesToQuads] AUDIT: ALLOWING internal edge on hull: ${edgeKey} (shared by 2 triangles, in trueBoundaryEdges but allowing merge)`);
-        console.log(`  Tri1: [${triObjects[0].verts.join(',')}], Tri2: [${triObjects[1].verts.join(',')}]`);
-      }
-      
-      // TARGETED DEBUG: Track all candidate edges
-      allCandidateEdges.add(edgeKey);
-      
-      // BORDER ISOLATION AUDIT: Track border vs interior candidates
-      const isBorder = isBorderAdjacentEdge(edgeKey);
-      if (isBorder) {
-        borderCandidates.add(edgeKey);
-        borderCandidateCount++;
-      } else {
-        interiorCandidateCount++;
-      }
-      
-      // TARGETED DEBUG: Log all internal edges being considered
-      if (debugMode && attempts <= 20) {
-        const [v1, v2] = edgeKey.split(',').map(Number);
-        const p1 = points[v1];
-        const p2 = points[v2];
-        const v1OnHull = p1?.isBoundary || false;
-        const v2OnHull = p2?.isBoundary || false;
-        console.log(`[dissolveEdgesToQuads] Internal edge candidate: ${edgeKey}, tri1: [${triObjects[0].verts.join(',')}], tri2: [${triObjects[1].verts.join(',')}], v1OnHull: ${v1OnHull}, v2OnHull: ${v2OnHull}`);
-      }
-      
-      internalEdges.push(edgeKey); // Allow merge (shared edge, not on true boundary)
     }
     
     // BORDER ISOLATION AUDIT: Log candidate stats at start of iteration
@@ -2762,15 +2738,55 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
  * @returns {Array} Array of 3 quads
  */
 function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
+  // ITERATION 35 FIX: Degeneracy check before subdivision
+  function isDegenerateTriangle(shape) {
+    if (!shape.verts || shape.verts.length !== 3) return true;
+    const [v0, v1, v2] = shape.verts;
+    const p0 = points[v0];
+    const p1 = points[v1];
+    const p2 = points[v2];
+    if (!p0 || !p1 || !p2) return true;
+    // Collinear check via cross-product
+    const cross = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
+    return Math.abs(cross) < 1e-6; // epsilon for floating point
+  }
+  
+  if (isDegenerateTriangle(triangle)) {
+    console.warn(`[SUBDIVISION] Skipping degenerate triangle: ${triangle.verts}`);
+    return []; // Return empty array (fallback handled by caller)
+  }
+  
   const [v0, v1, v2] = triangle.verts;
   const p0 = points[v0];
   const p1 = points[v1];
   const p2 = points[v2];
   
+  // ITERATION 35 FIX: Border snapping helper
+  function snapToBounds(point, minX, maxX, minY, maxY) {
+    point.x = Math.max(minX, Math.min(maxX, point.x));
+    point.y = Math.max(minY, Math.min(maxY, point.y));
+    return point;
+  }
+  
+  // Calculate bounds for snapping (if needed)
+  const allPoints = [p0, p1, p2].filter(p => p);
+  const minX = Math.min(...allPoints.map(p => p.x));
+  const maxX = Math.max(...allPoints.map(p => p.x));
+  const minY = Math.min(...allPoints.map(p => p.y));
+  const maxY = Math.max(...allPoints.map(p => p.y));
+  
   // Calculate midpoints
-  const mid01 = midpoint(p0, p1);
-  const mid12 = midpoint(p1, p2);
-  const mid20 = midpoint(p2, p0);
+  let mid01 = midpoint(p0, p1);
+  let mid12 = midpoint(p1, p2);
+  let mid20 = midpoint(p2, p0);
+  
+  // ITERATION 35 FIX: Snap midpoints to bounds if triangle touches border
+  const isBorder = (p0?.isBoundary || p1?.isBoundary || p2?.isBoundary);
+  if (isBorder) {
+    mid01 = snapToBounds(mid01, minX, maxX, minY, maxY);
+    mid12 = snapToBounds(mid12, minX, maxX, minY, maxY);
+    mid20 = snapToBounds(mid20, minX, maxX, minY, maxY);
+  }
   
   // Add midpoints to points array
   const i01 = addPoint(mid01);
@@ -2778,18 +2794,54 @@ function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
   const i20 = addPoint(mid20);
   
   // Calculate center
-  const center = {
+  let center = {
     x: (p0.x + p1.x + p2.x) / 3,
     y: (p0.y + p1.y + p2.y) / 3,
   };
+  
+  // ITERATION 35 FIX: Snap center to bounds if border triangle
+  if (isBorder) {
+    center = snapToBounds(center, minX, maxX, minY, maxY);
+  }
+  
   const ic = addPoint(center);
   
+  // ITERATION 35 FIX: Sub-quad validation
+  function validateSubQuad(quad) {
+    if (!quad.verts || quad.verts.length !== 4) return false;
+    const uniqueVerts = new Set(quad.verts);
+    if (uniqueVerts.size !== 4) return false;
+    // Zero-area check using shoelace formula
+    const [q0, q1, q2, q3] = quad.verts.map(v => points[v]).filter(p => p);
+    if (q0 && q1 && q2 && q3) {
+      const area = Math.abs(
+        (q0.x * q1.y + q1.x * q2.y + q2.x * q3.y + q3.x * q0.y) -
+        (q0.y * q1.x + q1.y * q2.x + q2.y * q3.x + q3.y * q0.x)
+      ) / 2;
+      if (area < 1e-6) return false; // Zero or near-zero area
+    }
+    return true;
+  }
+  
   // Create 3 quads
-  return [
+  const subQuads = [
     { type: 'quad', verts: [v0, i01, ic, i20] },
     { type: 'quad', verts: [i01, v1, i12, ic] },
     { type: 'quad', verts: [ic, i12, v2, i20] },
   ];
+  
+  // ITERATION 35 FIX: Filter invalid sub-quads
+  const validSubQuads = subQuads.filter(validateSubQuad);
+  
+  if (validSubQuads.length < 3) {
+    console.warn(`[SUBDIVISION] Invalid sub-quads for triangle ${triangle.verts}; ${validSubQuads.length} valid out of 3`);
+    // Fallback: Return original triangle if all sub-quads invalid
+    if (validSubQuads.length === 0) {
+      return [triangle]; // Keep original triangle
+    }
+  }
+  
+  return validSubQuads;
 }
 
 /**
