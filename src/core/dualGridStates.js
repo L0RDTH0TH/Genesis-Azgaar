@@ -1165,13 +1165,17 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   }
   
   // Build initial edge map
+  // PRIORITY 2 FIX: Store triangle objects instead of indices to eliminate index staleness
   function buildEdgeMap(triangles) {
     const edgeMap = new Map();
     let boundaryEdges = 0;
     let multiSharedEdges = 0;
     const problematicEdges = [];
     
-    triangles.forEach((tri, triIndex) => {
+    triangles.forEach((tri) => {
+      // Skip removed triangles
+      if (tri.removed) return;
+      
       const [v0, v1, v2] = tri.verts;
       const edges = [
         getEdgeKey(v0, v1),
@@ -1182,22 +1186,21 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         if (!edgeMap.has(edgeKey)) {
           edgeMap.set(edgeKey, []);
         }
-        edgeMap.get(edgeKey).push(triIndex);
+        edgeMap.get(edgeKey).push(tri); // Store triangle object, not index
       });
     });
     
     // AUDIT: Validate edge map
-    edgeMap.forEach((triIndices, edgeKey) => {
-      if (triIndices.length === 1) {
+    edgeMap.forEach((triObjects, edgeKey) => {
+      if (triObjects.length === 1) {
         boundaryEdges++;
-      } else if (triIndices.length > 2) {
+      } else if (triObjects.length > 2) {
         multiSharedEdges++;
         if (problematicEdges.length < 10) {
           problematicEdges.push({
             edge: edgeKey,
-            count: triIndices.length,
-            triangles: triIndices,
-            triangleVerts: triIndices.map(idx => triangles[idx]?.verts || 'missing')
+            count: triObjects.length,
+            triangleVerts: triObjects.map(tri => tri?.verts || 'missing')
           });
         }
       }
@@ -1210,10 +1213,9 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       }
       
       // Log sample of first 10 edges
-      const sampleEdges = Array.from(edgeMap.entries()).slice(0, 10).map(([edgeKey, triIndices]) => ({
+      const sampleEdges = Array.from(edgeMap.entries()).slice(0, 10).map(([edgeKey, triObjects]) => ({
         edge: edgeKey,
-        triangles: triIndices,
-        triangleVerts: triIndices.map(idx => triangles[idx]?.verts || 'missing')
+        triangleVerts: triObjects.map(tri => tri?.verts || 'missing')
       }));
       console.log(`[buildEdgeMap] AUDIT: Sample edges (first 10):`, JSON.stringify(sampleEdges, null, 2));
     }
@@ -1222,6 +1224,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   }
   
   // Check if dissolving an edge creates a valid quad
+  // PRIORITY 2 FIX: Now receives triangle objects directly from edge map (no index lookup needed)
   function canDissolveEdge(edgeKey, edgeMap, triangles) {
     const sharingTriangles = edgeMap.get(edgeKey);
     if (!sharingTriangles || sharingTriangles.length !== 2) {
@@ -1231,9 +1234,8 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       return false; // Not an internal edge (shared by exactly 2 triangles)
     }
     
-    const [tri1Idx, tri2Idx] = sharingTriangles;
-    const tri1 = triangles[tri1Idx];
-    const tri2 = triangles[tri2Idx];
+    // PRIORITY 2 FIX: Get triangle objects directly (no index lookup)
+    const [tri1, tri2] = sharingTriangles;
     
     if (!tri1 || !tri2 || tri1.removed || tri2.removed) {
       if (debugMode) {
@@ -1249,7 +1251,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     
     if (!tri1HasEdge || !tri2HasEdge) {
       if (debugMode) {
-        console.log(`[canDissolveEdge] REJECT: Edge ${edgeKey} not present in both triangles (tri1[${tri1Idx}] has edge: ${tri1HasEdge}, tri2[${tri2Idx}] has edge: ${tri2HasEdge}, tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}])`);
+        console.log(`[canDissolveEdge] REJECT: Edge ${edgeKey} not present in both triangles (tri1 has edge: ${tri1HasEdge}, tri2 has edge: ${tri2HasEdge}, tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}])`);
       }
       return false;
     }
@@ -1351,8 +1353,9 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const edgeMap = buildEdgeMap(activeTriangles);
     
     // Get all internal edges (shared by exactly 2 triangles)
+    // PRIORITY 2 FIX: triIndices is now triObjects (triangle objects)
     const internalEdges = Array.from(edgeMap.entries())
-      .filter(([edgeKey, triIndices]) => triIndices.length === 2)
+      .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
       .map(([edgeKey]) => edgeKey);
     
     if (internalEdges.length === 0) {
@@ -1401,10 +1404,9 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     }
     
     if (canDissolve) {
+      // PRIORITY 2 FIX: Get triangle objects directly from edge map (no index lookup)
       const sharingTriangles = edgeMap.get(selectedEdge);
-      const [tri1Idx, tri2Idx] = sharingTriangles;
-      const tri1 = workingTriangles[tri1Idx];
-      const tri2 = workingTriangles[tri2Idx];
+      const [tri1, tri2] = sharingTriangles;
       
       // Merge into quad
       const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
