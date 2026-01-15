@@ -49,6 +49,73 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
   }
   
+  // Helper: Compute convex hull using Graham scan algorithm
+  // Returns array of point indices that form the convex hull
+  function computeConvexHull(points) {
+    if (points.length < 3) {
+      // Need at least 3 points for a hull
+      return points.map((_, i) => i);
+    }
+    
+    // Find bottom-most point (or leftmost in case of tie)
+    let bottomIdx = 0;
+    for (let i = 1; i < points.length; i++) {
+      if (points[i].y < points[bottomIdx].y || 
+          (points[i].y === points[bottomIdx].y && points[i].x < points[bottomIdx].x)) {
+        bottomIdx = i;
+      }
+    }
+    
+    // Sort points by polar angle with respect to bottom point
+    const sorted = points.map((p, i) => ({
+      idx: i,
+      x: p.x,
+      y: p.y,
+      angle: Math.atan2(p.y - points[bottomIdx].y, p.x - points[bottomIdx].x),
+      dist: Math.sqrt((p.x - points[bottomIdx].x) ** 2 + (p.y - points[bottomIdx].y) ** 2)
+    })).sort((a, b) => {
+      if (Math.abs(a.angle - b.angle) < 1e-10) {
+        return a.dist - b.dist; // If same angle, closer first
+      }
+      return a.angle - b.angle;
+    });
+    
+    // Graham scan
+    const hull = [sorted[0].idx, sorted[1].idx];
+    
+    for (let i = 2; i < sorted.length; i++) {
+      const current = sorted[i];
+      while (hull.length > 1) {
+        const p1 = points[hull[hull.length - 2]];
+        const p2 = points[hull[hull.length - 1]];
+        const p3 = points[current.idx];
+        
+        // Cross product to determine turn direction
+        const cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+        if (cross > 0) break; // Left turn, keep
+        hull.pop(); // Right turn, remove
+      }
+      hull.push(current.idx);
+    }
+    
+    return hull;
+  }
+  
+  // Helper: Create Set of true boundary edge keys from convex hull
+  function getTrueBoundaryEdges(points, hullIndices) {
+    const boundaryEdges = new Set();
+    const getEdgeKey = (v1, v2) => v1 < v2 ? `${v1},${v2}` : `${v2},${v1}`;
+    
+    // Create edges from consecutive hull points
+    for (let i = 0; i < hullIndices.length; i++) {
+      const v1 = hullIndices[i];
+      const v2 = hullIndices[(i + 1) % hullIndices.length];
+      boundaryEdges.add(getEdgeKey(v1, v2));
+    }
+    
+    return boundaryEdges;
+  }
+  
   // Step 1: Generate transformed hex points (perfect hex grid with post-transform)
   // Clean hexagonal border via post-transform of perfect hex grid
   // This preserves clean hexagonal outer border while achieving elliptical shape
@@ -322,7 +389,17 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     console.log('[buildStalbergQuadGrid] Early relax test: enabled, check center chaos/CV');
   }
   
-  // Step 2: Triangulate from elliptical points using Delaunay triangulation
+  // Step 2: Compute true boundary edges (convex hull) BEFORE triangulation
+  // This identifies edges on the outer perimeter that should be protected
+  const hullIndices = computeConvexHull(primalPoints);
+  const trueBoundaryEdges = getTrueBoundaryEdges(primalPoints, hullIndices);
+  console.log(`[buildStalbergQuadGrid] Convex hull computed: ${hullIndices.length} hull points, ${trueBoundaryEdges.size} true boundary edges`);
+  
+  if (stepByStepRender) {
+    console.log(`[buildStalbergQuadGrid] True boundary edges (sample):`, Array.from(trueBoundaryEdges).slice(0, 10));
+  }
+  
+  // Step 3: Triangulate from elliptical points using Delaunay triangulation
   // Use Delaunator if available (fast O(n log n)), otherwise fall back to simple method
   const DelaunatorClass = options.DelaunatorClass;
   let rawDelaunayTriangles = null;
@@ -413,7 +490,8 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   } else {
     const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.85; // REFINEMENT FIX 1: Higher default (0.85) for better conversion
     const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
-    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender);
+    // Pass true boundary edges to dissolution function
+    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender, trueBoundaryEdges);
     console.log(`[buildStalbergQuadGrid] After dissolution: ${quads.length} shapes`);
   }
   
@@ -1253,10 +1331,15 @@ function triangulateFromHex(hexPoints, hexPointIndices) {
  * @param {number} dissolveProbability - Probability of attempting dissolution (0.0-1.0, default 0.5)
  * @returns {Array} Array of quads and remaining triangles
  */
-function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false) {
+function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false, trueBoundaryEdges = null) {
   // STEP-BY-STEP DEBUG: Detailed logging
   if (debugMode) {
     console.log(`[dissolveEdgesToQuads] STARTING: ${triangles.length} input triangles, ${points.length} points, dissolveProbability=${dissolveProbability}`);
+    if (trueBoundaryEdges) {
+      console.log(`[dissolveEdgesToQuads] True boundary edges provided: ${trueBoundaryEdges.size} edges to protect`);
+    } else {
+      console.log(`[dissolveEdgesToQuads] WARNING: No true boundary edges provided - using legacy boundary detection`);
+    }
   }
   
   // REFINEMENT FIX 1: Epsilon tolerance for floating-point vertex comparison
@@ -1516,9 +1599,25 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const edgeMap = buildEdgeMap(activeTriangles);
     
     // Get all internal edges (shared by exactly 2 triangles)
-    // PRIORITY 2 FIX: triIndices is now triObjects (triangle objects)
+    // CORRECT BOUNDARY PROTECTION: Only exclude true boundary edges (on convex hull)
+    // Allow merges of shared edges even if triangles have boundary vertices
     const internalEdges = Array.from(edgeMap.entries())
-      .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
+      .filter(([edgeKey, triObjects]) => {
+        // Must be shared by exactly 2 triangles
+        if (triObjects.length !== 2 || triObjects[0].removed || triObjects[1].removed) {
+          return false;
+        }
+        
+        // CORRECT BOUNDARY PROTECTION: Only protect true boundary edges (on convex hull)
+        if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
+          if (debugMode && attempts <= 5) {
+            console.log(`[dissolveEdgesToQuads] Protected true boundary edge: ${edgeKey} (on convex hull)`);
+          }
+          return false; // Skip true boundary edges
+        }
+        
+        return true; // Allow merge (shared edge, not on true boundary)
+      })
       .map(([edgeKey]) => edgeKey);
     
     if (internalEdges.length === 0) {
@@ -1540,6 +1639,16 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     
     const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
     const selectedEdge = internalEdges[randomEdgeIndex];
+    
+    // Log allowed merge near boundary (if edge has boundary vertices but isn't a true boundary edge)
+    if (debugMode && attempts <= 10 && trueBoundaryEdges) {
+      const [v1, v2] = selectedEdge.split(',').map(Number);
+      const p1 = points[v1];
+      const p2 = points[v2];
+      if ((p1?.isBoundary || p2?.isBoundary) && !trueBoundaryEdges.has(selectedEdge)) {
+        console.log(`[dissolveEdgesToQuads] Allowed internal merge near boundary: ${selectedEdge} (vertices may be boundary, but edge is not on true hull)`);
+      }
+    }
     
     // PRIORITY 1 FIX: Use canDissolveEdge() with explicit edge sharing validation
     const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
@@ -1633,11 +1742,20 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       break; // No more internal edges
     }
     
-    // Process all valid edges (probability = 1.0, force merge)
-    let mergedThisIteration = 0;
-    for (const selectedEdge of internalEdges) {
-      finalPassAttempts++;
-      const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
+      // Process all valid edges (probability = 1.0, force merge)
+      // CORRECT BOUNDARY PROTECTION: Still respect true boundary edges in final pass
+      let mergedThisIteration = 0;
+      for (const selectedEdge of internalEdges) {
+        // Skip true boundary edges even in final pass
+        if (trueBoundaryEdges && trueBoundaryEdges.has(selectedEdge)) {
+          if (debugMode && finalPassAttempts < 5) {
+            console.log(`[dissolveEdgesToQuads] Final pass: Skipped true boundary edge: ${selectedEdge}`);
+          }
+          continue;
+        }
+        
+        finalPassAttempts++;
+        const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
       
       if (canDissolve) {
         const sharingTriangles = edgeMap.get(selectedEdge);
