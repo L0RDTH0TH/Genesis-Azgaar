@@ -63,8 +63,6 @@ async function generateInteractiveTerrain() {
         targetPoints: null, // Disabled - using densityMultiplier instead for spacing-based reduction
         skipDissolution: false, // FIX 5: Enable dissolution for quad rendering
         dissolveProbability: 0.85, // REFINEMENT FIX 1: Higher probability threshold (0.85) for better conversion rate
-        aggressiveMergePass: true, // AGGRESSIVE MERGE: Enable second merge pass with higher probability (0.95)
-        allowDegenerateQuads: false, // DEGENERATE ALLOWANCE: Allow quads with 3-5 vertices (default: false, strict 4 vertices)
         skipLevel1Subdivision: true, // Skip Level 1 to reduce density (preview mode)
       },
     };
@@ -661,15 +659,48 @@ function generateInteractiveHTML(data) {
       } else if (stageKey === '3' && stage.data) {
         // Stage 3: Quad outlines (blue) - like cull-triangles.jpg
         let quadCount = 0;
+        let invalidQuadCount = 0;
+        let selfIntersectingCount = 0;
+        
         if (Array.isArray(stage.data)) {
-          stage.data.forEach(quad => {
+          stage.data.forEach((quad, quadIdx) => {
             if (quad && quad.verts && Array.isArray(quad.verts) && quad.verts.length >= 3) {
               const verts = quad.verts.map(vIdx => {
                 const p = centeredPoints[vIdx];
                 return p && isFinite(p.x) && isFinite(p.y) ? p : null;
               }).filter(v => v !== null);
-              if (verts.length >= 3) {
-                const path = verts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
+              
+              if (verts.length < 3) {
+                invalidQuadCount++;
+                if (quadIdx < 5) {
+                  console.log(\`[renderPipelineStage] Stage 3: Invalid quad \${quadIdx} - less than 3 valid vertices: [\${quad.verts.join(',')}]\`);
+                }
+                return;
+              }
+              
+              // AUDIT: Check for duplicate vertices (would cause self-intersection)
+              const uniqueVerts = [];
+              const seenCoords = new Set();
+              for (const v of verts) {
+                const coordKey = \`\${v.x.toFixed(2)},\${v.y.toFixed(2)}\`;
+                if (!seenCoords.has(coordKey)) {
+                  seenCoords.add(coordKey);
+                  uniqueVerts.push(v);
+                }
+              }
+              
+              if (uniqueVerts.length !== verts.length) {
+                selfIntersectingCount++;
+                if (quadIdx < 5) {
+                  console.log(\`[renderPipelineStage] Stage 3: Quad \${quadIdx} has duplicate vertices - \${verts.length} input, \${uniqueVerts.length} unique\`);
+                }
+              }
+              
+              // Use unique vertices for rendering
+              const renderVerts = uniqueVerts.length < verts.length ? uniqueVerts : verts;
+              
+              if (renderVerts.length >= 3) {
+                const path = renderVerts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
                 layers.push(\`<path d="\${path}" fill="none" stroke="\${stage.color}" stroke-width="2" opacity="0.9" />\`);
                 quadCount++;
               }
@@ -677,6 +708,9 @@ function generateInteractiveHTML(data) {
           });
         }
         console.log(\`Rendered \${quadCount} blue quads for Stage 3 (After Dissolution/Cull)\`);
+        if (invalidQuadCount > 0 || selfIntersectingCount > 0) {
+          console.log(\`[renderPipelineStage] Stage 3 AUDIT: \${invalidQuadCount} invalid quads, \${selfIntersectingCount} quads with duplicate vertices\`);
+        }
       } else if (stageKey === '4' && stage.data) {
         // Stage 4: Subdivided triangles (red) - like subdivide-triangles-to-quads.jpg
         let shapeCount = 0;

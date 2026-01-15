@@ -412,10 +412,8 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     quads = triangles; // Use triangles directly
   } else {
     const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.85; // REFINEMENT FIX 1: Higher default (0.85) for better conversion
-    const aggressiveMergePass = options.politicsMode?.aggressiveMergePass ?? true; // Second aggressive merge pass
-    const allowDegenerateQuads = options.politicsMode?.allowDegenerateQuads ?? false; // Allow slightly degenerate quads
     const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
-    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender, aggressiveMergePass, allowDegenerateQuads);
+    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender);
     console.log(`[buildStalbergQuadGrid] After dissolution: ${quads.length} shapes`);
   }
   
@@ -518,25 +516,25 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   const level1Quads = [];
   
   if (!skipLevel1Subdivision) {
-    for (let i = 0; i < level0Quads.length; i++) {
-      const parentQuad = level0Quads[i];
-      const subQuads = subdivideQuadIntoFour(parentQuad, points, addPoint, midpoint);
-      
-      parentQuad.childQuadIds = [];
-      for (const subQuad of subQuads) {
-        const childIndex = level1Quads.length;
-        level1Quads.push({
-          i: childIndex,
-          level: 1,
-          verts: subQuad.verts,
-          center: calculateQuadCenter(subQuad.verts, points),
-          parentQuadId: i,
-          childQuadIds: null,
-          stateId: -1,
-          provinceId: -1,
-        });
-        parentQuad.childQuadIds.push(childIndex);
-      }
+  for (let i = 0; i < level0Quads.length; i++) {
+    const parentQuad = level0Quads[i];
+    const subQuads = subdivideQuadIntoFour(parentQuad, points, addPoint, midpoint);
+    
+    parentQuad.childQuadIds = [];
+    for (const subQuad of subQuads) {
+      const childIndex = level1Quads.length;
+      level1Quads.push({
+        i: childIndex,
+        level: 1,
+        verts: subQuad.verts,
+        center: calculateQuadCenter(subQuad.verts, points),
+        parentQuadId: i,
+        childQuadIds: null,
+        stateId: -1,
+        provinceId: -1,
+      });
+      parentQuad.childQuadIds.push(childIndex);
+    }
     }
     console.log(`[buildStalbergQuadGrid] Level 1 subdivision: ${level1Quads.length} quads`);
   } else {
@@ -598,23 +596,23 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
       console.log('[buildStalbergQuadGrid] DIAGNOSTIC MODE: testLowRelaxation=true, using 1 iteration only');
       console.log('[buildStalbergQuadGrid] Relaxation test: iterations=1, center chaos? Manual check required');
     }
-    
-    const level0NeighborMap = buildNeighborMap(points, level0Quads);
+  
+  const level0NeighborMap = buildNeighborMap(points, level0Quads);
     relaxGrid(points, level0NeighborMap, relaxationIterations, dampingFactor, options);
-    
-    // Update Level 0 quad centers after relaxation
-    for (const quad of level0Quads) {
-      quad.center = calculateQuadCenter(quad.verts, points);
-    }
-    
+  
+  // Update Level 0 quad centers after relaxation
+  for (const quad of level0Quads) {
+    quad.center = calculateQuadCenter(quad.verts, points);
+  }
+  
     // Relax Level 1 quads only if they exist
     if (level1Quads.length > 0) {
-      const level1NeighborMap = buildNeighborMap(points, level1Quads);
+  const level1NeighborMap = buildNeighborMap(points, level1Quads);
       relaxGrid(points, level1NeighborMap, relaxationIterations, dampingFactor, options);
-      
-      // Update Level 1 quad centers after relaxation
-      for (const quad of level1Quads) {
-        quad.center = calculateQuadCenter(quad.verts, points);
+  
+  // Update Level 1 quad centers after relaxation
+  for (const quad of level1Quads) {
+    quad.center = calculateQuadCenter(quad.verts, points);
       }
     }
   }
@@ -1144,7 +1142,7 @@ function triangulateFromHex(hexPoints, hexPointIndices) {
  * @param {number} dissolveProbability - Probability of attempting dissolution (0.0-1.0, default 0.5)
  * @returns {Array} Array of quads and remaining triangles
  */
-function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false, aggressiveMergePass = true, allowDegenerateQuads = false) {
+function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false) {
   // STEP-BY-STEP DEBUG: Detailed logging
   if (debugMode) {
     console.log(`[dissolveEdgesToQuads] STARTING: ${triangles.length} input triangles, ${points.length} points, dissolveProbability=${dissolveProbability}`);
@@ -1324,59 +1322,72 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   }
   
   // Merge two triangles into a quad
+  // AUDIT: Enhanced logging to track vertex ordering and potential issues
   function mergeTrianglesToQuad(tri1, tri2, edgeKey) {
     const [v1, v2] = edgeKey.split(',').map(Number);
     const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
     
-    // Order vertices to form a valid quad
-    // Strategy: Start with one vertex of the dissolved edge, then traverse
-    // We need to order the 4 vertices in a cycle
-    const orderedVerts = [];
-    const used = new Set();
-    
-    // Start with v1 (first vertex of dissolved edge)
-    orderedVerts.push(v1);
-    used.add(v1);
-    
-    // Find vertices connected to v1 in tri1 or tri2
-    function findConnected(vert, triangle) {
-      const idx = triangle.verts.indexOf(vert);
-      if (idx === -1) return [];
-      const prev = triangle.verts[(idx + 2) % 3];
-      const next = triangle.verts[(idx + 1) % 3];
-      return [prev, next].filter(v => !used.has(v));
+    // AUDIT: Log input data
+    if (debugMode && edgesDissolved <= 10) {
+      console.log(`[mergeTrianglesToQuad] AUDIT: Merging edge ${edgeKey}`);
+      console.log(`  tri1 verts: [${tri1.verts.join(',')}]`);
+      console.log(`  tri2 verts: [${tri2.verts.join(',')}]`);
+      console.log(`  shared edge: [${v1},${v2}]`);
+      console.log(`  allVerts (unique): [${allVerts.join(',')}] (count: ${allVerts.length})`);
     }
     
-    // Build ordered cycle
-    let current = v1;
-    while (orderedVerts.length < 4) {
-      const candidates = [];
-      const tri1Connected = findConnected(current, tri1);
-      const tri2Connected = findConnected(current, tri2);
-      candidates.push(...tri1Connected, ...tri2Connected);
-      
-      if (candidates.length === 0) {
-        // Fallback: just add remaining vertices
-        const remaining = allVerts.filter(v => !used.has(v));
-        if (remaining.length > 0) {
-          orderedVerts.push(remaining[0]);
-          used.add(remaining[0]);
-          current = remaining[0];
-        } else {
-          break;
-        }
-      } else {
-        const next = candidates[0];
-        orderedVerts.push(next);
-        used.add(next);
-        current = next;
+    // AUDIT: Check for issues before ordering
+    if (allVerts.length !== 4) {
+      if (debugMode) {
+        console.log(`[mergeTrianglesToQuad] WARNING: Expected 4 unique vertices, got ${allVerts.length}`);
+        console.log(`  tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
       }
     }
     
-    // If we didn't get 4 vertices, use simple ordering
-    if (orderedVerts.length !== 4) {
-      orderedVerts.length = 0;
+    // Order vertices to form a valid quad
+    // IMPROVED ALGORITHM: The two triangles share edge [v1, v2]. 
+    // The quad should be ordered as: [v1, unique_from_tri1, v2, unique_from_tri2]
+    // This ensures vertices form a proper cycle around the quad perimeter
+    const orderedVerts = [];
+    let orderingMethod = 'proper';
+    
+    // Find the unique vertex from each triangle (not on the shared edge)
+    const tri1Unique = tri1.verts.find(v => v !== v1 && v !== v2);
+    const tri2Unique = tri2.verts.find(v => v !== v1 && v !== v2);
+    
+    if (tri1Unique === undefined || tri2Unique === undefined) {
+      if (debugMode) {
+        console.log(`[mergeTrianglesToQuad] ERROR: Cannot find unique vertices. tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}], edge: [${v1},${v2}]`);
+      }
+      // Fallback: use allVerts in order (may cause incorrect shape)
       orderedVerts.push(...allVerts);
+      orderingMethod = 'fallback';
+    } else {
+      // AUDIT: Use proper quad ordering: [v1, tri1Unique, v2, tri2Unique]
+      // This ensures vertices form a proper cycle around the quad
+      orderedVerts.push(v1, tri1Unique, v2, tri2Unique);
+      
+      if (debugMode && edgesDissolved <= 10) {
+        console.log(`[mergeTrianglesToQuad] Using proper quad ordering: [${v1}, ${tri1Unique}, ${v2}, ${tri2Unique}]`);
+      }
+    }
+    
+    // AUDIT: Verify vertex ordering forms a valid cycle
+    // Check if vertices are in correct order (no duplicates, proper cycle)
+    const hasDuplicates = orderedVerts.length !== new Set(orderedVerts).size;
+    if (hasDuplicates && debugMode) {
+      console.log(`[mergeTrianglesToQuad] WARNING: Duplicate vertices in ordered list: [${orderedVerts.join(',')}]`);
+    }
+    
+    // AUDIT: Log final quad
+    if (debugMode && edgesDissolved <= 10) {
+      console.log(`[mergeTrianglesToQuad] RESULT: Quad with ${orderedVerts.length} vertices: [${orderedVerts.join(',')}] (ordering: ${orderingMethod})`);
+      if (orderingMethod === 'fallback') {
+        console.log(`[mergeTrianglesToQuad] WARNING: Used fallback ordering - may cause incorrect polygon shape`);
+      }
+      if (hasDuplicates) {
+        console.log(`[mergeTrianglesToQuad] ERROR: Quad has duplicate vertices - will cause rendering issues`);
+      }
     }
     
     return {
@@ -1435,9 +1446,9 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       };
       
       if (sharingTriangles && sharingTriangles.length === 2) {
-        const [tri1Idx, tri2Idx] = sharingTriangles;
-        const tri1 = workingTriangles[tri1Idx];
-        const tri2 = workingTriangles[tri2Idx];
+      const [tri1Idx, tri2Idx] = sharingTriangles;
+      const tri1 = workingTriangles[tri1Idx];
+      const tri2 = workingTriangles[tri2Idx];
         auditInfo.tri1Verts = tri1?.verts;
         auditInfo.tri2Verts = tri2?.verts;
         auditInfo.tri1Removed = tri1?.removed;
@@ -1457,23 +1468,13 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       // Merge into quad
       const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
       
-      // Validate quad (must have 4 vertices, or allow degenerate if enabled)
-      const isValidQuad = allowDegenerateQuads 
-        ? (quad.verts.length >= 3 && quad.verts.length <= 5) // Allow 3-5 vertices for degenerate quads
-        : (quad.verts.length === 4); // Strict 4 vertices
-      
-      if (!isValidQuad) {
+      // Validate quad (must have 4 vertices)
+      if (quad.verts.length !== 4) {
         degenerateQuadAttempts++;
         if (debugMode && degenerateQuadAttempts <= 10) {
-          console.log(`[dissolveEdgesToQuads] Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices (expected 4${allowDegenerateQuads ? ' or 3-5 if degenerate allowed' : ''}), tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
+          console.log(`[dissolveEdgesToQuads] Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices (expected 4), tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
         }
         continue; // Invalid quad
-      }
-      
-      if (allowDegenerateQuads && quad.verts.length !== 4) {
-        if (debugMode) {
-          console.log(`[dissolveEdgesToQuads] Allowing degenerate quad with ${quad.verts.length} vertices from edge ${selectedEdge}`);
-        }
       }
       
       // Mark triangles as removed
@@ -1494,86 +1495,6 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     }
   }
   
-  // AGGRESSIVE MERGE PASS: Second pass with higher probability to catch remaining merges
-  let secondPassQuads = 0;
-  let secondPassAttempts = 0;
-  let secondPassDissolved = 0;
-  
-  if (aggressiveMergePass) {
-    if (debugMode) {
-      const remainingBeforePass2 = workingTriangles.filter(t => !t.removed).length;
-      console.log(`[dissolveEdgesToQuads] Starting aggressive second merge pass (${remainingBeforePass2} triangles remaining)`);
-    }
-    
-    // Second pass: Use higher probability (0.95) and more attempts
-    const aggressiveProbability = 0.95;
-    const aggressiveMaxAttempts = workingTriangles.filter(t => !t.removed).length * 5; // More attempts for second pass
-    
-    while (secondPassAttempts < aggressiveMaxAttempts) {
-      secondPassAttempts++;
-      
-      // Rebuild edge map for remaining triangles
-      const activeTriangles = workingTriangles.filter(t => !t.removed);
-      if (activeTriangles.length < 2) break; // Need at least 2 triangles to merge
-      
-      const edgeMap = buildEdgeMap(activeTriangles);
-      
-      // Get all internal edges
-      const internalEdges = Array.from(edgeMap.entries())
-        .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
-        .map(([edgeKey]) => edgeKey);
-      
-      if (internalEdges.length === 0) {
-        break; // No more internal edges
-      }
-      
-      // Higher probability threshold for aggressive pass
-      const rand = rng.random();
-      if (rand > aggressiveProbability) {
-        continue;
-      }
-      
-      const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
-      const selectedEdge = internalEdges[randomEdgeIndex];
-      
-      // Check if we can dissolve (with relaxed validation for aggressive pass)
-      const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
-      
-      if (canDissolve) {
-        const sharingTriangles = edgeMap.get(selectedEdge);
-        const [tri1, tri2] = sharingTriangles;
-        
-        // Merge into quad
-        const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
-        
-        // Validate quad (allow degenerate if enabled)
-        const isValidQuad = allowDegenerateQuads 
-          ? (quad.verts.length >= 3 && quad.verts.length <= 5)
-          : (quad.verts.length === 4);
-        
-        if (isValidQuad) {
-          // Mark triangles as removed
-          tri1.removed = true;
-          tri2.removed = true;
-          
-          // Add quad
-          quads.push(quad);
-          secondPassQuads++;
-          secondPassDissolved++;
-          
-          if (debugMode && secondPassDissolved <= 5) {
-            console.log(`[dissolveEdgesToQuads] Second pass: dissolved edge ${selectedEdge} into quad with ${quad.verts.length} verts: [${quad.verts.join(',')}]`);
-          }
-        }
-      }
-    }
-    
-    if (debugMode) {
-      const remainingAfterPass2 = workingTriangles.filter(t => !t.removed).length;
-      console.log(`[dissolveEdgesToQuads] Second pass complete: ${secondPassDissolved} edges dissolved, ${secondPassQuads} quads created, ${remainingAfterPass2} triangles remaining`);
-    }
-  }
-  
   // Collect remaining triangles (not dissolved)
   const remainingTriangles = workingTriangles
     .filter(t => !t.removed)
@@ -1584,18 +1505,12 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const finalQuadCount = quads.length;
     const finalTriangleCount = remainingTriangles.length;
     const totalShapes = finalQuadCount + finalTriangleCount;
-    const totalEdgesDissolved = edgesDissolved + secondPassDissolved;
-    const totalAttempts = attempts + secondPassAttempts;
-    
-    console.log(`[dissolveEdgesToQuads] COMPLETED: ${attempts} attempts (first pass), ${secondPassAttempts} attempts (second pass), ${totalEdgesDissolved} total edges dissolved, ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
+    console.log(`[dissolveEdgesToQuads] COMPLETED: ${attempts} attempts, ${edgesDissolved} edges dissolved, ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
     console.log(`[dissolveEdgesToQuads] RESULT: ${totalShapes} total shapes (${finalQuadCount} quads, ${finalTriangleCount} triangles)`);
-    console.log(`[dissolveEdgesToQuads] DISSOLUTION RATE: ${totalAttempts > 0 ? ((totalEdgesDissolved / totalAttempts) * 100).toFixed(1) : 0}% success rate (first pass: ${attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) : 0}%, second pass: ${secondPassAttempts > 0 ? ((secondPassDissolved / secondPassAttempts) * 100).toFixed(1) : 0}%)`);
+    console.log(`[dissolveEdgesToQuads] DISSOLUTION RATE: ${attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) : 0}% success rate`);
     console.log(`[dissolveEdgesToQuads] TRIANGLE-TO-QUAD CONVERSION: ${finalQuadCount} quads from ${triangles.length} triangles = ${((finalQuadCount / triangles.length) * 100).toFixed(1)}% conversion rate`);
     console.log(`[dissolveEdgesToQuads] FAILURE BREAKDOWN: ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
     console.log(`[dissolveEdgesToQuads] REFINEMENT STATS: ${probabilitySkips} probability skips, ${epsilonMatches} epsilon-adjusted matches`);
-    if (aggressiveMergePass) {
-      console.log(`[dissolveEdgesToQuads] SECOND PASS: ${secondPassQuads} additional quads created, ${finalTriangleCount} triangles remaining`);
-    }
     
     // AUDIT: Export failure statistics
     const auditSummary = {
@@ -1631,10 +1546,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         totalShapes: totalShapes,
         quads: finalQuadCount,
         triangles: finalTriangleCount,
-        dissolutionSuccessRate: totalAttempts > 0 ? (totalEdgesDissolved / totalAttempts) * 100 : 0,
-        firstPassSuccessRate: attempts > 0 ? (edgesDissolved / attempts) * 100 : 0,
-        secondPassSuccessRate: secondPassAttempts > 0 ? (secondPassDissolved / secondPassAttempts) * 100 : 0,
-        secondPassQuads: secondPassQuads,
+        dissolutionSuccessRate: attempts > 0 ? (edgesDissolved / attempts) * 100 : 0,
         conversionRate: (finalQuadCount / triangles.length) * 100
       };
       
