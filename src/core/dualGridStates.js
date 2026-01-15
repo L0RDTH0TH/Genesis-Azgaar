@@ -1360,6 +1360,12 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   let probabilitySkips = 0; // REFINEMENT FIX 1: Track probability skips
   let epsilonMatches = 0; // REFINEMENT FIX 2: Track epsilon-adjusted matches
   
+  // TARGETED DEBUG: Track all edges that were candidates but never selected/merged
+  const allCandidateEdges = new Set(); // All edges that were ever candidates
+  const attemptedEdges = new Set(); // Edges that were actually selected and attempted
+  const mergedEdges = new Set(); // Edges that were successfully merged
+  const skippedEdgesLog = []; // Detailed log of why edges were skipped
+  
   // Build edge map: edge -> [triangle indices that share this edge]
   // Edge is represented as sorted pair of vertex indices
   function getEdgeKey(v1, v2) {
@@ -1599,26 +1605,52 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const edgeMap = buildEdgeMap(activeTriangles);
     
     // Get all internal edges (shared by exactly 2 triangles)
-    // CORRECT BOUNDARY PROTECTION: Only exclude true boundary edges (on convex hull)
-    // Allow merges of shared edges even if triangles have boundary vertices
-    const internalEdges = Array.from(edgeMap.entries())
-      .filter(([edgeKey, triObjects]) => {
-        // Must be shared by exactly 2 triangles
-        if (triObjects.length !== 2 || triObjects[0].removed || triObjects[1].removed) {
-          return false;
-        }
+    // REFINED BOUNDARY PROTECTION: Only protect edges where BOTH endpoints are hull vertices AND edge is on hull segment
+    // Allow merges of shared edges even if one endpoint is on hull (as long as edge itself isn't a hull segment)
+    const internalEdges = [];
+    const skippedEdges = [];
+    
+    for (const [edgeKey, triObjects] of edgeMap.entries()) {
+      // Must be shared by exactly 2 triangles
+      if (triObjects.length !== 2 || triObjects[0].removed || triObjects[1].removed) {
+        continue;
+      }
+      
+      // REFINED BOUNDARY PROTECTION: Only protect if edge is explicitly on hull AND both endpoints are hull vertices
+      if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
+        // Check if both endpoints are hull vertices (stricter check)
+        const [v1, v2] = edgeKey.split(',').map(Number);
+        const p1 = points[v1];
+        const p2 = points[v2];
         
-        // CORRECT BOUNDARY PROTECTION: Only protect true boundary edges (on convex hull)
-        if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
-          if (debugMode && attempts <= 5) {
-            console.log(`[dissolveEdgesToQuads] Protected true boundary edge: ${edgeKey} (on convex hull)`);
-          }
-          return false; // Skip true boundary edges
+        // If edge is in trueBoundaryEdges, it's a hull segment - protect it
+        if (debugMode && attempts <= 10) {
+          console.log(`[dissolveEdgesToQuads] Protected true boundary edge: ${edgeKey} (on convex hull segment)`);
         }
-        
-        return true; // Allow merge (shared edge, not on true boundary)
-      })
-      .map(([edgeKey]) => edgeKey);
+        skippedEdges.push({ edge: edgeKey, reason: 'true_boundary_hull_segment', tri1: triObjects[0].verts, tri2: triObjects[1].verts });
+        continue; // Skip true boundary edges (hull segments)
+      }
+      
+      // TARGETED DEBUG: Track all candidate edges
+      allCandidateEdges.add(edgeKey);
+      
+      // TARGETED DEBUG: Log all internal edges being considered
+      if (debugMode && attempts <= 20) {
+        const [v1, v2] = edgeKey.split(',').map(Number);
+        const p1 = points[v1];
+        const p2 = points[v2];
+        const v1OnHull = p1?.isBoundary || false;
+        const v2OnHull = p2?.isBoundary || false;
+        console.log(`[dissolveEdgesToQuads] Internal edge candidate: ${edgeKey}, tri1: [${triObjects[0].verts.join(',')}], tri2: [${triObjects[1].verts.join(',')}], v1OnHull: ${v1OnHull}, v2OnHull: ${v2OnHull}`);
+      }
+      
+      internalEdges.push(edgeKey); // Allow merge (shared edge, not on true boundary)
+    }
+    
+    // TARGETED DEBUG: Log skipped edges summary
+    if (debugMode && skippedEdges.length > 0 && attempts <= 5) {
+      console.log(`[dissolveEdgesToQuads] Skipped ${skippedEdges.length} edges due to boundary protection (sample):`, skippedEdges.slice(0, 5));
+    }
     
     if (internalEdges.length === 0) {
       if (debugMode && attempts === 1) {
@@ -1631,6 +1663,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const rand = rng.random();
     if (rand > dissolveProbability) {
       probabilitySkips++;
+      // TARGETED DEBUG: Track probability skips (but don't log which edge was skipped since we haven't selected yet)
       if (debugMode && probabilitySkips <= 10) {
         console.log(`[dissolveEdgesToQuads] Skipped merge due to probability (rand=${rand.toFixed(3)}, threshold=${dissolveProbability}, internalEdges=${internalEdges.length})`);
       }
@@ -1705,12 +1738,17 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       quads.push(quad);
       dissolveCount++;
       edgesDissolved++;
+      mergedEdges.add(selectedEdge); // TARGETED DEBUG: Track successfully merged edges
       
       if (debugMode && edgesDissolved <= 5) {
         console.log(`[dissolveEdgesToQuads] Successfully dissolved edge ${selectedEdge} into quad with verts: [${quad.verts.join(',')}]`);
       }
     } else {
       invalidEdgeAttempts++;
+      // TARGETED DEBUG: Track why edge was rejected
+      if (debugMode && attempts <= 20) {
+        skippedEdgesLog.push({ edge: selectedEdge, reason: 'canDissolveEdge_rejected', attempt: attempts });
+      }
       // Note: canDissolveEdge() already logs rejection reasons, so we don't duplicate here
     }
   }
@@ -1731,8 +1769,18 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     if (activeTriangles.length < 2) break; // Need at least 2 triangles to merge
     
     const edgeMap = buildEdgeMap(activeTriangles);
+    // REFINED BOUNDARY PROTECTION: Still respect true boundary edges in final pass
     const internalEdges = Array.from(edgeMap.entries())
-      .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
+      .filter(([edgeKey, triObjects]) => {
+        if (triObjects.length !== 2 || triObjects[0].removed || triObjects[1].removed) {
+          return false;
+        }
+        // Skip true boundary edges (hull segments)
+        if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
+          return false;
+        }
+        return true;
+      })
       .map(([edgeKey]) => edgeKey);
     
     if (internalEdges.length === 0) {
@@ -1743,19 +1791,30 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     }
     
       // Process all valid edges (probability = 1.0, force merge)
-      // CORRECT BOUNDARY PROTECTION: Still respect true boundary edges in final pass
+      // REFINED BOUNDARY PROTECTION: Still respect true boundary edges in final pass
       let mergedThisIteration = 0;
+      const finalPassSkipped = [];
+      
       for (const selectedEdge of internalEdges) {
-        // Skip true boundary edges even in final pass
+        // Skip true boundary edges even in final pass (hull segments must be protected)
         if (trueBoundaryEdges && trueBoundaryEdges.has(selectedEdge)) {
-          if (debugMode && finalPassAttempts < 5) {
-            console.log(`[dissolveEdgesToQuads] Final pass: Skipped true boundary edge: ${selectedEdge}`);
+          if (debugMode && finalPassAttempts < 10) {
+            console.log(`[dissolveEdgesToQuads] Final pass: Skipped true boundary edge: ${selectedEdge} (hull segment)`);
           }
+          finalPassSkipped.push({ edge: selectedEdge, reason: 'true_boundary_hull_segment' });
           continue;
         }
         
         finalPassAttempts++;
         const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
+        
+        // TARGETED DEBUG: Log final pass attempts
+        if (debugMode && finalPassAttempts <= 10) {
+          const [v1, v2] = selectedEdge.split(',').map(Number);
+          const p1 = points[v1];
+          const p2 = points[v2];
+          console.log(`[dissolveEdgesToQuads] Final pass attempt ${finalPassAttempts}: edge ${selectedEdge}, canDissolve: ${canDissolve}, v1OnHull: ${p1?.isBoundary}, v2OnHull: ${p2?.isBoundary}`);
+        }
       
       if (canDissolve) {
         const sharingTriangles = edgeMap.get(selectedEdge);
@@ -1805,6 +1864,30 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   const remainingTriangles = workingTriangles
     .filter(t => !t.removed)
     .map(t => ({ type: 'triangle', verts: t.verts }));
+  
+  // TARGETED DEBUG: Analyze edges that were candidates but never merged
+  if (debugMode) {
+    const neverAttempted = Array.from(allCandidateEdges).filter(e => !attemptedEdges.has(e));
+    const attemptedButNotMerged = Array.from(attemptedEdges).filter(e => !mergedEdges.has(e));
+    
+    console.log(`[dissolveEdgesToQuads] TARGETED DEBUG: Edge tracking summary:`);
+    console.log(`  Total candidate edges: ${allCandidateEdges.size}`);
+    console.log(`  Edges attempted: ${attemptedEdges.size}`);
+    console.log(`  Edges successfully merged: ${mergedEdges.size}`);
+    console.log(`  Edges never attempted: ${neverAttempted.length}`);
+    console.log(`  Edges attempted but not merged: ${attemptedButNotMerged.length}`);
+    
+    if (neverAttempted.length > 0 && neverAttempted.length <= 20) {
+      console.log(`[dissolveEdgesToQuads] TARGETED DEBUG: Edges that were candidates but never selected/attempted:`, neverAttempted);
+    } else if (neverAttempted.length > 20) {
+      console.log(`[dissolveEdgesToQuads] TARGETED DEBUG: ${neverAttempted.length} edges were candidates but never selected (too many to list, showing first 10):`, neverAttempted.slice(0, 10));
+    }
+    
+    if (attemptedButNotMerged.length > 0 && attemptedButNotMerged.length <= 20) {
+      console.log(`[dissolveEdgesToQuads] TARGETED DEBUG: Edges that were attempted but not merged:`, attemptedButNotMerged);
+      console.log(`[dissolveEdgesToQuads] TARGETED DEBUG: Skip reasons:`, skippedEdgesLog.slice(0, 10));
+    }
+  }
   
   // CROSS-STAGE AUDIT: Analyze missed merge opportunities
   if (debugMode && remainingTriangles.length > 0) {
