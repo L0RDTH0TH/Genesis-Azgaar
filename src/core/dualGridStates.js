@@ -1611,24 +1611,44 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const skippedEdges = [];
     
     for (const [edgeKey, triObjects] of edgeMap.entries()) {
-      // Must be shared by exactly 2 triangles
-      if (triObjects.length !== 2 || triObjects[0].removed || triObjects[1].removed) {
+      // AUDIT: Log ALL edges with their sharing count and protection status
+      const sharingCount = triObjects.length;
+      const isInTrueBoundary = trueBoundaryEdges && trueBoundaryEdges.has(edgeKey);
+      
+      // CRITICAL BUG IDENTIFIED: Current logic protects edges in trueBoundaryEdges even if shared by 2 triangles
+      // CORRECT LOGIC: Only protect edges that are:
+      //   1. Shared by exactly 1 triangle (true boundary) AND
+      //   2. On the convex hull (in trueBoundaryEdges)
+      // If shared by 2 triangles, allow dissolution even if on hull (it's an internal edge near border)
+      
+      if (sharingCount === 1) {
+        // True boundary edge (shared by only 1 triangle) - protect if on hull
+        if (isInTrueBoundary) {
+          if (debugMode && attempts <= 10) {
+            console.log(`[dissolveEdgesToQuads] AUDIT: Protected true boundary edge: ${edgeKey} (shared by 1 triangle, on hull)`);
+          }
+          skippedEdges.push({ edge: edgeKey, reason: 'true_boundary_single_triangle', sharingCount: 1, isInTrueBoundary: true });
+          continue; // Skip true boundary edges (shared by 1 triangle, on hull)
+        }
+        // Not on hull but shared by 1 - still protect (boundary edge)
+        if (debugMode && attempts <= 10) {
+          console.log(`[dissolveEdgesToQuads] AUDIT: Protected boundary edge: ${edgeKey} (shared by 1 triangle, not on hull)`);
+        }
+        skippedEdges.push({ edge: edgeKey, reason: 'boundary_single_triangle', sharingCount: 1, isInTrueBoundary: false });
         continue;
       }
       
-      // REFINED BOUNDARY PROTECTION: Only protect if edge is explicitly on hull AND both endpoints are hull vertices
-      if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
-        // Check if both endpoints are hull vertices (stricter check)
-        const [v1, v2] = edgeKey.split(',').map(Number);
-        const p1 = points[v1];
-        const p2 = points[v2];
-        
-        // If edge is in trueBoundaryEdges, it's a hull segment - protect it
-        if (debugMode && attempts <= 10) {
-          console.log(`[dissolveEdgesToQuads] Protected true boundary edge: ${edgeKey} (on convex hull segment)`);
-        }
-        skippedEdges.push({ edge: edgeKey, reason: 'true_boundary_hull_segment', tri1: triObjects[0].verts, tri2: triObjects[1].verts });
-        continue; // Skip true boundary edges (hull segments)
+      // Must be shared by exactly 2 triangles to be a candidate
+      if (sharingCount !== 2 || triObjects[0].removed || triObjects[1].removed) {
+        continue;
+      }
+      
+      // CRITICAL FIX: If shared by 2 triangles, allow dissolution even if in trueBoundaryEdges
+      // The edge is internal (shared by 2 triangles), so it can be dissolved
+      // Previous bug: We were protecting edges in trueBoundaryEdges even if shared by 2 triangles
+      if (isInTrueBoundary && debugMode && attempts <= 20) {
+        console.log(`[dissolveEdgesToQuads] AUDIT: ALLOWING internal edge on hull: ${edgeKey} (shared by 2 triangles, in trueBoundaryEdges but allowing merge)`);
+        console.log(`  Tri1: [${triObjects[0].verts.join(',')}], Tri2: [${triObjects[1].verts.join(',')}]`);
       }
       
       // TARGETED DEBUG: Track all candidate edges
@@ -1730,6 +1750,14 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         continue; // Invalid quad
       }
       
+      // SAFETY VALIDATION: Ensure we didn't dissolve a true boundary edge (sharingCount === 1)
+      const edgeInfo = edgeMap.get(selectedEdge);
+      if (edgeInfo && edgeInfo.length === 1) {
+        console.error(`[dissolveEdgesToQuads] ERROR: Attempted to dissolve true boundary edge! ${selectedEdge} (sharingCount=1)`);
+        // Rollback: Don't mark triangles as removed, don't add quad
+        continue; // Skip this merge
+      }
+      
       // Mark triangles as removed
       tri1.removed = true;
       tri2.removed = true;
@@ -1769,17 +1797,25 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     if (activeTriangles.length < 2) break; // Need at least 2 triangles to merge
     
     const edgeMap = buildEdgeMap(activeTriangles);
-    // REFINED BOUNDARY PROTECTION: Still respect true boundary edges in final pass
+    // CRITICAL FIX: Only protect edges shared by 1 triangle (true boundary)
+    // Allow all edges shared by 2 triangles, even if on hull
     const internalEdges = Array.from(edgeMap.entries())
       .filter(([edgeKey, triObjects]) => {
-        if (triObjects.length !== 2 || triObjects[0].removed || triObjects[1].removed) {
+        const sharingCount = triObjects.length;
+        const isInTrueBoundary = trueBoundaryEdges && trueBoundaryEdges.has(edgeKey);
+        
+        // Skip if not shared by exactly 2 triangles
+        if (sharingCount !== 2 || triObjects[0].removed || triObjects[1].removed) {
           return false;
         }
-        // Skip true boundary edges (hull segments)
-        if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
-          return false;
+        
+        // CRITICAL FIX: Only protect if shared by 1 triangle AND on hull
+        // If shared by 2 triangles, allow merge even if on hull (it's an internal edge)
+        if (sharingCount === 1 && isInTrueBoundary) {
+          return false; // True boundary edge (shared by 1, on hull) - protect
         }
-        return true;
+        
+        return true; // Allow merge (shared by 2 triangles, internal edge)
       })
       .map(([edgeKey]) => edgeKey);
     
@@ -1791,18 +1827,30 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     }
     
       // Process all valid edges (probability = 1.0, force merge)
-      // REFINED BOUNDARY PROTECTION: Still respect true boundary edges in final pass
+      // CRITICAL FIX: Only protect edges shared by 1 triangle (true boundary)
+      // Allow all edges shared by 2 triangles, even if on hull
       let mergedThisIteration = 0;
       const finalPassSkipped = [];
       
       for (const selectedEdge of internalEdges) {
-        // Skip true boundary edges even in final pass (hull segments must be protected)
-        if (trueBoundaryEdges && trueBoundaryEdges.has(selectedEdge)) {
+        // Check sharing count from edgeMap
+        const edgeInfo = edgeMap.get(selectedEdge);
+        const sharingCount = edgeInfo ? edgeInfo.length : 0;
+        const isInTrueBoundary = trueBoundaryEdges && trueBoundaryEdges.has(selectedEdge);
+        
+        // Only protect if shared by 1 triangle (true boundary)
+        // If shared by 2 triangles, allow merge even if on hull
+        if (sharingCount === 1 && isInTrueBoundary) {
           if (debugMode && finalPassAttempts < 10) {
-            console.log(`[dissolveEdgesToQuads] Final pass: Skipped true boundary edge: ${selectedEdge} (hull segment)`);
+            console.log(`[dissolveEdgesToQuads] Final pass: Skipped true boundary edge: ${selectedEdge} (shared by 1 triangle, on hull)`);
           }
-          finalPassSkipped.push({ edge: selectedEdge, reason: 'true_boundary_hull_segment' });
+          finalPassSkipped.push({ edge: selectedEdge, reason: 'true_boundary_single_triangle', sharingCount: 1 });
           continue;
+        }
+        
+        // If shared by 2 triangles but in trueBoundaryEdges, log but allow
+        if (sharingCount === 2 && isInTrueBoundary && debugMode && finalPassAttempts < 10) {
+          console.log(`[dissolveEdgesToQuads] Final pass: ALLOWING internal edge on hull: ${selectedEdge} (shared by 2 triangles)`);
         }
         
         finalPassAttempts++;
@@ -1829,6 +1877,13 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
             console.log(`[dissolveEdgesToQuads] Final pass: Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices`);
           }
           continue; // Invalid quad
+        }
+        
+        // SAFETY VALIDATION: Ensure we didn't dissolve a true boundary edge (sharingCount === 1)
+        const edgeInfo = edgeMap.get(selectedEdge);
+        if (edgeInfo && edgeInfo.length === 1) {
+          console.error(`[dissolveEdgesToQuads] ERROR: Final pass attempted to dissolve true boundary edge! ${selectedEdge} (sharingCount=1)`);
+          continue; // Skip this merge
         }
         
         // Mark triangles as removed
