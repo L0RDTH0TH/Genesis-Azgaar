@@ -552,6 +552,64 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   // Step 4: Subdivide remaining triangles (optional - can skip for lower density)
   const skipTriangleSubdivision = options.politicsMode?.skipTriangleSubdivision ?? true; // Default to true for lower density
   
+  // SUBDIVISION BORDER AUDIT: Helper functions for border detection and validation
+  function isBorderTouching(shape, hullIndices) {
+    if (!shape.verts || shape.verts.length === 0) return false;
+    if (!hullIndices || hullIndices.length === 0) {
+      // Fallback: Check isBoundary flag
+      return shape.verts.some(v => points[v]?.isBoundary);
+    }
+    return shape.verts.some(v => hullIndices.includes(v));
+  }
+  
+  function isDegenerateTriangle(shape) {
+    if (!shape.verts || shape.verts.length !== 3) return false;
+    const [v0, v1, v2] = shape.verts;
+    const p0 = points[v0];
+    const p1 = points[v1];
+    const p2 = points[v2];
+    if (!p0 || !p1 || !p2) return true; // Missing points
+    
+    // Collinear check via cross-product
+    const cross = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
+    return Math.abs(cross) < 1e-6; // epsilon for floating point
+  }
+  
+  function calcTriangleArea(shape) {
+    if (!shape.verts || shape.verts.length !== 3) return 0;
+    const [v0, v1, v2] = shape.verts;
+    const p0 = points[v0];
+    const p1 = points[v1];
+    const p2 = points[v2];
+    if (!p0 || !p1 || !p2) return 0;
+    
+    // Shoelace formula
+    return Math.abs((p0.x * (p1.y - p2.y) + p1.x * (p2.y - p0.y) + p2.x * (p0.y - p1.y)) / 2);
+  }
+  
+  function validateSubQuad(quad, points) {
+    if (!quad.verts || quad.verts.length !== 4) return { valid: false, reason: 'not_4_verts' };
+    
+    // Check for duplicate vertices
+    const uniqueVerts = new Set(quad.verts);
+    if (uniqueVerts.size !== 4) return { valid: false, reason: 'duplicate_verts' };
+    
+    // Check for valid points
+    const [v0, v1, v2, v3] = quad.verts;
+    const p0 = points[v0];
+    const p1 = points[v1];
+    const p2 = points[v2];
+    const p3 = points[v3];
+    if (!p0 || !p1 || !p2 || !p3) return { valid: false, reason: 'missing_points' };
+    
+    // Check for zero area (collinear points)
+    const area = Math.abs((p0.x * (p1.y - p2.y) + p1.x * (p2.y - p0.y) + p2.x * (p0.y - p1.y)) / 2) +
+                 Math.abs((p0.x * (p2.y - p3.y) + p2.x * (p3.y - p0.y) + p3.x * (p0.y - p2.y)) / 2);
+    if (area < 1e-6) return { valid: false, reason: 'zero_area' };
+    
+    return { valid: true };
+  }
+  
   // AUDIT: Count remaining triangles before subdivision
   const remainingTrianglesBefore = quads.filter(s => s.type === 'triangle');
   const quadsBefore = quads.filter(s => s.type === 'quad');
@@ -584,6 +642,12 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: All triangles to process:`, allTrianglesInInput.map(t => t.verts));
   }
   
+  // SUBDIVISION BORDER AUDIT: Track border triangles
+  let borderTrianglesCount = 0;
+  let borderTrianglesSubdivided = 0;
+  let borderTrianglesFailed = 0;
+  const borderTriangleDetails = [];
+  
   for (const shape of quads) {
     shapesProcessed++;
     
@@ -592,28 +656,100 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
       const vertsKey = shape.verts.sort((a, b) => a - b).join(',');
       processedTriangleVerts.add(vertsKey);
       
-      // AUDIT: Log triangle subdivision
-      if (stepByStepRender && trianglesSubdivided < 5) {
-        console.log(`[buildStalbergQuadGrid] STAGE 4: Subdividing triangle ${trianglesSubdivided + 1}/${remainingTrianglesBefore.length} with verts: [${shape.verts.join(',')}]`);
+      // SUBDIVISION BORDER AUDIT: Check if triangle touches border
+      const isBorder = isBorderTouching(shape, hullIndices);
+      const isDegenerate = isDegenerateTriangle(shape);
+      const area = calcTriangleArea(shape);
+      
+      if (isBorder) {
+        borderTrianglesCount++;
+        borderTriangleDetails.push({
+          verts: shape.verts,
+          area: area,
+          isDegenerate: isDegenerate,
+          vertsKey: vertsKey
+        });
+        
+        if (stepByStepRender) {
+          console.log(`[STAGE 4 TRACE] Border triangle ID: ${borderTrianglesCount}, verts: [${shape.verts.join(',')}], area: ${area.toFixed(2)}, isDegenerate: ${isDegenerate}`);
+        }
       }
       
-      const subQuads = subdivideTriangleIntoThreeQuads(shape, points, addPoint, midpoint);
+      // SUBDIVISION BORDER AUDIT: Pre-subdivide validation
+      if (isDegenerate) {
+        console.warn(`[STAGE 4 FAIL] Border triangle skipped: degenerate triangle (collinear points) - verts: [${shape.verts.join(',')}]`);
+        if (isBorder) {
+          borderTrianglesFailed++;
+        }
+        trianglesSkipped++;
+        allQuads.push(shape); // Keep as-is
+        continue;
+      }
+      
+      // AUDIT: Log triangle subdivision
+      if (stepByStepRender && trianglesSubdivided < 5) {
+        console.log(`[buildStalbergQuadGrid] STAGE 4: Subdividing triangle ${trianglesSubdivided + 1}/${remainingTrianglesBefore.length} with verts: [${shape.verts.join(',')}], border=${isBorder}`);
+      }
+      
+      const subQuads = subdivideTriangleIntoThreeQuads(shape, points, addPoint, midpoint, stepByStepRender, isBorder);
+      
+      // SUBDIVISION BORDER AUDIT: Validate sub-quads
+      let validSubQuads = [];
+      let invalidSubQuads = [];
+      
+      for (const subQuad of subQuads) {
+        const validation = validateSubQuad(subQuad, points);
+        if (validation.valid) {
+          validSubQuads.push(subQuad);
+        } else {
+          invalidSubQuads.push({ quad: subQuad, reason: validation.reason });
+          if (stepByStepRender && isBorder) {
+            console.warn(`[STAGE 4 FAIL] Border triangle sub-quad invalid: ${validation.reason} - quad verts: [${subQuad.verts.join(',')}]`);
+          }
+        }
+      }
       
       // CROSS-STAGE AUDIT: Verify subdivision result
       if (subQuads.length !== 3) {
         console.warn(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: WARNING - Triangle subdivision returned ${subQuads.length} quads (expected 3) for triangle [${shape.verts.join(',')}]`);
       }
       
+      // SUBDIVISION BORDER AUDIT: Handle invalid sub-quads
+      if (invalidSubQuads.length > 0) {
+        console.warn(`[STAGE 4 FAIL] Border triangle ${isBorder ? 'BORDER' : 'INTERIOR'}: ${invalidSubQuads.length} invalid sub-quads from triangle [${shape.verts.join(',')}]`);
+        if (isBorder) {
+          borderTrianglesFailed++;
+        }
+        // Fallback: Keep original triangle if all sub-quads are invalid
+        if (validSubQuads.length === 0) {
+          console.warn(`[STAGE 4 FAIL] Border triangle: All sub-quads invalid, keeping original triangle [${shape.verts.join(',')}]`);
+          allQuads.push(shape);
+          trianglesSkipped++;
+          continue;
+        }
+      }
+      
+      // Use only valid sub-quads
+      const finalSubQuads = validSubQuads.length > 0 ? validSubQuads : subQuads;
+      
       // ENHANCED VALIDATION: Mark quads from triangle subdivision for separate rendering
-      const markedSubQuads = subQuads.map(q => ({
+      const markedSubQuads = finalSubQuads.map(q => ({
         ...q,
         fromTriangleSubdivision: true, // Flag for debug rendering
-        sourceTriangle: shape.verts // Track original triangle
+        sourceTriangle: shape.verts, // Track original triangle
+        isBorderSubQuad: isBorder // Track if from border triangle
       }));
       
       allQuads.push(...markedSubQuads);
       trianglesSubdivided++;
-      newQuadsFromTriangles += subQuads.length;
+      newQuadsFromTriangles += finalSubQuads.length;
+      
+      if (isBorder) {
+        borderTrianglesSubdivided++;
+        if (stepByStepRender && borderTrianglesSubdivided <= 3) {
+          console.log(`[STAGE 4 SUCCESS] Border triangle subdivided: ${finalSubQuads.length} valid quads from [${shape.verts.join(',')}]`);
+        }
+      }
       
       // AUDIT: Log result
       if (stepByStepRender && trianglesSubdivided <= 3) {
@@ -669,6 +805,14 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     console.log(`[buildStalbergQuadGrid] STAGE 4 POST-SUBDIVISION: ${allQuads.length} total shapes (${quadsAfter.length} quads, ${trianglesAfter.length} triangles)`);
     console.log(`[buildStalbergQuadGrid] STAGE 4 STATS: ${trianglesSubdivided} triangles subdivided, ${trianglesSkipped} triangles skipped, ${newQuadsFromTriangles} new quads created`);
     console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: Stage 4 processing - ${shapesProcessed} shapes processed, ${quadsKept} quads kept, ${trianglesSubdivided} triangles subdivided`);
+    
+    // SUBDIVISION BORDER AUDIT: Summary of border triangle handling
+    if (borderTrianglesCount > 0) {
+      console.log(`[STAGE 4 BORDER AUDIT] Border triangles: ${borderTrianglesCount} total, ${borderTrianglesSubdivided} subdivided, ${borderTrianglesFailed} failed`);
+      if (borderTrianglesFailed > 0 && stepByStepRender) {
+        console.log(`[STAGE 4 BORDER AUDIT] Failed border triangles:`, borderTriangleDetails.filter(d => d.isDegenerate).map(d => `[${d.verts.join(',')}]`));
+      }
+    }
     
     // Final verification
     if (trianglesAfter.length > 0 && !skipTriangleSubdivision) {
