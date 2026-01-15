@@ -50,7 +50,7 @@ async function generateInteractiveTerrain() {
         dampingFactor: 0.5, // Increased damping for stability (prevents oscillation/crossing)
         dualOffsetFactor: 0.35, // Reduced offset for less aggressive rounding (prevents edge crossings)
         hexLayers: 18, // Aggressively reduced for chunky quads (~1400 initial points, target ~5-6k final)
-        skipTriangleSubdivision: true, // Skip triangle→quad subdivision for lower density
+        skipTriangleSubdivision: false, // FIX: Enable triangle subdivision for Stage 4 visualization (was true, causing triangles to be skipped)
         hexSize: 12, // Size of hex cells (tuned for target radius ~500px)
         aspectRatio: 1.15, // Reduced from 1.22 for more uniform cell sizes (less distortion)
         softBoundary: true, // Enable soft boundary locking (near-boundary points move partially)

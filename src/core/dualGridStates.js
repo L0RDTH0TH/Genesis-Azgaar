@@ -473,20 +473,71 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   
   // Step 4: Subdivide remaining triangles (optional - can skip for lower density)
   const skipTriangleSubdivision = options.politicsMode?.skipTriangleSubdivision ?? true; // Default to true for lower density
+  
+  // AUDIT: Count remaining triangles before subdivision
+  const remainingTrianglesBefore = quads.filter(s => s.type === 'triangle');
+  const quadsBefore = quads.filter(s => s.type === 'quad');
+  
+  if (stepByStepRender) {
+    console.log(`[buildStalbergQuadGrid] STAGE 4 PRE-SUBDIVISION: ${quads.length} total shapes (${quadsBefore.length} quads, ${remainingTrianglesBefore.length} triangles)`);
+    console.log(`[buildStalbergQuadGrid] STAGE 4: skipTriangleSubdivision=${skipTriangleSubdivision}`);
+    
+    if (remainingTrianglesBefore.length > 0) {
+      console.log(`[buildStalbergQuadGrid] STAGE 4: Sample remaining triangles:`, remainingTrianglesBefore.slice(0, 3).map(t => ({
+        verts: t.verts,
+        type: t.type
+      })));
+    }
+  }
+  
   const allQuads = [];
+  let trianglesSubdivided = 0;
+  let trianglesSkipped = 0;
+  let newQuadsFromTriangles = 0;
+  
   for (const shape of quads) {
     if (shape.type === 'triangle' && !skipTriangleSubdivision) {
+      // AUDIT: Log triangle subdivision
+      if (stepByStepRender && trianglesSubdivided < 5) {
+        console.log(`[buildStalbergQuadGrid] STAGE 4: Subdividing triangle with verts: [${shape.verts.join(',')}]`);
+      }
+      
       const subQuads = subdivideTriangleIntoThreeQuads(shape, points, addPoint, midpoint);
       allQuads.push(...subQuads);
+      trianglesSubdivided++;
+      newQuadsFromTriangles += subQuads.length;
+      
+      // AUDIT: Log result
+      if (stepByStepRender && trianglesSubdivided <= 3) {
+        console.log(`[buildStalbergQuadGrid] STAGE 4: Created ${subQuads.length} quads from triangle:`, subQuads.map(q => ({
+          verts: q.verts,
+          type: q.type
+        })));
+      }
     } else {
       // Keep shape as-is (either quad from dissolution, or triangle if skipping subdivision)
+      if (shape.type === 'triangle') {
+        trianglesSkipped++;
+        if (stepByStepRender && trianglesSkipped <= 3) {
+          console.log(`[buildStalbergQuadGrid] STAGE 4: Skipping triangle subdivision for triangle with verts: [${shape.verts.join(',')}] (skipTriangleSubdivision=${skipTriangleSubdivision})`);
+        }
+      }
       allQuads.push(shape);
     }
   }
+  
   if (skipTriangleSubdivision) {
-    console.log(`[buildStalbergQuadGrid] Skipping triangle subdivision (keeping dissolved quads only): ${allQuads.length} quads`);
+    console.log(`[buildStalbergQuadGrid] Skipping triangle subdivision (keeping dissolved quads only): ${allQuads.length} quads (${trianglesSkipped} triangles kept as-is)`);
   } else {
-    console.log(`[buildStalbergQuadGrid] After subdivision: ${allQuads.length} quads`);
+    console.log(`[buildStalbergQuadGrid] After subdivision: ${allQuads.length} quads (${trianglesSubdivided} triangles subdivided into ${newQuadsFromTriangles} quads)`);
+  }
+  
+  // AUDIT: Post-subdivision summary
+  if (stepByStepRender) {
+    const quadsAfter = allQuads.filter(s => s.type === 'quad');
+    const trianglesAfter = allQuads.filter(s => s.type === 'triangle');
+    console.log(`[buildStalbergQuadGrid] STAGE 4 POST-SUBDIVISION: ${allQuads.length} total shapes (${quadsAfter.length} quads, ${trianglesAfter.length} triangles)`);
+    console.log(`[buildStalbergQuadGrid] STAGE 4 STATS: ${trianglesSubdivided} triangles subdivided, ${trianglesSkipped} triangles skipped, ${newQuadsFromTriangles} new quads created`);
   }
   
   // STEP-BY-STEP DEBUG: Capture Stage 4 (after subdivide triangles to quads)
