@@ -547,3 +547,109 @@ for (const selectedEdge of remainingCandidates) {
 
 **Diagnostic Implementation Date:** 2026-01-15  
 **Status:** Ready for testing - Run 5+ "Reset Grid" cycles and capture console output
+
+---
+
+## 10. Border-Priority Sorting Implementation (v2)
+
+### 10.1 Implementation
+
+**Date:** 2026-01-15  
+**Iteration:** 32  
+**Goal:** Prevent early isolation by prioritizing border-adjacent edges in the main dissolution loop
+
+**Root Cause from Diagnostics:**
+- Pre-cleanup pairs = 0 consistently (isolation during main loop)
+- Border pairs exist initially but become isolated as interior pairs are merged first
+- Random selection merges interior pairs, leaving border triangles orphaned
+
+**Solution:** Sort `internalEdges` array to prioritize border-adjacent edges before selection
+
+**Code Location:** `src/core/dualGridStates.js` lines ~1670-1710
+
+**Implementation:**
+```javascript
+// BORDER-PRIORITY SORTING: Sort to prioritize border-adjacent edges (prevent early isolation)
+internalEdges.sort((a, b) => {
+  const aBorder = isBorderAdjacentEdge(a) ? 1 : 0;  // 1 if border, 0 otherwise
+  const bBorder = isBorderAdjacentEdge(b) ? 1 : 0;
+  return bBorder - aBorder;  // Border (1) before non-border (0) - descending priority
+});
+```
+
+**Selection Strategy:**
+- 70% chance: Select from border edges only (if any exist)
+- 30% chance: Select from all edges (still sorted, so border more likely)
+- This ensures border pairs are merged earlier, preventing isolation
+
+### 10.2 Expected Impact
+
+**Before (Random Selection):**
+- Border and interior edges have equal selection probability
+- Interior pairs merged first → border triangles become isolated
+- Pre-cleanup: 0 pairs (all isolated)
+- Remaining: 28 isolated triangles
+
+**After (Border-Priority Sorting):**
+- Border edges sorted first, 70% selection bias
+- Border pairs merged earlier → fewer isolated border triangles
+- Pre-cleanup: Should have fewer isolated pairs (or pairs still available)
+- Remaining: Fewer isolated triangles, especially border ones
+
+### 10.3 Test Results
+
+**Configuration:**
+- Density: 0.125 (`stepByStepDensityMultiplier`)
+- `dissolveProbability`: 1.0 (no probability skips)
+- Border-priority sorting: Enabled
+- Selection bias: 70% border, 30% all
+
+**Results Table:**
+
+| Run # | Pre Total Pairs | Pre Border Pairs | Border Merges (Main) | Cleanup Merges | Post Total Pairs | Post Border Pairs | Remaining Triangles |
+|-------|----------------|-----------------|---------------------|----------------|------------------|-------------------|---------------------|
+| 1     | TBD            | TBD             | TBD                 | TBD            | TBD              | TBD               | TBD                 |
+| 2     | TBD            | TBD             | TBD                 | TBD            | TBD              | TBD               | TBD                 |
+| 3     | TBD            | TBD             | TBD                 | TBD            | TBD              | TBD               | TBD                 |
+
+**Expected Improvements:**
+- More border pairs merged in main loop (vs. previous 2/102)
+- Pre-cleanup pairs > 0 (pairs still available, not all isolated)
+- Fewer remaining triangles (especially border ones)
+- Cleanup merges remaining pairs successfully
+
+### 10.4 Logging Enhancements
+
+**New Log Messages:**
+```
+[dissolveEdgesToQuads] BORDER-PRIORITY SORT: 342 candidates sorted (102 border first, 240 interior)
+[dissolveEdgesToQuads] ATTEMPT 1: Edge 72,74, borderAdjacent=true, selection=border-priority, ...
+[dissolveEdgesToQuads] ATTEMPT 2: Edge 2,52, borderAdjacent=true, selection=border-priority, ...
+```
+
+**Metrics to Track:**
+- Border vs interior selection ratio (should be ~70% border)
+- Border pairs merged in main loop (should increase from 2)
+- Pre-cleanup pair count (should be > 0 if sorting works)
+- Remaining triangle count (should decrease)
+
+### 10.5 Next Steps
+
+**If Pre-Cleanup Pairs > 0:**
+- Sorting is working (pairs still available)
+- Cleanup should merge remaining pairs
+- Verify remaining triangles decrease
+
+**If Pre-Cleanup Pairs Still = 0:**
+- May need stronger bias (increase 70% to 90%)
+- Or process border edges deterministically before interior
+- Or use greedy selection (process all border edges first, then interior)
+
+**If Border Merges Increase but Isolation Persists:**
+- May need to process border edges completely before any interior
+- Or use deterministic border-first pass before random selection
+
+---
+
+**Implementation Date:** 2026-01-15  
+**Status:** Implemented - Ready for testing with border-priority sorting enabled

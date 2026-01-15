@@ -1748,6 +1748,21 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       break; // No more internal edges to dissolve
     }
     
+    // BORDER-PRIORITY SORTING: Sort to prioritize border-adjacent edges (prevent early isolation)
+    // This ensures border pairs are merged first, preventing interior merges from orphaning them
+    internalEdges.sort((a, b) => {
+      const aBorder = isBorderAdjacentEdge(a) ? 1 : 0;  // 1 if border, 0 otherwise
+      const bBorder = isBorderAdjacentEdge(b) ? 1 : 0;
+      return bBorder - aBorder;  // Border (1) before non-border (0) - descending priority
+    });
+    
+    // BORDER-PRIORITY LOGGING: Log border priority sorting results
+    if (debugMode && attempts <= 5) {
+      const borderCount = internalEdges.filter(e => isBorderAdjacentEdge(e)).length;
+      const interiorCount = internalEdges.length - borderCount;
+      console.log(`[dissolveEdgesToQuads] BORDER-PRIORITY SORT: ${internalEdges.length} candidates sorted (${borderCount} border first, ${interiorCount} interior)`);
+    }
+    
     // REFINEMENT FIX 1: Randomly select an edge (with configurable probability check)
     const rand = rng.random();
     if (rand > dissolveProbability) {
@@ -1759,9 +1774,27 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       continue; // Skip this attempt based on probability
     }
     
-    const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
-    const selectedEdge = internalEdges[randomEdgeIndex];
-    const isSelectedBorder = isBorderAdjacentEdge(selectedEdge);
+    // BORDER-PRIORITY SELECTION: Prefer border edges (first portion of sorted array)
+    // Use weighted random: 70% chance to select from border portion, 30% from all edges
+    const borderEdges = internalEdges.filter(e => isBorderAdjacentEdge(e));
+    const borderCount = borderEdges.length;
+    let selectedEdge;
+    let isSelectedBorder = false;
+    let selectionMethod = 'random';
+    
+    if (borderCount > 0 && rng.random() < 0.7) {
+      // 70% chance: Select from border edges only
+      const randomBorderIndex = Math.floor(rng.random() * borderCount);
+      selectedEdge = borderEdges[randomBorderIndex];
+      isSelectedBorder = true;
+      selectionMethod = 'border-priority';
+    } else {
+      // 30% chance: Select from all edges (still sorted, so border more likely)
+      const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
+      selectedEdge = internalEdges[randomEdgeIndex];
+      isSelectedBorder = isBorderAdjacentEdge(selectedEdge);
+      selectionMethod = isSelectedBorder ? 'random-border' : 'random-interior';
+    }
     
     // BORDER ISOLATION AUDIT: Track attempted edges
     if (isSelectedBorder) {
@@ -1787,6 +1820,8 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       const auditInfo = {
         attempt: attempts,
         selectedEdge: selectedEdge,
+        selectionMethod: selectionMethod,
+        isBorder: isSelectedBorder,
         sharingTriangles: sharingTriangles,
         canDissolve: canDissolve,
         edgeMapSize: edgeMap.size,
