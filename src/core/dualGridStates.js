@@ -411,7 +411,7 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     console.log(`[buildStalbergQuadGrid] Skipping dissolution (rendering raw triangles)`);
     quads = triangles; // Use triangles directly
   } else {
-    const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.5;
+    const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.85; // REFINEMENT FIX 1: Higher default (0.85) for better conversion
     const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
     quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender);
     console.log(`[buildStalbergQuadGrid] After dissolution: ${quads.length} shapes`);
@@ -1148,6 +1148,12 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     console.log(`[dissolveEdgesToQuads] STARTING: ${triangles.length} input triangles, ${points.length} points, dissolveProbability=${dissolveProbability}`);
   }
   
+  // REFINEMENT FIX 1: Epsilon tolerance for floating-point vertex comparison
+  const EPSILON = 1e-6;
+  function vertsEqual(v1, v2) {
+    return Math.abs(v1 - v2) < EPSILON;
+  }
+  
   // Work with a mutable copy of triangles
   const workingTriangles = triangles.map(t => ({ ...t, verts: [...t.verts] }));
   const quads = [];
@@ -1157,6 +1163,8 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   let edgesDissolved = 0;
   let invalidEdgeAttempts = 0;
   let degenerateQuadAttempts = 0;
+  let probabilitySkips = 0; // REFINEMENT FIX 1: Track probability skips
+  let epsilonMatches = 0; // REFINEMENT FIX 2: Track epsilon-adjusted matches
   
   // Build edge map: edge -> [triangle indices that share this edge]
   // Edge is represented as sorted pair of vertex indices
@@ -1225,6 +1233,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   
   // Check if dissolving an edge creates a valid quad
   // PRIORITY 2 FIX: Now receives triangle objects directly from edge map (no index lookup needed)
+  // REFINEMENT FIX 2: Uses epsilon tolerance for vertex comparison
   function canDissolveEdge(edgeKey, edgeMap, triangles) {
     const sharingTriangles = edgeMap.get(edgeKey);
     if (!sharingTriangles || sharingTriangles.length !== 2) {
@@ -1256,22 +1265,52 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       return false;
     }
     
-    // PRIORITY 1 FIX: Verify triangles share EXACTLY the two edge vertices (and no more)
-    const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
-    if (sharedVerts.length !== 2 || !sharedVerts.includes(v1) || !sharedVerts.includes(v2)) {
+    // REFINEMENT FIX 2: Verify triangles share EXACTLY the two edge vertices using epsilon tolerance
+    // First try exact match, then epsilon match
+    let sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+    
+    // If exact match fails, try epsilon tolerance
+    if (sharedVerts.length !== 2) {
+      sharedVerts = tri1.verts.filter(v1 => 
+        tri2.verts.some(v2 => vertsEqual(v1, v2))
+      );
+      if (sharedVerts.length === 2) {
+        epsilonMatches++;
+        if (debugMode && epsilonMatches <= 5) {
+          console.log(`[canDissolveEdge] Epsilon match: Found shared vertices using tolerance (edge: ${edgeKey})`);
+        }
+      }
+    }
+    
+    // Verify shared vertices include the edge vertices (with epsilon tolerance)
+    const hasV1 = sharedVerts.some(v => vertsEqual(v, v1));
+    const hasV2 = sharedVerts.some(v => vertsEqual(v, v2));
+    
+    if (sharedVerts.length !== 2 || !hasV1 || !hasV2) {
       if (debugMode) {
         console.log(`[canDissolveEdge] REJECT: Triangles share ${sharedVerts.length} vertices [${sharedVerts.join(',')}], expected exactly 2: [${v1},${v2}]. tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
       }
       return false;
     }
     
-    // Get all unique vertices from both triangles (should now be exactly 4 if above checks pass)
-    const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
+    // REFINEMENT FIX 2: Get all unique vertices using epsilon tolerance
+    // Build unique set with epsilon-rounded keys
+    const uniqueVerts = [];
+    const seenKeys = new Set();
+    
+    for (const v of [...tri1.verts, ...tri2.verts]) {
+      const roundedKey = Math.round(v / EPSILON) * EPSILON;
+      const keyStr = roundedKey.toFixed(6);
+      if (!seenKeys.has(keyStr)) {
+        seenKeys.add(keyStr);
+        uniqueVerts.push(v);
+      }
+    }
     
     // Must have exactly 4 unique vertices to form a quad
-    if (allVerts.length !== 4) {
+    if (uniqueVerts.length !== 4) {
       if (debugMode) {
-        console.log(`[canDissolveEdge] REJECT: ${allVerts.length} unique vertices (expected 4), tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}], shared: [${sharedVerts.join(',')}]`);
+        console.log(`[canDissolveEdge] REJECT: ${uniqueVerts.length} unique vertices (expected 4), tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}], shared: [${sharedVerts.join(',')}]`);
       }
       return false;
     }
@@ -1365,8 +1404,13 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       break; // No more internal edges to dissolve
     }
     
-    // Randomly select an edge (with probability check)
-    if (rng.random() > dissolveProbability) {
+    // REFINEMENT FIX 1: Randomly select an edge (with configurable probability check)
+    const rand = rng.random();
+    if (rand > dissolveProbability) {
+      probabilitySkips++;
+      if (debugMode && probabilitySkips <= 10) {
+        console.log(`[dissolveEdgesToQuads] Skipped merge due to probability (rand=${rand.toFixed(3)}, threshold=${dissolveProbability}, internalEdges=${internalEdges.length})`);
+      }
       continue; // Skip this attempt based on probability
     }
     
@@ -1453,6 +1497,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     console.log(`[dissolveEdgesToQuads] DISSOLUTION RATE: ${attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) : 0}% success rate`);
     console.log(`[dissolveEdgesToQuads] TRIANGLE-TO-QUAD CONVERSION: ${finalQuadCount} quads from ${triangles.length} triangles = ${((finalQuadCount / triangles.length) * 100).toFixed(1)}% conversion rate`);
     console.log(`[dissolveEdgesToQuads] FAILURE BREAKDOWN: ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
+    console.log(`[dissolveEdgesToQuads] REFINEMENT STATS: ${probabilitySkips} probability skips, ${epsilonMatches} epsilon-adjusted matches`);
     
     // AUDIT: Export failure statistics
     const auditSummary = {

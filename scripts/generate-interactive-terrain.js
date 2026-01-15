@@ -62,6 +62,7 @@ async function generateInteractiveTerrain() {
         stepByStepDensityMultiplier: 0.125, // DENSITY REDUCTION: 0.125 = 12.5% density (4x spacing, ~8x larger triangles) - PRIORITY over targetPoints
         targetPoints: null, // Disabled - using densityMultiplier instead for spacing-based reduction
         skipDissolution: false, // FIX 5: Enable dissolution for quad rendering
+        dissolveProbability: 0.85, // REFINEMENT FIX 1: Higher probability threshold (0.85) for better conversion rate
         skipLevel1Subdivision: true, // Skip Level 1 to reduce density (preview mode)
       },
     };
