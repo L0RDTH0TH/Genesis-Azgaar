@@ -1225,6 +1225,9 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   function canDissolveEdge(edgeKey, edgeMap, triangles) {
     const sharingTriangles = edgeMap.get(edgeKey);
     if (!sharingTriangles || sharingTriangles.length !== 2) {
+      if (debugMode) {
+        console.log(`[canDissolveEdge] REJECT: Edge ${edgeKey} shared by ${sharingTriangles?.length || 0} triangles (expected 2)`);
+      }
       return false; // Not an internal edge (shared by exactly 2 triangles)
     }
     
@@ -1233,14 +1236,41 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const tri2 = triangles[tri2Idx];
     
     if (!tri1 || !tri2 || tri1.removed || tri2.removed) {
+      if (debugMode) {
+        console.log(`[canDissolveEdge] REJECT: Edge ${edgeKey} - triangle missing or removed (tri1: ${tri1 ? 'exists' : 'missing'}, tri2: ${tri2 ? 'exists' : 'missing'}, tri1.removed: ${tri1?.removed}, tri2.removed: ${tri2?.removed})`);
+      }
       return false; // One of the triangles is already removed
     }
     
-    // Get all unique vertices from both triangles
+    // PRIORITY 1 FIX: Extract edge vertices and verify they exist in both triangles
+    const [v1, v2] = edgeKey.split(',').map(Number);
+    const tri1HasEdge = tri1.verts.includes(v1) && tri1.verts.includes(v2);
+    const tri2HasEdge = tri2.verts.includes(v1) && tri2.verts.includes(v2);
+    
+    if (!tri1HasEdge || !tri2HasEdge) {
+      if (debugMode) {
+        console.log(`[canDissolveEdge] REJECT: Edge ${edgeKey} not present in both triangles (tri1[${tri1Idx}] has edge: ${tri1HasEdge}, tri2[${tri2Idx}] has edge: ${tri2HasEdge}, tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}])`);
+      }
+      return false;
+    }
+    
+    // PRIORITY 1 FIX: Verify triangles share EXACTLY the two edge vertices (and no more)
+    const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+    if (sharedVerts.length !== 2 || !sharedVerts.includes(v1) || !sharedVerts.includes(v2)) {
+      if (debugMode) {
+        console.log(`[canDissolveEdge] REJECT: Triangles share ${sharedVerts.length} vertices [${sharedVerts.join(',')}], expected exactly 2: [${v1},${v2}]. tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
+      }
+      return false;
+    }
+    
+    // Get all unique vertices from both triangles (should now be exactly 4 if above checks pass)
     const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
     
     // Must have exactly 4 unique vertices to form a quad
     if (allVerts.length !== 4) {
+      if (debugMode) {
+        console.log(`[canDissolveEdge] REJECT: ${allVerts.length} unique vertices (expected 4), tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}], shared: [${sharedVerts.join(',')}]`);
+      }
       return false;
     }
     
@@ -1340,67 +1370,17 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
     const selectedEdge = internalEdges[randomEdgeIndex];
     
-    // Check if we can dissolve this edge (with detailed failure logging)
-    const sharingTriangles = edgeMap.get(selectedEdge);
-    let canDissolve = true;
-    let failureReason = '';
-    let failureCategory = '';
+    // PRIORITY 1 FIX: Use canDissolveEdge() with explicit edge sharing validation
+    const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
     
-    // AUDIT: Track failure reasons
-    if (!sharingTriangles || sharingTriangles.length !== 2) {
-      canDissolve = false;
-      failureCategory = 'edge_map_invalid';
-      failureReason = `edge shared by ${sharingTriangles?.length || 0} triangles (expected 2)`;
-    } else {
-      const [tri1Idx, tri2Idx] = sharingTriangles;
-      const tri1 = workingTriangles[tri1Idx];
-      const tri2 = workingTriangles[tri2Idx];
-      
-      if (!tri1 || !tri2) {
-        canDissolve = false;
-        failureCategory = 'triangle_missing';
-        failureReason = 'triangle missing';
-      } else if (tri1.removed || tri2.removed) {
-        canDissolve = false;
-        failureCategory = 'triangle_removed';
-        failureReason = 'triangle already removed';
-      } else {
-        // AUDIT: Verify edge vertices actually exist in both triangles
-        const [v1, v2] = selectedEdge.split(',').map(Number);
-        const tri1HasEdge = tri1.verts.includes(v1) && tri1.verts.includes(v2);
-        const tri2HasEdge = tri2.verts.includes(v1) && tri2.verts.includes(v2);
-        
-        if (!tri1HasEdge || !tri2HasEdge) {
-          canDissolve = false;
-          failureCategory = 'edge_not_shared';
-          failureReason = `edge [${v1},${v2}] not actually in triangles: tri1 has edge: ${tri1HasEdge}, tri2 has edge: ${tri2HasEdge}`;
-        } else {
-          // Check unique vertices
-          const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
-          if (allVerts.length !== 4) {
-            canDissolve = false;
-            failureCategory = 'wrong_vertex_count';
-            failureReason = `${allVerts.length} unique vertices (expected 4), tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}], shared: [${v1},${v2}]`;
-            
-            // AUDIT: Analyze why vertex count is wrong
-            const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
-            if (sharedVerts.length !== 2) {
-              failureReason += `, shared verts: [${sharedVerts.join(',')}] (expected 2)`;
-            }
-          }
-        }
-      }
-    }
-    
-    // AUDIT: Log detailed attempt info
+    // AUDIT: Log detailed attempt info (reduced logging since canDissolveEdge() now logs rejections)
     if (debugMode && attempts <= 20) {
+      const sharingTriangles = edgeMap.get(selectedEdge);
       const auditInfo = {
         attempt: attempts,
         selectedEdge: selectedEdge,
         sharingTriangles: sharingTriangles,
         canDissolve: canDissolve,
-        failureCategory: failureCategory || 'success',
-        failureReason: failureReason || 'none',
         edgeMapSize: edgeMap.size,
         activeTriangles: activeTriangles.length
       };
@@ -1415,10 +1395,13 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         auditInfo.tri2Removed = tri2?.removed;
       }
       
-      console.log(`[dissolveEdgesToQuads] AUDIT attempt ${attempts}:`, JSON.stringify(auditInfo, null, 2));
+      if (canDissolve) {
+        console.log(`[dissolveEdgesToQuads] AUDIT attempt ${attempts} - APPROVED:`, JSON.stringify(auditInfo, null, 2));
+      }
     }
     
     if (canDissolve) {
+      const sharingTriangles = edgeMap.get(selectedEdge);
       const [tri1Idx, tri2Idx] = sharingTriangles;
       const tri1 = workingTriangles[tri1Idx];
       const tri2 = workingTriangles[tri2Idx];
@@ -1449,9 +1432,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       }
     } else {
       invalidEdgeAttempts++;
-      if (debugMode && invalidEdgeAttempts <= 10) {
-        console.log(`[dissolveEdgesToQuads] Cannot dissolve edge ${selectedEdge}: ${failureReason}`);
-      }
+      // Note: canDissolveEdge() already logs rejection reasons, so we don't duplicate here
     }
   }
   
