@@ -526,7 +526,14 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
         console.warn(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: WARNING - Triangle subdivision returned ${subQuads.length} quads (expected 3) for triangle [${shape.verts.join(',')}]`);
       }
       
-      allQuads.push(...subQuads);
+      // ENHANCED VALIDATION: Mark quads from triangle subdivision for separate rendering
+      const markedSubQuads = subQuads.map(q => ({
+        ...q,
+        fromTriangleSubdivision: true, // Flag for debug rendering
+        sourceTriangle: shape.verts // Track original triangle
+      }));
+      
+      allQuads.push(...markedSubQuads);
       trianglesSubdivided++;
       newQuadsFromTriangles += subQuads.length;
       
@@ -1597,6 +1604,83 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       invalidEdgeAttempts++;
       // Note: canDissolveEdge() already logs rejection reasons, so we don't duplicate here
     }
+  }
+  
+  // FINAL MERGE PASS: Deterministic pass to catch remaining valid merges
+  // Per audit recommendation: Force-merge valid edges that were skipped due to probability
+  let finalPassMerges = 0;
+  let finalPassAttempts = 0;
+  const maxFinalPassIterations = 2; // Limit to 1-2 iterations to avoid over-merging
+  
+  if (debugMode) {
+    const remainingBeforeFinal = workingTriangles.filter(t => !t.removed).length;
+    console.log(`[dissolveEdgesToQuads] Starting final merge pass (${remainingBeforeFinal} triangles remaining, max ${maxFinalPassIterations} iterations)`);
+  }
+  
+  for (let finalIter = 0; finalIter < maxFinalPassIterations; finalIter++) {
+    const activeTriangles = workingTriangles.filter(t => !t.removed);
+    if (activeTriangles.length < 2) break; // Need at least 2 triangles to merge
+    
+    const edgeMap = buildEdgeMap(activeTriangles);
+    const internalEdges = Array.from(edgeMap.entries())
+      .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
+      .map(([edgeKey]) => edgeKey);
+    
+    if (internalEdges.length === 0) {
+      if (debugMode && finalIter === 0) {
+        console.log(`[dissolveEdgesToQuads] Final pass: No internal edges found (all remaining triangles are isolated)`);
+      }
+      break; // No more internal edges
+    }
+    
+    // Process all valid edges (probability = 1.0, force merge)
+    let mergedThisIteration = 0;
+    for (const selectedEdge of internalEdges) {
+      finalPassAttempts++;
+      const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
+      
+      if (canDissolve) {
+        const sharingTriangles = edgeMap.get(selectedEdge);
+        const [tri1, tri2] = sharingTriangles;
+        
+        // Merge into quad
+        const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
+        
+        // Validate quad (must have 4 vertices)
+        if (quad.verts.length !== 4) {
+          if (debugMode && finalPassMerges < 5) {
+            console.log(`[dissolveEdgesToQuads] Final pass: Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices`);
+          }
+          continue; // Invalid quad
+        }
+        
+        // Mark triangles as removed
+        tri1.removed = true;
+        tri2.removed = true;
+        
+        // Add quad
+        quads.push(quad);
+        edgesDissolved++;
+        finalPassMerges++;
+        mergedThisIteration++;
+        
+        if (debugMode && finalPassMerges <= 5) {
+          console.log(`[dissolveEdgesToQuads] Final pass: Merged edge ${selectedEdge} into quad with verts: [${quad.verts.join(',')}]`);
+        }
+      }
+    }
+    
+    if (debugMode && finalIter === 0) {
+      console.log(`[dissolveEdgesToQuads] Final pass iteration ${finalIter + 1}: ${mergedThisIteration} merges from ${internalEdges.length} edges`);
+    }
+    
+    // If no merges this iteration, stop early
+    if (mergedThisIteration === 0) break;
+  }
+  
+  if (debugMode && finalPassMerges > 0) {
+    const remainingAfterFinal = workingTriangles.filter(t => !t.removed).length;
+    console.log(`[dissolveEdgesToQuads] Final pass complete: ${finalPassMerges} additional merges (${finalPassAttempts} attempts), ${remainingAfterFinal} triangles remaining`);
   }
   
   // Collect remaining triangles (not dissolved)

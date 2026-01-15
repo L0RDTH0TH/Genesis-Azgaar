@@ -45,7 +45,7 @@ async function generateInteractiveTerrain() {
         earlyTerminationThreshold: 0.0001,
         lockBoundaries: true, // Lock boundary points during relaxation (immutable hex border)
         progressiveDamping: true,
-        dissolveProbability: 0.65,
+        dissolveProbability: 0.95, // INCREASED: From 0.85 to 0.95 per audit recommendation to reduce probability skips (was 15.4%, target <10%)
         relaxationIterations: 100, // Optimized for convergence without over-movement (prevents line crossings)
         dampingFactor: 0.5, // Increased damping for stability (prevents oscillation/crossing)
         dualOffsetFactor: 0.35, // Reduced offset for less aggressive rounding (prevents edge crossings)
@@ -713,7 +713,11 @@ function generateInteractiveHTML(data) {
         }
       } else if (stageKey === '4' && stage.data) {
         // Stage 4: Subdivided triangles (red) - like subdivide-triangles-to-quads.jpg
+        // ENHANCED VALIDATION: Render quads from subdivision separately (different color for debug)
         let shapeCount = 0;
+        let quadsFromSubdivision = 0;
+        let quadsFromDissolution = 0;
+        
         if (Array.isArray(stage.data)) {
           stage.data.forEach(shape => {
             if (shape && shape.verts && Array.isArray(shape.verts) && shape.verts.length >= 3) {
@@ -723,13 +727,25 @@ function generateInteractiveHTML(data) {
               }).filter(v => v !== null);
               if (verts.length >= 3) {
                 const path = verts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
-                layers.push(\`<path d="\${path}" fill="none" stroke="\${stage.color}" stroke-width="1.5" opacity="0.8" />\`);
+                
+                // ENHANCED VALIDATION: Different color for quads from triangle subdivision
+                const isFromSubdivision = shape.fromTriangleSubdivision === true;
+                const strokeColor = isFromSubdivision ? '#ff4488' : '#ff8844'; // Pink for subdivision, orange for dissolution
+                const strokeWidth = isFromSubdivision ? '2' : '1.5';
+                
+                layers.push(\`<path d="\${path}" fill="none" stroke="\${strokeColor}" stroke-width="\${strokeWidth}" opacity="0.8" />\`);
                 shapeCount++;
+                
+                if (isFromSubdivision) {
+                  quadsFromSubdivision++;
+                } else if (shape.type === 'quad') {
+                  quadsFromDissolution++;
+                }
               }
             }
           });
         }
-        console.log(\`Rendered \${shapeCount} red subdivided shapes for Stage 4 (After Subdivide Triangles)\`);
+        console.log(\`Rendered \${shapeCount} shapes for Stage 4 (After Subdivide Triangles): \${quadsFromSubdivision} from subdivision (pink), \${quadsFromDissolution} from dissolution (orange)\`);
       } else if (stageKey === '5' && stage.data) {
         // Stage 5: Subdivided quads (orange) - like subdivide-quads.jpg
         let quadCount = 0;
