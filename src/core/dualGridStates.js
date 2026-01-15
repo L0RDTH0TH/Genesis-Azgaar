@@ -494,15 +494,38 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   let trianglesSubdivided = 0;
   let trianglesSkipped = 0;
   let newQuadsFromTriangles = 0;
+  let shapesProcessed = 0;
+  let quadsKept = 0;
+  
+  // CROSS-STAGE AUDIT: Track all triangles to ensure none are missed
+  const allTrianglesInInput = quads.filter(s => s.type === 'triangle');
+  const processedTriangleVerts = new Set();
+  
+  if (stepByStepRender) {
+    console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: Stage 4 - Processing ${quads.length} shapes (${quadsBefore.length} quads, ${remainingTrianglesBefore.length} triangles)`);
+    console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: All triangles to process:`, allTrianglesInInput.map(t => t.verts));
+  }
   
   for (const shape of quads) {
+    shapesProcessed++;
+    
     if (shape.type === 'triangle' && !skipTriangleSubdivision) {
+      // CROSS-STAGE AUDIT: Verify triangle is being processed
+      const vertsKey = shape.verts.sort((a, b) => a - b).join(',');
+      processedTriangleVerts.add(vertsKey);
+      
       // AUDIT: Log triangle subdivision
       if (stepByStepRender && trianglesSubdivided < 5) {
-        console.log(`[buildStalbergQuadGrid] STAGE 4: Subdividing triangle with verts: [${shape.verts.join(',')}]`);
+        console.log(`[buildStalbergQuadGrid] STAGE 4: Subdividing triangle ${trianglesSubdivided + 1}/${remainingTrianglesBefore.length} with verts: [${shape.verts.join(',')}]`);
       }
       
       const subQuads = subdivideTriangleIntoThreeQuads(shape, points, addPoint, midpoint);
+      
+      // CROSS-STAGE AUDIT: Verify subdivision result
+      if (subQuads.length !== 3) {
+        console.warn(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: WARNING - Triangle subdivision returned ${subQuads.length} quads (expected 3) for triangle [${shape.verts.join(',')}]`);
+      }
+      
       allQuads.push(...subQuads);
       trianglesSubdivided++;
       newQuadsFromTriangles += subQuads.length;
@@ -521,8 +544,30 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
         if (stepByStepRender && trianglesSkipped <= 3) {
           console.log(`[buildStalbergQuadGrid] STAGE 4: Skipping triangle subdivision for triangle with verts: [${shape.verts.join(',')}] (skipTriangleSubdivision=${skipTriangleSubdivision})`);
         }
+      } else if (shape.type === 'quad') {
+        quadsKept++;
       }
       allQuads.push(shape);
+    }
+  }
+  
+  // CROSS-STAGE AUDIT: Verify all triangles were processed
+  if (stepByStepRender && !skipTriangleSubdivision) {
+    const allTriangleVerts = new Set(allTrianglesInInput.map(t => t.verts.sort((a, b) => a - b).join(',')));
+    const unprocessedTriangles = Array.from(allTriangleVerts).filter(v => !processedTriangleVerts.has(v));
+    
+    if (unprocessedTriangles.length > 0) {
+      console.error(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: ERROR - ${unprocessedTriangles.length} triangles were NOT processed:`, unprocessedTriangles);
+    } else {
+      console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: SUCCESS - All ${remainingTrianglesBefore.length} triangles were processed`);
+    }
+    
+    // Verify counts match
+    const expectedNewQuads = remainingTrianglesBefore.length * 3;
+    if (newQuadsFromTriangles !== expectedNewQuads) {
+      console.warn(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: WARNING - Expected ${expectedNewQuads} new quads from ${remainingTrianglesBefore.length} triangles, got ${newQuadsFromTriangles}`);
+    } else {
+      console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: Counts match - ${remainingTrianglesBefore.length} triangles → ${newQuadsFromTriangles} quads (3 per triangle)`);
     }
   }
   
@@ -538,6 +583,14 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     const trianglesAfter = allQuads.filter(s => s.type === 'triangle');
     console.log(`[buildStalbergQuadGrid] STAGE 4 POST-SUBDIVISION: ${allQuads.length} total shapes (${quadsAfter.length} quads, ${trianglesAfter.length} triangles)`);
     console.log(`[buildStalbergQuadGrid] STAGE 4 STATS: ${trianglesSubdivided} triangles subdivided, ${trianglesSkipped} triangles skipped, ${newQuadsFromTriangles} new quads created`);
+    console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: Stage 4 processing - ${shapesProcessed} shapes processed, ${quadsKept} quads kept, ${trianglesSubdivided} triangles subdivided`);
+    
+    // Final verification
+    if (trianglesAfter.length > 0 && !skipTriangleSubdivision) {
+      console.warn(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: WARNING - ${trianglesAfter.length} triangles remain after subdivision (expected 0)`);
+    } else if (trianglesAfter.length === 0 && !skipTriangleSubdivision) {
+      console.log(`[buildStalbergQuadGrid] CROSS-STAGE AUDIT: SUCCESS - All triangles subdivided, 0 triangles remaining`);
+    }
   }
   
   // STEP-BY-STEP DEBUG: Capture Stage 4 (after subdivide triangles to quads)
@@ -1550,6 +1603,107 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   const remainingTriangles = workingTriangles
     .filter(t => !t.removed)
     .map(t => ({ type: 'triangle', verts: t.verts }));
+  
+  // CROSS-STAGE AUDIT: Analyze missed merge opportunities
+  if (debugMode && remainingTriangles.length > 0) {
+    console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Analyzing ${remainingTriangles.length} remaining triangles for missed merge opportunities`);
+    
+    // Build edge map for remaining triangles
+    const remainingEdgeMap = buildEdgeMap(remainingTriangles.map(t => ({ ...t, removed: false })));
+    
+    // Find edges shared by exactly 2 remaining triangles (potential missed quads)
+    const missedMergeCandidates = Array.from(remainingEdgeMap.entries())
+      .filter(([edgeKey, triObjects]) => triObjects.length === 2)
+      .map(([edgeKey, triObjects]) => ({
+        edge: edgeKey,
+        tri1: triObjects[0],
+        tri2: triObjects[1],
+        tri1Verts: triObjects[0].verts,
+        tri2Verts: triObjects[1].verts
+      }));
+    
+    if (missedMergeCandidates.length > 0) {
+      console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Found ${missedMergeCandidates.length} potential missed merge opportunities (edges shared by 2 remaining triangles)`);
+      
+      // Analyze why these weren't merged
+      let validMissedMerges = 0;
+      let invalidMissedMerges = 0;
+      
+      for (const candidate of missedMergeCandidates.slice(0, 10)) { // Sample first 10
+        const canMerge = canDissolveEdge(candidate.edge, remainingEdgeMap, remainingTriangles.map(t => ({ ...t, removed: false })));
+        if (canMerge) {
+          validMissedMerges++;
+          console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: VALID MISSED MERGE - Edge ${candidate.edge} could be merged: tri1 [${candidate.tri1Verts.join(',')}], tri2 [${candidate.tri2Verts.join(',')}]`);
+        } else {
+          invalidMissedMerges++;
+        }
+      }
+      
+      console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Sample analysis - ${validMissedMerges} valid missed merges, ${invalidMissedMerges} invalid (out of ${Math.min(10, missedMergeCandidates.length)} sampled)`);
+    } else {
+      console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: No missed merge opportunities found (no edges shared by 2 remaining triangles)`);
+      
+      // Additional analysis: Check if remaining triangles share edges with created quads
+      // This would indicate they could have been merged if selected earlier
+      const quadEdgeSet = new Set();
+      quads.forEach(quad => {
+        if (quad.verts && quad.verts.length >= 3) {
+          for (let i = 0; i < quad.verts.length; i++) {
+            const v1 = quad.verts[i];
+            const v2 = quad.verts[(i + 1) % quad.verts.length];
+            quadEdgeSet.add(getEdgeKey(v1, v2));
+          }
+        }
+      });
+      
+      let trianglesAdjacentToQuads = 0;
+      const adjacentTriangles = [];
+      
+      remainingTriangles.forEach(tri => {
+        const triEdges = [
+          getEdgeKey(tri.verts[0], tri.verts[1]),
+          getEdgeKey(tri.verts[1], tri.verts[2]),
+          getEdgeKey(tri.verts[2], tri.verts[0])
+        ];
+        
+        const sharedWithQuads = triEdges.filter(e => quadEdgeSet.has(e));
+        if (sharedWithQuads.length > 0) {
+          trianglesAdjacentToQuads++;
+          adjacentTriangles.push({
+            verts: tri.verts,
+            sharedEdges: sharedWithQuads
+          });
+        }
+      });
+      
+      if (trianglesAdjacentToQuads > 0) {
+        console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: ${trianglesAdjacentToQuads} remaining triangles share edges with created quads (indicating they could have been merged if selected earlier)`);
+        console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Sample adjacent triangles:`, adjacentTriangles.slice(0, 5));
+      }
+    }
+    
+    // Log all remaining triangles with their edges
+    console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: All remaining triangles:`, remainingTriangles.map(t => ({
+      verts: t.verts,
+      edges: [
+        getEdgeKey(t.verts[0], t.verts[1]),
+        getEdgeKey(t.verts[1], t.verts[2]),
+        getEdgeKey(t.verts[2], t.verts[0])
+      ]
+    })));
+    
+    // Analyze rejection reasons
+    console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Rejection breakdown - ${probabilitySkips} probability skips, ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
+    console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Probability skips represent ${((probabilitySkips / attempts) * 100).toFixed(1)}% of attempts (dissolveProbability=${dissolveProbability})`);
+    console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Success rate: ${((edgesDissolved / attempts) * 100).toFixed(1)}% (${edgesDissolved} successful out of ${attempts} attempts)`);
+    
+    // Analyze why merges might have been missed
+    if (probabilitySkips > 0) {
+      const probabilitySkipRate = (probabilitySkips / attempts) * 100;
+      console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: ${probabilitySkipRate.toFixed(1)}% of attempts were skipped due to probability (dissolveProbability=${dissolveProbability})`);
+      console.log(`[dissolveEdgesToQuads] CROSS-STAGE AUDIT: Recommendation: Consider increasing dissolveProbability to ${Math.min(0.95, dissolveProbability + 0.1)} to reduce missed merges`);
+    }
+  }
   
   // STEP-BY-STEP DEBUG: Final statistics
   if (debugMode) {
