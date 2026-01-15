@@ -10,20 +10,37 @@ import { RNG } from '../utils/rng.js';
 import { createTypedArray } from '../utils/array.js';
 
 /**
- * Build Stålberg-inspired quad grid from hexagonal base
- * @param {number} hexLayers - Number of hex layers (default: 20)
+ * Build Stålberg-inspired quad grid from transformed hex lattice distribution
+ * Clean hexagonal border via post-transform of perfect hex grid
+ * 
+ * Generates a perfect hexagonal grid first, then applies affine transformation
+ * to create elliptical shape. This preserves clean hexagonal outer border
+ * (full hex sides visible) while achieving desired elliptical overall shape.
+ * 
+ * @param {number} hexLayers - Number of hex layers (legacy parameter, not used directly)
  * @param {Object} rng - RNG instance for seeded randomness
  * @param {Object} options - Options object with politicsMode (optional)
- * @returns {Object} Dual grid structure with points, level0Quads, level1Quads
+ *   - hexLayers: Number of hex rings (default: 45)
+ *   - hexSize: Size of hex cells (default: 12)
+ *   - aspectRatio: Horizontal stretch factor (default: 1.22)
+ *   - relaxationIterations: Reduced to 20-30 to preserve hex structure
+ *   - DelaunatorClass: Delaunator class for triangulation (optional, will use simple method if not provided)
+ * @returns {Object} Dual grid structure with points, level0Quads, level1Quads, dualPoints
  */
 export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   // Global points array (will be populated)
   const points = [];
   
   // Helper: Add point and return index
+  // Preserve all properties (including isBoundary for boundary locking)
   function addPoint(point) {
     const index = points.length;
-    points.push({ x: point.x, y: point.y });
+    const newPoint = { x: point.x, y: point.y };
+    // Preserve isBoundary and any other properties
+    if (point.isBoundary !== undefined) {
+      newPoint.isBoundary = point.isBoundary;
+    }
+    points.push(newPoint);
     return index;
   }
   
@@ -32,26 +49,302 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     return { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
   }
   
-  // Step 1: Generate hexagonal points
-  const hexPoints = createHexagonalPoints(hexLayers, rng);
-  const hexPointIndices = hexPoints.map(p => addPoint(p));
+  // Step 1: Generate transformed hex points (perfect hex grid with post-transform)
+  // Clean hexagonal border via post-transform of perfect hex grid
+  // This preserves clean hexagonal outer border while achieving elliptical shape
+  const baseHexRings = options.politicsMode?.hexLayers ?? 45;
+  const baseHexSize = options.politicsMode?.hexSize ?? 12;
+  const aspectRatio = options.politicsMode?.aspectRatio ?? 1.22;
   
-  // Step 2: Triangulate from hex centers (connect to neighbors)
-  const triangles = triangulateFromHex(hexPoints, hexPointIndices);
+  // STEP-BY-STEP DEBUG: Density reduction for investigation
+  // Reduce point density by half (reduce hexRings, increase hexSize to maintain grid size)
+  // Point count in hex grid ≈ 3*hexRings*(hexRings+1) + 1, so reducing hexRings reduces points
+  // To maintain grid size: reduce hexRings by √densityMultiplier, increase hexSize by 1/√densityMultiplier
+  const densityMultiplier = options.politicsMode?.stepByStepDensityMultiplier ?? 1.0;
+  
+  let hexRings, effectiveHexSize;
+  if (densityMultiplier !== 1.0) {
+    // Reduce rings to reduce point count, increase size to maintain grid dimensions
+    const densityScale = Math.sqrt(densityMultiplier); // For 0.5 density, scale = 0.707
+    hexRings = Math.max(1, Math.round(baseHexRings * densityScale));
+    effectiveHexSize = baseHexSize / densityScale; // Compensate for reduced rings
+    
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: multiplier=${densityMultiplier}, baseHexRings=${baseHexRings}→${hexRings}, baseHexSize=${baseHexSize}→${effectiveHexSize.toFixed(2)}`);
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Expected point reduction: ~${Math.round(3 * baseHexRings * (baseHexRings + 1) + 1)} → ~${Math.round(3 * hexRings * (hexRings + 1) + 1)} points`);
+  } else {
+    hexRings = baseHexRings;
+    effectiveHexSize = baseHexSize;
+  }
+  
+  const primalPoints = createTransformedHexPoints(hexRings, effectiveHexSize, aspectRatio, rng);
+  
+  if (densityMultiplier !== 1.0) {
+    const expectedAtDensity1 = Math.round(3 * baseHexRings * (baseHexRings + 1) + 1);
+    const actualReduction = ((1 - primalPoints.length / expectedAtDensity1) * 100).toFixed(1);
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Generated ${primalPoints.length} points (expected at density 1.0: ~${expectedAtDensity1}, reduction: ${actualReduction}%)`);
+    
+    // Verify bounds are maintained
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of primalPoints) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Grid bounds maintained: ${minX.toFixed(1)} to ${maxX.toFixed(1)}, ${minY.toFixed(1)} to ${maxY.toFixed(1)}`);
+  }
+  const hexPointIndices = primalPoints.map(p => addPoint(p));
+  
+  // STEP-BY-STEP DEBUG: Capture Stage 1 (raw spawned points)
+  const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
+  const pipelineStages = stepByStepRender ? {
+    stage1_rawPoints: primalPoints.map(p => ({ x: p.x, y: p.y })), // Raw spawned points
+  } : null;
+  
+  // Step 1.5: EARLY RELAXATION (if testEarlyRelax flag enabled)
+  // Smooth foundation points BEFORE building structure (per PIPELINE_ORDER_HYPOTHESIS_REPORT.md)
+  const testEarlyRelax = options.politicsMode?.testEarlyRelax ?? false;
+  let earlyRelaxationApplied = false;
+  
+  if (testEarlyRelax) {
+    console.log('[buildStalbergQuadGrid] EARLY RELAX TEST: enabled, smoothing foundation points before triangulation');
+    
+    // Build simple neighbor map from Delaunay triangulation of initial points
+    const DelaunatorClass = options.DelaunatorClass;
+    let earlyNeighborMap = new Map();
+    
+    if (DelaunatorClass) {
+      // Use Delaunay to get connectivity for simple hex grid
+      const coords = primalPoints.map(p => [p.x, p.y]);
+      const delaunay = DelaunatorClass.from(coords);
+      
+      // Build neighbor map from Delaunay triangles
+      for (let i = 0; i < points.length; i++) {
+        earlyNeighborMap.set(i, []);
+      }
+      
+      // Extract neighbors from Delaunay triangles
+      for (let i = 0; i < delaunay.triangles.length; i += 3) {
+        const i0 = delaunay.triangles[i];
+        const i1 = delaunay.triangles[i + 1];
+        const i2 = delaunay.triangles[i + 2];
+        
+        // Add bidirectional connections
+        const addNeighbor = (a, b) => {
+          const neighbors = earlyNeighborMap.get(a);
+          if (!neighbors.includes(b)) {
+            neighbors.push(b);
+          }
+        };
+        
+        addNeighbor(i0, i1);
+        addNeighbor(i0, i2);
+        addNeighbor(i1, i0);
+        addNeighbor(i1, i2);
+        addNeighbor(i2, i0);
+        addNeighbor(i2, i1);
+      }
+    } else {
+      // Fallback: distance-based neighbors (k-nearest, k=6 for hex grid)
+      for (let i = 0; i < points.length; i++) {
+        const neighbors = [];
+        const distances = [];
+        
+        for (let j = 0; j < points.length; j++) {
+          if (i === j) continue;
+          const dx = points[i].x - points[j].x;
+          const dy = points[i].y - points[j].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          distances.push({ idx: j, dist });
+        }
+        
+        distances.sort((a, b) => a.dist - b.dist);
+        for (let k = 0; k < Math.min(6, distances.length); k++) {
+          neighbors.push(distances[k].idx);
+        }
+        
+        earlyNeighborMap.set(i, neighbors);
+      }
+    }
+    
+    // Apply early relaxation with low iterations (5 for test)
+    const earlyRelaxIterations = options.politicsMode?.earlyRelaxIterations ?? 5;
+    const dampingFactor = options.politicsMode?.dampingFactor ?? 0.5;
+    
+    console.log(`[buildStalbergQuadGrid] Early relax: ${earlyRelaxIterations} iterations, damping=${dampingFactor}`);
+    relaxGrid(points, earlyNeighborMap, earlyRelaxIterations, dampingFactor, options);
+    
+    // Update primalPoints to match relaxed points
+    for (let i = 0; i < primalPoints.length; i++) {
+      primalPoints[i].x = points[i].x;
+      primalPoints[i].y = points[i].y;
+    }
+    
+    earlyRelaxationApplied = true;
+    console.log('[buildStalbergQuadGrid] Early relax test: enabled, check center chaos/CV');
+  }
+  
+  // Step 2: Triangulate from elliptical points using Delaunay triangulation
+  // Use Delaunator if available (fast O(n log n)), otherwise fall back to simple method
+  const DelaunatorClass = options.DelaunatorClass;
+  let rawDelaunayTriangles = null;
+  let triangles;
+  
+  if (DelaunatorClass) {
+    const result = triangulateFromPointsWithDelaunator(primalPoints, hexPointIndices, DelaunatorClass);
+    triangles = result.triangles;
+    rawDelaunayTriangles = result.rawTriangles; // Store raw Delaunator triangle indices
+  } else {
+    triangles = triangulateFromPointsSimple(primalPoints, hexPointIndices);
+  }
+  
+  console.log(`[buildStalbergQuadGrid] Triangulated ${triangles.length} triangles from ${primalPoints.length} points`);
+  
+  // STEP-BY-STEP DEBUG: Capture Stage 2 (after triangulation) with detailed analysis
+  if (stepByStepRender && pipelineStages) {
+    // Calculate triangle statistics
+    const triangleAreas = [];
+    const sampleTriangles = [];
+    for (let i = 0; i < Math.min(10, triangles.length); i++) {
+      const tri = triangles[i];
+      if (tri && tri.verts && tri.verts.length >= 3) {
+        const v0 = points[tri.verts[0]];
+        const v1 = points[tri.verts[1]];
+        const v2 = points[tri.verts[2]];
+        if (v0 && v1 && v2) {
+          // Shoelace formula for area
+          const area = Math.abs((v0.x * (v1.y - v2.y) + v1.x * (v2.y - v0.y) + v2.x * (v0.y - v1.y)) / 2);
+          triangleAreas.push(area);
+          sampleTriangles.push({
+            index: i,
+            verts: tri.verts,
+            area: area,
+            coords: {
+              v0: { x: v0.x, y: v0.y },
+              v1: { x: v1.x, y: v1.y },
+              v2: { x: v2.x, y: v2.y },
+            }
+          });
+        }
+      }
+    }
+    const avgArea = triangleAreas.length > 0 ? triangleAreas.reduce((a, b) => a + b, 0) / triangleAreas.length : 0;
+    const minArea = triangleAreas.length > 0 ? Math.min(...triangleAreas) : 0;
+    const maxArea = triangleAreas.length > 0 ? Math.max(...triangleAreas) : 0;
+    
+    console.log(`[buildStalbergQuadGrid] STAGE 2 ANALYSIS: ${triangles.length} triangles, avg area: ${avgArea.toFixed(2)}, min: ${minArea.toFixed(2)}, max: ${maxArea.toFixed(2)}`);
+    console.log(`[buildStalbergQuadGrid] STAGE 2 SAMPLE TRIANGLES (first 10):`, JSON.stringify(sampleTriangles, null, 2));
+    
+    pipelineStages.stage2_triangles = triangles.map(t => ({
+      type: t.type,
+      verts: [...t.verts],
+    }));
+    pipelineStages.stage2_points = points.map(p => ({ x: p.x, y: p.y }));
+    pipelineStages.stage2_stats = {
+      triangleCount: triangles.length,
+      pointCount: points.length,
+      avgArea: avgArea,
+      minArea: minArea,
+      maxArea: maxArea,
+      sampleTriangles: sampleTriangles,
+    };
+    console.log('[buildStalbergQuadGrid] Rendered pipeline stage 2: After triangulation');
+  }
   
   // Step 3: Dissolve edges to form quads (per design v2 section 1)
-  const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.5;
-  const quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability);
+  // Enable dissolution for proper quad rendering (not wireframe triangles)
+  const skipDissolution = options.politicsMode?.skipDissolution ?? false; // Default to false for quad rendering
+  let quads;
+  if (skipDissolution) {
+    console.log(`[buildStalbergQuadGrid] Skipping dissolution (rendering raw triangles)`);
+    quads = triangles; // Use triangles directly
+  } else {
+    const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.5;
+    const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
+    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender);
+    console.log(`[buildStalbergQuadGrid] After dissolution: ${quads.length} shapes`);
+  }
   
-  // Step 4: Subdivide remaining triangles
+  // STEP-BY-STEP DEBUG: Capture Stage 3 (after dissolution/cull to quads) with detailed analysis
+  if (stepByStepRender && pipelineStages) {
+    // Analyze quads
+    const quadCount = quads.filter(q => q.type === 'quad').length;
+    const triangleCount = quads.filter(q => q.type === 'triangle').length;
+    const quadAreas = [];
+    const sampleQuads = [];
+    
+    for (let i = 0; i < Math.min(10, quads.length); i++) {
+      const quad = quads[i];
+      if (quad && quad.verts && quad.verts.length >= 3) {
+        const verts = quad.verts.map(vIdx => points[vIdx]).filter(v => v);
+        if (verts.length >= 3) {
+          // Shoelace formula
+          let area = 0;
+          for (let j = 0; j < verts.length; j++) {
+            const v1 = verts[j];
+            const v2 = verts[(j + 1) % verts.length];
+            area += v1.x * v2.y - v2.x * v1.y;
+          }
+          area = Math.abs(area) / 2;
+          quadAreas.push(area);
+          sampleQuads.push({
+            index: i,
+            type: quad.type,
+            verts: quad.verts,
+            vertCount: quad.verts.length,
+            area: area,
+            coords: verts.map(v => ({ x: v.x, y: v.y })),
+          });
+        }
+      }
+    }
+    
+    const avgQuadArea = quadAreas.length > 0 ? quadAreas.reduce((a, b) => a + b, 0) / quadAreas.length : 0;
+    
+    console.log(`[buildStalbergQuadGrid] STAGE 3 ANALYSIS: ${quads.length} total shapes (${quadCount} quads, ${triangleCount} triangles)`);
+    console.log(`[buildStalbergQuadGrid] STAGE 3: Avg quad area: ${avgQuadArea.toFixed(2)}, sample quads:`, JSON.stringify(sampleQuads, null, 2));
+    
+    pipelineStages.stage3_quads = quads.map(q => ({
+      type: q.type,
+      verts: [...q.verts],
+    }));
+    pipelineStages.stage3_points = points.map(p => ({ x: p.x, y: p.y }));
+    pipelineStages.stage3_stats = {
+      totalShapes: quads.length,
+      quadCount: quadCount,
+      triangleCount: triangleCount,
+      avgQuadArea: avgQuadArea,
+      sampleQuads: sampleQuads,
+    };
+    console.log('[buildStalbergQuadGrid] Rendered pipeline stage 3: After dissolution/cull to quads');
+  }
+  
+  // Step 4: Subdivide remaining triangles (optional - can skip for lower density)
+  const skipTriangleSubdivision = options.politicsMode?.skipTriangleSubdivision ?? true; // Default to true for lower density
   const allQuads = [];
   for (const shape of quads) {
-    if (shape.type === 'triangle') {
+    if (shape.type === 'triangle' && !skipTriangleSubdivision) {
       const subQuads = subdivideTriangleIntoThreeQuads(shape, points, addPoint, midpoint);
       allQuads.push(...subQuads);
     } else {
+      // Keep shape as-is (either quad from dissolution, or triangle if skipping subdivision)
       allQuads.push(shape);
     }
+  }
+  if (skipTriangleSubdivision) {
+    console.log(`[buildStalbergQuadGrid] Skipping triangle subdivision (keeping dissolved quads only): ${allQuads.length} quads`);
+  } else {
+    console.log(`[buildStalbergQuadGrid] After subdivision: ${allQuads.length} quads`);
+  }
+  
+  // STEP-BY-STEP DEBUG: Capture Stage 4 (after subdivide triangles to quads)
+  if (stepByStepRender && pipelineStages) {
+    pipelineStages.stage4_subdividedTriangles = allQuads.map(q => ({
+      type: q.type,
+      verts: [...q.verts],
+    }));
+    pipelineStages.stage4_points = points.map(p => ({ x: p.x, y: p.y }));
+    console.log('[buildStalbergQuadGrid] Rendered pipeline stage 4: After subdivide triangles to quads');
   }
   
   // Step 5: Create Level 0 quads (current quads)
@@ -66,56 +359,186 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     provinceId: -1,
   }));
   
-  // Step 6: Subdivide Level 0 quads into Level 1 quads
+  // Step 6: Subdivide Level 0 quads into Level 1 quads (optional, skip for preview)
+  const skipLevel1Subdivision = options.politicsMode?.skipLevel1Subdivision ?? true; // Default to true for preview
   const level1Quads = [];
-  for (let i = 0; i < level0Quads.length; i++) {
-    const parentQuad = level0Quads[i];
-    const subQuads = subdivideQuadIntoFour(parentQuad, points, addPoint, midpoint);
-    
-    parentQuad.childQuadIds = [];
-    for (const subQuad of subQuads) {
-      const childIndex = level1Quads.length;
-      level1Quads.push({
-        i: childIndex,
-        level: 1,
-        verts: subQuad.verts,
-        center: calculateQuadCenter(subQuad.verts, points),
-        parentQuadId: i,
-        childQuadIds: null,
-        stateId: -1,
-        provinceId: -1,
-      });
-      parentQuad.childQuadIds.push(childIndex);
+  
+  if (!skipLevel1Subdivision) {
+    for (let i = 0; i < level0Quads.length; i++) {
+      const parentQuad = level0Quads[i];
+      const subQuads = subdivideQuadIntoFour(parentQuad, points, addPoint, midpoint);
+      
+      parentQuad.childQuadIds = [];
+      for (const subQuad of subQuads) {
+        const childIndex = level1Quads.length;
+        level1Quads.push({
+          i: childIndex,
+          level: 1,
+          verts: subQuad.verts,
+          center: calculateQuadCenter(subQuad.verts, points),
+          parentQuadId: i,
+          childQuadIds: null,
+          stateId: -1,
+          provinceId: -1,
+        });
+        parentQuad.childQuadIds.push(childIndex);
+      }
     }
+    console.log(`[buildStalbergQuadGrid] Level 1 subdivision: ${level1Quads.length} quads`);
+  } else {
+    console.log(`[buildStalbergQuadGrid] Skipping Level 1 subdivision (preview mode)`);
+  }
+  
+  // STEP-BY-STEP DEBUG: Capture Stage 5 (after subdivide quads)
+  if (stepByStepRender && pipelineStages) {
+    pipelineStages.stage5_subdividedQuads = {
+      level0: level0Quads.map(q => ({
+        verts: [...q.verts],
+        center: { x: q.center.x, y: q.center.y },
+      })),
+      level1: level1Quads.map(q => ({
+        verts: [...q.verts],
+        center: { x: q.center.x, y: q.center.y },
+      })),
+    };
+    pipelineStages.stage5_points = points.map(p => ({ x: p.x, y: p.y }));
+    console.log('[buildStalbergQuadGrid] Rendered pipeline stage 5: After subdivide quads');
   }
   
   // Step 7: Relaxation (per design v2 section 2)
+  // FORCE exact iterations when stepByStepRender is enabled (1 or 0 to isolate structural issues)
+  if (stepByStepRender) {
+    const debugRelaxIterations = options.politicsMode?.stepByStepRelaxIterations ?? 1;
+    if (options.politicsMode?.relaxationIterations !== undefined && options.politicsMode.relaxationIterations !== debugRelaxIterations) {
+      console.log('[buildStalbergQuadGrid] STEP-BY-STEP DEBUG: Forcing relaxation to ' + debugRelaxIterations + ' iteration(s) (was ' + options.politicsMode.relaxationIterations + ')');
+    }
+    options.politicsMode = options.politicsMode || {};
+    options.politicsMode.relaxationIterations = debugRelaxIterations; // Force exact iterations for step-by-step debug
+  }
   // Relax Level 0 quads first
-  const relaxationIterations = options.politicsMode?.relaxationIterations ?? 200;
-  const dampingFactor = options.politicsMode?.dampingFactor ?? 0.3;
+  // Optimized iterations (80-120) for convergence without over-movement, higher damping to prevent oscillation
+  // DIAGNOSTIC: testLowRelaxation flag for testing minimal relaxation (1 iteration)
+  // EARLY RELAX: Skip late relaxation if early relaxation was applied
+  let relaxationIterations = 0; // Initialize for logging
+  const dampingFactor = options.politicsMode?.dampingFactor ?? 0.5;
   
-  const level0NeighborMap = buildNeighborMap(points, level0Quads);
-  relaxGrid(points, level0NeighborMap, relaxationIterations, dampingFactor);
-  
-  // Update Level 0 quad centers after relaxation
-  for (const quad of level0Quads) {
-    quad.center = calculateQuadCenter(quad.verts, points);
+  if (earlyRelaxationApplied) {
+    console.log('[buildStalbergQuadGrid] Skipping late relaxation (early relaxation already applied)');
+    relaxationIterations = 0; // No late relaxation
+    // Update quad centers without relaxation
+    for (const quad of level0Quads) {
+      quad.center = calculateQuadCenter(quad.verts, points);
+    }
+    if (level1Quads.length > 0) {
+      for (const quad of level1Quads) {
+        quad.center = calculateQuadCenter(quad.verts, points);
+      }
+    }
+  } else {
+    // Normal late relaxation (current behavior)
+    relaxationIterations = options.politicsMode?.testLowRelaxation
+      ? 1
+      : (options.politicsMode?.relaxationIterations ?? 100);
+    
+    if (options.politicsMode?.testLowRelaxation) {
+      console.log('[buildStalbergQuadGrid] DIAGNOSTIC MODE: testLowRelaxation=true, using 1 iteration only');
+      console.log('[buildStalbergQuadGrid] Relaxation test: iterations=1, center chaos? Manual check required');
+    }
+    
+    const level0NeighborMap = buildNeighborMap(points, level0Quads);
+    relaxGrid(points, level0NeighborMap, relaxationIterations, dampingFactor, options);
+    
+    // Update Level 0 quad centers after relaxation
+    for (const quad of level0Quads) {
+      quad.center = calculateQuadCenter(quad.verts, points);
+    }
+    
+    // Relax Level 1 quads only if they exist
+    if (level1Quads.length > 0) {
+      const level1NeighborMap = buildNeighborMap(points, level1Quads);
+      relaxGrid(points, level1NeighborMap, relaxationIterations, dampingFactor, options);
+      
+      // Update Level 1 quad centers after relaxation
+      for (const quad of level1Quads) {
+        quad.center = calculateQuadCenter(quad.verts, points);
+      }
+    }
   }
   
-  // Relax Level 1 quads (re-build neighbor map for level 1)
-  const level1NeighborMap = buildNeighborMap(points, level1Quads);
-  relaxGrid(points, level1NeighborMap, relaxationIterations, dampingFactor);
+  // Step 8: Apply dual offset for rounded corners (per design v2 section 2)
+  // Reduced offset factor to prevent edge crossings (0.35 = 35% move toward center)
+  const dualOffsetFactor = options.politicsMode?.dualOffsetFactor ?? 0.35;
+  console.log(`[buildStalbergQuadGrid] Applying dual offset with factor ${dualOffsetFactor}`);
+  const dualPoints = applyDualOffset(points, level0Quads, dualOffsetFactor);
   
-  // Update Level 1 quad centers after relaxation
-  for (const quad of level1Quads) {
-    quad.center = calculateQuadCenter(quad.verts, points);
+  // STEP-BY-STEP DEBUG: Capture Stage 6 (after relaxation + dual offset - final)
+  if (stepByStepRender && pipelineStages) {
+    pipelineStages.stage6_final = {
+      points: points.map(p => ({ x: p.x, y: p.y })),
+      dualPoints: dualPoints.map(p => ({ x: p.x, y: p.y })),
+      level0Quads: level0Quads.map(q => ({
+        verts: [...q.verts],
+        center: { x: q.center.x, y: q.center.y },
+      })),
+    };
+    console.log('[buildStalbergQuadGrid] Rendered pipeline stage 6: After relaxation + dual offset (final)');
   }
   
-  return {
+  // Step 9: Calculate cell uniformity metrics (post-relaxation analysis)
+  if (level0Quads.length > 0) {
+    const cellAreas = [];
+    for (const quad of level0Quads) {
+      if (quad.verts && quad.verts.length >= 3) {
+        // Simple area calculation using shoelace formula
+        const verts = quad.verts.map(vIdx => points[vIdx]);
+        let area = 0;
+        for (let j = 0; j < verts.length; j++) {
+          const v1 = verts[j];
+          const v2 = verts[(j + 1) % verts.length];
+          area += v1.x * v2.y - v2.x * v1.y;
+        }
+        area = Math.abs(area) / 2;
+        if (isFinite(area) && area > 0) {
+          cellAreas.push(area);
+        }
+      }
+    }
+    
+    if (cellAreas.length > 0) {
+      const avgArea = cellAreas.reduce((a, b) => a + b, 0) / cellAreas.length;
+      const variance = cellAreas.reduce((sum, area) => sum + Math.pow(area - avgArea, 2), 0) / cellAreas.length;
+      const stdDev = Math.sqrt(variance);
+      const coefficientOfVariation = (stdDev / avgArea) * 100;
+      const relaxationMode = options.politicsMode?.testLowRelaxation ? 'DIAGNOSTIC (1 iter)' : 'NORMAL';
+      console.log(`[buildStalbergQuadGrid] Cell uniformity check (${relaxationMode}): avg cell size ~${avgArea.toFixed(2)}, variance ${variance.toFixed(2)}, CV ${coefficientOfVariation.toFixed(1)}%`);
+    }
+  }
+  
+  // Log relaxation parameters for debugging
+  console.log(`[buildStalbergQuadGrid] Relaxation parameters: iterations=${relaxationIterations}, damping=${dampingFactor}, offsetFactor=${dualOffsetFactor}, adaptiveDamping=enabled, softBoundary=enabled`);
+  console.log(`[buildStalbergQuadGrid] Dual offset complete: ${dualPoints.length} dual points generated`);
+  
+  // Store raw Delaunay triangles if available (for wireframe rendering)
+  const result = {
     points,
+    dualPoints,
     level0Quads,
     level1Quads,
   };
+  
+  // Add raw triangles if they were generated (for temporary wireframe rendering)
+  if (rawDelaunayTriangles !== null && rawDelaunayTriangles !== undefined) {
+    result.rawDelaunayTriangles = rawDelaunayTriangles;
+    console.log(`[buildStalbergQuadGrid] Stored ${rawDelaunayTriangles.length / 3} raw triangles for wireframe rendering`);
+  }
+  
+  // Add pipeline stages for step-by-step rendering
+  if (stepByStepRender && pipelineStages) {
+    result.pipelineStages = pipelineStages;
+    console.log('[buildStalbergQuadGrid] Step-by-step debug: Captured 6 pipeline stages');
+  }
+  
+  return result;
 }
 
 /**
@@ -146,6 +569,359 @@ function createHexagonalPoints(layers, rng) {
   }
   
   return points;
+}
+
+/**
+ * Create elliptical points using Vogel/Fibonacci spiral distribution
+ * Generates a clean, near-perfect circular/elliptical point distribution
+ * that naturally fits an ellipse without requiring heavy post-processing.
+ * 
+ * Uses golden angle (≈2.39996 radians) for uniform spacing in spiral.
+ * Points are distributed with ~sqrt(i) radius growth for even density.
+ * 
+ * @param {number} count - Number of points to generate (~5000-8000)
+ * @param {number} aspectRatio - Horizontal stretch factor (default: 1.22 for elliptical shape)
+ * @param {Object} rng - RNG instance (for potential future shuffling)
+ * @returns {Array} Array of {x, y} points centered at origin
+ */
+function createEllipticalPoints(count, aspectRatio = 1.22, rng) {
+  const points = [];
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5)); // ≈2.39996 radians
+  
+  // Base radius tuned to fill ~80-90% of target viewBox (r≈500)
+  // Scale factor adjusted to match target distribution
+  const baseRadius = 480;
+  
+  for (let i = 0; i < count; i++) {
+    // Vogel spiral: angle grows by golden angle, radius grows ~sqrt(i)
+    const theta = i * goldenAngle;
+    const r = Math.sqrt(i / count) * baseRadius;
+    
+    // Apply elliptical warping: stretch X by aspectRatio
+    const x = r * Math.cos(theta) * aspectRatio;
+    const y = r * Math.sin(theta);
+    
+    points.push({ x, y });
+  }
+  
+  // Optional: Light shuffle to break perfect spiral look (commented out for now)
+  // This preserves the clean distribution while adding slight randomness
+  // if (rng) {
+  //   for (let i = points.length - 1; i > 0; i--) {
+  //     const j = Math.floor(rng.random() * (i + 1));
+  //     [points[i], points[j]] = [points[j], points[i]];
+  //   }
+  // }
+  
+  return points;
+}
+
+/**
+ * Create elliptical hex lattice points (clipped/warped hex grid for stack-ability)
+ * Pivoted to hex lattice for stack-ability - generates hexagonal lattice points
+ * that are clipped or warped to fit within an elliptical boundary.
+ * 
+ * This provides better tiling/stack-ability compared to spiral distribution
+ * while maintaining uniform density and elliptical shape.
+ * 
+ * @param {number} layers - Number of hex layers/rings (default: 50)
+ * @param {number} hexSize - Size of hex cells (default: 10)
+ * @param {number} aspectRatio - Horizontal stretch factor for ellipse (default: 1.22)
+ * @param {Object} rng - RNG instance for noise/shuffling
+ * @returns {Array} Array of {x, y} points centered at origin, clipped to ellipse
+ */
+function createEllipticalHexPoints(layers = 50, hexSize = 10, aspectRatio = 1.22, rng) {
+  const points = [];
+  const maxRadius = 480; // Target max radius (~500 for viewBox)
+  const noiseScale = hexSize / 10; // Light noise for organic feel
+  
+  // Center point
+  points.push({ x: 0, y: 0 });
+  
+  // Generate hex points using axial coordinates (q, r)
+  for (let q = -layers; q <= layers; q++) {
+    const r1 = Math.max(-layers, -q - layers);
+    const r2 = Math.min(layers, -q + layers);
+    for (let r = r1; r <= r2; r++) {
+      if (q === 0 && r === 0) continue; // Skip center (already added)
+      
+      // Convert axial to pixel coordinates
+      let x = (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r) * hexSize;
+      let y = (3 / 2 * r) * hexSize;
+      
+      // Check if point is inside ellipse: (x/aspectR)^2 + y^2 <= r^2
+      const ellipseX = x / aspectRatio;
+      const distFromCenter = Math.sqrt(ellipseX * ellipseX + y * y);
+      
+      if (distFromCenter > maxRadius) {
+        // Point is outside ellipse - warp inward slightly (multiply by 0.95)
+        const warpFactor = 0.95;
+        x *= warpFactor;
+        y *= warpFactor;
+        
+        // Re-check after warping
+        const ellipseXWarped = x / aspectRatio;
+        const distWarped = Math.sqrt(ellipseXWarped * ellipseXWarped + y * y);
+        
+        // If still outside, skip this point
+        if (distWarped > maxRadius) {
+          continue;
+        }
+      }
+      
+      // Add light noise for organic feel
+      if (rng) {
+        x += (rng.random() - 0.5) * noiseScale;
+        y += (rng.random() - 0.5) * noiseScale;
+      }
+      
+      points.push({ x, y });
+    }
+  }
+  
+  // Light shuffle for organic feel (optional)
+  if (rng && points.length > 1) {
+    for (let i = points.length - 1; i > 0; i--) {
+      const j = Math.floor(rng.random() * (i + 1));
+      [points[i], points[j]] = [points[j], points[i]];
+    }
+  }
+  
+  return points;
+}
+
+/**
+ * Create transformed hex points (perfect hex grid with post-transform for clean border)
+ * Clean hexagonal border via post-transform of perfect hex grid
+ * 
+ * Generates a perfect concentric hexagonal grid first, then applies affine transformation
+ * to create an elliptical shape. This preserves the clean hexagonal outer border
+ * (full hex sides visible) while achieving the desired elliptical overall shape.
+ * 
+ * @param {number} hexRings - Number of hex rings (default: 45)
+ * @param {number} hexSize - Size of hex cells (default: 12)
+ * @param {number} aspect - Horizontal stretch factor for ellipse (default: 1.22)
+ * @param {Object} rng - RNG instance for noise/shuffling
+ * @returns {Array} Array of {x, y} points centered at origin, transformed to ellipse
+ */
+function createTransformedHexPoints(hexRings = 45, hexSize = 12, aspect = 1.22, rng) {
+  const points = [];
+  const noiseScale = hexSize / 12; // Light noise for organic feel
+  
+  // CORRECT SCALING: Calculate scale to fit target radius (~500px) after aspect stretch
+  const targetRadius = 500;
+  
+  // True max radius before aspect (flat-top hex dominant axis)
+  const maxRaw = hexRings * hexSize * Math.sqrt(3);
+  
+  // After aspect stretch on x
+  const maxAfterAspect = maxRaw * aspect;
+  
+  const scaleToFit = targetRadius / maxAfterAspect;
+  
+  console.log(`[createTransformedHexPoints] Scaling: hexRings=${hexRings}, hexSize=${hexSize}, maxRaw=${maxRaw.toFixed(1)}, maxAfterAspect=${maxAfterAspect.toFixed(1)}, scaleToFit=${scaleToFit.toFixed(4)}`);
+  
+  // Step 1: Generate perfect concentric hex rings (axial coordinates q, r)
+  // Center point
+  points.push({ x: 0, y: 0 });
+  
+  // Generate all hex points for rings 0 to hexRings
+  // Locked boundary for immutable hex border during relaxation
+  let boundaryCount = 0;
+  for (let q = -hexRings; q <= hexRings; q++) {
+    const r1 = Math.max(-hexRings, -q - hexRings);
+    const r2 = Math.min(hexRings, -q + hexRings);
+    for (let r = r1; r <= r2; r++) {
+      if (q === 0 && r === 0) continue; // Skip center (already added)
+      
+      // Convert axial to pixel coordinates (perfect hex grid)
+      // Apply scale FIRST, right after calculating raw x/y
+      const x = (Math.sqrt(3) * q + Math.sqrt(3) / 2 * r) * hexSize;
+      const y = (3 / 2 * r) * hexSize;
+      
+      // Apply scale to fit target
+      const p = { x: x * scaleToFit, y: y * scaleToFit };
+      
+      // Then apply aspect stretch
+      p.x *= aspect;
+      
+      // Tag boundary points (outermost ring) - these will be locked during relaxation
+      // A point is on the boundary if it's at the edge of the hex grid
+      const isBoundary = (q === -hexRings || q === hexRings || 
+                          r === -hexRings || r === hexRings ||
+                          q + r === -hexRings || q + r === hexRings);
+      
+      if (isBoundary) {
+        p.isBoundary = true;
+        boundaryCount++;
+      }
+      
+      points.push(p);
+    }
+  }
+  console.log(`[createTransformedHexPoints] Tagged ${boundaryCount} boundary points (outermost ring)`);
+  
+  // Step 2: Add light noise for organic feel (after transformation)
+  if (rng) {
+    for (const p of points) {
+      p.x += (rng.random() - 0.5) * noiseScale;
+      p.y += (rng.random() - 0.5) * noiseScale;
+    }
+  }
+  
+  // Step 3: Light shuffle for organic feel (optional)
+  if (rng && points.length > 1) {
+    for (let i = points.length - 1; i > 0; i--) {
+      const j = Math.floor(rng.random() * (i + 1));
+      [points[i], points[j]] = [points[j], points[i]];
+    }
+  }
+  
+  // NO OTHER SCALES HERE – remove any finalScale, 0.92, 0.88, etc.
+  // Step 4: Recenter to origin
+  let sumX = 0, sumY = 0;
+  for (const p of points) {
+    sumX += p.x;
+    sumY += p.y;
+  }
+  const centroidX = sumX / points.length;
+  const centroidY = sumY / points.length;
+  
+  // Recenter to origin
+  for (const p of points) {
+    p.x -= centroidX;
+    p.y -= centroidY;
+  }
+  
+  // Bounds check logging
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  points.forEach(p => {
+    minX = Math.min(minX, p.x);
+    maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y);
+    maxY = Math.max(maxY, p.y);
+  });
+  console.log(`[createTransformedHexPoints] Final grid bounds: minX=${minX.toFixed(1)}, maxX=${maxX.toFixed(1)}, minY=${minY.toFixed(1)}, maxY=${maxY.toFixed(1)}, width=${(maxX-minX).toFixed(1)}, height=${(maxY-minY).toFixed(1)}`);
+  
+  return points;
+}
+
+/**
+ * Triangulate points using Delaunator (fast O(n log n) Delaunay triangulation)
+ * @param {Array} points - Array of {x, y} points
+ * @param {Array} pointIndices - Array of point indices
+ * @param {Function} DelaunatorClass - Delaunator class
+ * @returns {Array} Array of triangles {type: 'triangle', verts: [i1, i2, i3]}
+ */
+function triangulateFromPointsWithDelaunator(points, pointIndices, DelaunatorClass) {
+  // Convert points to array of [x, y] pairs for Delaunator
+  // Delaunator expects [[x0, y0], [x1, y1], ...] format
+  const coords = points.map(p => [p.x, p.y]);
+  
+  // Create Delaunay triangulation
+  const delaunay = DelaunatorClass.from(coords);
+  const triangles = [];
+  const edgeSet = new Set();
+  
+  // Debug: Check Delaunator output
+  console.log(`[triangulateFromPointsWithDelaunator] Input: ${points.length} points, coords length: ${coords.length}`);
+  console.log(`[triangulateFromPointsWithDelaunator] Delaunay triangles length: ${delaunay.triangles ? delaunay.triangles.length : 'undefined'}`);
+  
+  // Extract triangles from Delaunay triangulation
+  // delaunay.triangles is a flat array: [t0a, t0b, t0c, t1a, t1b, t1c, ...]
+  if (!delaunay.triangles || delaunay.triangles.length === 0) {
+    console.warn('[triangulateFromPointsWithDelaunator] No triangles returned from Delaunator');
+    return { triangles: [], rawTriangles: null };
+  }
+  
+  // Store raw triangle indices for wireframe rendering (before deduplication)
+  const rawTriangles = Array.from(delaunay.triangles);
+  
+  for (let i = 0; i < delaunay.triangles.length; i += 3) {
+    const i0 = delaunay.triangles[i];
+    const i1 = delaunay.triangles[i + 1];
+    const i2 = delaunay.triangles[i + 2];
+    
+    // Map to point indices
+    const v0 = pointIndices[i0];
+    const v1 = pointIndices[i1];
+    const v2 = pointIndices[i2];
+    
+    // Create sorted key to avoid duplicates
+    const triKey = [v0, v1, v2].sort((a, b) => a - b).join(',');
+    
+    if (!edgeSet.has(triKey)) {
+      edgeSet.add(triKey);
+      triangles.push({
+        type: 'triangle',
+        verts: [v0, v1, v2],
+      });
+    }
+  }
+  
+  return { triangles, rawTriangles };
+}
+
+/**
+ * Triangulate points using simple nearest-neighbor approach (fallback, slow O(n²))
+ * Only use this if Delaunator is not available
+ * @param {Array} points - Array of {x, y} points
+ * @param {Array} pointIndices - Array of point indices
+ * @returns {Array} Array of triangles {type: 'triangle', verts: [i1, i2, i3]}
+ */
+function triangulateFromPointsSimple(points, pointIndices) {
+  // For small point sets only (warn if too large)
+  if (points.length > 1000) {
+    console.warn(`[triangulateFromPointsSimple] Large point set (${points.length}), consider using Delaunator for better performance`);
+  }
+  
+  const triangles = [];
+  const edgeSet = new Set();
+  const k = 6; // Number of nearest neighbors to consider
+  
+  // Helper: Calculate distance between two points
+  function distance(p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+  
+  // For each point, find k nearest neighbors and create triangles
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const neighbors = [];
+    
+    // Find k nearest neighbors
+    for (let j = 0; j < points.length; j++) {
+      if (i === j) continue;
+      const dist = distance(p, points[j]);
+      neighbors.push({ index: j, distance: dist });
+    }
+    
+    // Sort by distance and take k nearest
+    neighbors.sort((a, b) => a.distance - b.distance);
+    const nearest = neighbors.slice(0, k).map(n => n.index);
+    
+    // Create triangles with nearest neighbors (connect to pairs)
+    for (let ni = 0; ni < nearest.length; ni++) {
+      const n1 = nearest[ni];
+      const n2 = nearest[(ni + 1) % nearest.length];
+      
+      // Create triangle [i, n1, n2] if not already exists
+      const triKey = [pointIndices[i], pointIndices[n1], pointIndices[n2]]
+        .sort((a, b) => a - b).join(',');
+      
+      if (!edgeSet.has(triKey)) {
+        edgeSet.add(triKey);
+        triangles.push({
+          type: 'triangle',
+          verts: [pointIndices[i], pointIndices[n1], pointIndices[n2]],
+        });
+      }
+    }
+  }
+  
+  return triangles;
 }
 
 /**
@@ -214,13 +990,21 @@ function triangulateFromHex(hexPoints, hexPointIndices) {
  * @param {number} dissolveProbability - Probability of attempting dissolution (0.0-1.0, default 0.5)
  * @returns {Array} Array of quads and remaining triangles
  */
-function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5) {
+function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false) {
+  // STEP-BY-STEP DEBUG: Detailed logging
+  if (debugMode) {
+    console.log(`[dissolveEdgesToQuads] STARTING: ${triangles.length} input triangles, ${points.length} points, dissolveProbability=${dissolveProbability}`);
+  }
+  
   // Work with a mutable copy of triangles
   const workingTriangles = triangles.map(t => ({ ...t, verts: [...t.verts] }));
   const quads = [];
   const maxAttempts = workingTriangles.length * 3;
   let dissolveCount = 0;
   let attempts = 0;
+  let edgesDissolved = 0;
+  let invalidEdgeAttempts = 0;
+  let degenerateQuadAttempts = 0;
   
   // Build edge map: edge -> [triangle indices that share this edge]
   // Edge is represented as sorted pair of vertex indices
@@ -344,7 +1128,8 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     attempts++;
     
     // Rebuild edge map (triangles may have been removed)
-    const edgeMap = buildEdgeMap(workingTriangles.filter(t => !t.removed));
+    const activeTriangles = workingTriangles.filter(t => !t.removed);
+    const edgeMap = buildEdgeMap(activeTriangles);
     
     // Get all internal edges (shared by exactly 2 triangles)
     const internalEdges = Array.from(edgeMap.entries())
@@ -352,6 +1137,9 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       .map(([edgeKey]) => edgeKey);
     
     if (internalEdges.length === 0) {
+      if (debugMode && attempts === 1) {
+        console.log(`[dissolveEdgesToQuads] WARNING: No internal edges found on first attempt! Active triangles: ${activeTriangles.length}`);
+      }
       break; // No more internal edges to dissolve
     }
     
@@ -363,22 +1151,68 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
     const selectedEdge = internalEdges[randomEdgeIndex];
     
-    // Check if we can dissolve this edge
-    if (canDissolveEdge(selectedEdge, edgeMap, workingTriangles)) {
-      const sharingTriangles = edgeMap.get(selectedEdge);
+    // Check if we can dissolve this edge (with detailed failure logging)
+    const sharingTriangles = edgeMap.get(selectedEdge);
+    let canDissolve = true;
+    let failureReason = '';
+    
+    if (!sharingTriangles || sharingTriangles.length !== 2) {
+      canDissolve = false;
+      failureReason = `edge shared by ${sharingTriangles?.length || 0} triangles (expected 2)`;
+    } else {
+      const [tri1Idx, tri2Idx] = sharingTriangles;
+      const tri1 = workingTriangles[tri1Idx];
+      const tri2 = workingTriangles[tri2Idx];
+      
+      if (!tri1 || !tri2) {
+        canDissolve = false;
+        failureReason = 'triangle missing';
+      } else if (tri1.removed || tri2.removed) {
+        canDissolve = false;
+        failureReason = 'triangle already removed';
+      } else {
+        const allVerts = [...new Set([...tri1.verts, ...tri2.verts])];
+        if (allVerts.length !== 4) {
+          canDissolve = false;
+          failureReason = `${allVerts.length} unique vertices (expected 4), tri1: [${tri1.verts.join(',')}], tri2: [${tri2.verts.join(',')}]`;
+        }
+      }
+    }
+    
+    if (canDissolve) {
       const [tri1Idx, tri2Idx] = sharingTriangles;
       const tri1 = workingTriangles[tri1Idx];
       const tri2 = workingTriangles[tri2Idx];
       
       // Merge into quad
       const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
-      quads.push(quad);
+      
+      // Validate quad (must have 4 vertices)
+      if (quad.verts.length !== 4) {
+        degenerateQuadAttempts++;
+        if (debugMode && degenerateQuadAttempts <= 10) {
+          console.log(`[dissolveEdgesToQuads] Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices (expected 4), tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
+        }
+        continue; // Invalid quad
+      }
       
       // Mark triangles as removed
       tri1.removed = true;
       tri2.removed = true;
       
+      // Add quad
+      quads.push(quad);
       dissolveCount++;
+      edgesDissolved++;
+      
+      if (debugMode && edgesDissolved <= 5) {
+        console.log(`[dissolveEdgesToQuads] Successfully dissolved edge ${selectedEdge} into quad with verts: [${quad.verts.join(',')}]`);
+      }
+    } else {
+      invalidEdgeAttempts++;
+      if (debugMode && invalidEdgeAttempts <= 10) {
+        console.log(`[dissolveEdgesToQuads] Cannot dissolve edge ${selectedEdge}: ${failureReason}`);
+      }
     }
   }
   
@@ -386,6 +1220,44 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   const remainingTriangles = workingTriangles
     .filter(t => !t.removed)
     .map(t => ({ type: 'triangle', verts: t.verts }));
+  
+  // STEP-BY-STEP DEBUG: Final statistics
+  if (debugMode) {
+    const finalQuadCount = quads.length;
+    const finalTriangleCount = remainingTriangles.length;
+    const totalShapes = finalQuadCount + finalTriangleCount;
+    console.log(`[dissolveEdgesToQuads] COMPLETED: ${attempts} attempts, ${edgesDissolved} edges dissolved, ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
+    console.log(`[dissolveEdgesToQuads] RESULT: ${totalShapes} total shapes (${finalQuadCount} quads, ${finalTriangleCount} triangles)`);
+    console.log(`[dissolveEdgesToQuads] DISSOLUTION RATE: ${attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) : 0}% success rate`);
+    console.log(`[dissolveEdgesToQuads] TRIANGLE-TO-QUAD CONVERSION: ${finalQuadCount} quads from ${triangles.length} triangles = ${((finalQuadCount / triangles.length) * 100).toFixed(1)}% conversion rate`);
+    console.log(`[dissolveEdgesToQuads] FAILURE BREAKDOWN: ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
+    
+    // Export Stage 2/3 data summary for debugging
+    if (debugMode) {
+      const stage2Data = {
+        triangles: triangles.length,
+        points: points.length,
+        avgTriangleArea: triangles.reduce((sum, t) => {
+          const [v0, v1, v2] = t.verts;
+          const area = Math.abs((points[v0].x * (points[v1].y - points[v2].y) + 
+                                 points[v1].x * (points[v2].y - points[v0].y) + 
+                                 points[v2].x * (points[v0].y - points[v1].y)) / 2);
+          return sum + area;
+        }, 0) / triangles.length
+      };
+      
+      const stage3Data = {
+        totalShapes: totalShapes,
+        quads: finalQuadCount,
+        triangles: finalTriangleCount,
+        dissolutionSuccessRate: attempts > 0 ? (edgesDissolved / attempts) * 100 : 0,
+        conversionRate: (finalQuadCount / triangles.length) * 100
+      };
+      
+      console.log(`[dissolveEdgesToQuads] STAGE 2 DATA:`, JSON.stringify(stage2Data, null, 2));
+      console.log(`[dissolveEdgesToQuads] STAGE 3 DATA:`, JSON.stringify(stage3Data, null, 2));
+    }
+  }
   
   // Return quads + remaining triangles
   return [...quads, ...remainingTriangles];
@@ -445,6 +1317,9 @@ function subdivideQuadIntoFour(quad, points, addPoint, midpoint) {
   const p2 = points[v2];
   const p3 = points[v3];
   
+  // FIX 3: Check if any parent vertex is boundary - tag new points accordingly
+  const hasBoundaryParent = (p0.isBoundary || p1.isBoundary || p2.isBoundary || p3.isBoundary);
+  
   // Calculate midpoints
   const mid01 = midpoint(p0, p1);
   const mid12 = midpoint(p1, p2);
@@ -457,12 +1332,22 @@ function subdivideQuadIntoFour(quad, points, addPoint, midpoint) {
   const i23 = addPoint(mid23);
   const i30 = addPoint(mid30);
   
+  // Tag new points as boundary if parent was boundary
+  if (hasBoundaryParent) {
+    if (points[i01]) points[i01].isBoundary = true;
+    if (points[i12]) points[i12].isBoundary = true;
+    if (points[i23]) points[i23].isBoundary = true;
+    if (points[i30]) points[i30].isBoundary = true;
+  }
+  
   // Calculate center
   const center = {
     x: (p0.x + p1.x + p2.x + p3.x) / 4,
     y: (p0.y + p1.y + p2.y + p3.y) / 4,
   };
   const ic = addPoint(center);
+  
+  // Center is interior, not boundary
   
   // Create 4 sub-quads
   return [
@@ -534,15 +1419,110 @@ export function buildNeighborMap(points, quads) {
 }
 
 /**
+ * Apply dual offset to points for rounded corners (Townscaper-style)
+ * Moves each quad vertex inward toward the quad center by a fixed factor
+ * @param {Array} points - Original points array
+ * @param {Array} quads - Quads array (with verts property)
+ * @param {number} offsetFactor - Offset factor (default: 0.30, 30% of distance to center)
+ * @returns {Array} New array of dual points with offset applied
+ */
+function applyDualOffset(points, quads, offsetFactor = 0.30) {
+  console.log(`[applyDualOffset] Starting: ${points.length} points, ${quads.length} quads, offsetFactor=${offsetFactor}`);
+  const dualPoints = points.map(p => ({ x: p.x, y: p.y })); // Copy original points
+  let pointsModified = 0;
+  
+  let sampleLogged = false;
+  
+  for (const quad of quads) {
+    if (!quad.verts || quad.verts.length < 3) continue;
+    
+    // Compute quad center
+    let cx = 0, cy = 0;
+    for (const v of quad.verts) {
+      cx += points[v].x;
+      cy += points[v].y;
+    }
+    cx /= quad.verts.length;
+    cy /= quad.verts.length;
+    
+    // Calculate minimum edge length for clamping
+    let minEdgeLength = Infinity;
+    for (let i = 0; i < quad.verts.length; i++) {
+      const v0 = points[quad.verts[i]];
+      const v1 = points[quad.verts[(i + 1) % quad.verts.length]];
+      const edgeLen = Math.sqrt((v1.x - v0.x) ** 2 + (v1.y - v0.y) ** 2);
+      minEdgeLength = Math.min(minEdgeLength, edgeLen);
+    }
+    
+    // For each vertex, move inward toward center
+    // FIX 2: Preserve boundary points - don't offset them (maintains clean hex border)
+    for (const v of quad.verts) {
+      const p = points[v];
+      
+      // Skip boundary points - keep them fixed for clean border
+      if (p.isBoundary) {
+        continue; // Don't offset boundary points
+      }
+      
+      const dx = cx - p.x;
+      const dy = cy - p.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (dist < 1e-6) continue; // Avoid division by zero (center == vertex)
+      
+      // Validate input coordinates
+      if (!isFinite(p.x) || !isFinite(p.y) || !isFinite(cx) || !isFinite(cy)) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`[applyDualOffset] Invalid coordinates detected for quad vertex ${v}, skipping offset`);
+        }
+        continue; // Keep original position if invalid
+      }
+      
+      // Clamp move to avoid over-offset (max 10% of min edge length)
+      const move = Math.min(offsetFactor * dist, 0.1 * minEdgeLength);
+      
+      const newPos = {
+        x: p.x + (dx / dist) * move,
+        y: p.y + (dy / dist) * move,
+      };
+      
+      // Validate output coordinates
+      if (!isFinite(newPos.x) || !isFinite(newPos.y)) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`[applyDualOffset] Invalid coordinates after offset for vertex ${v}, keeping original position`);
+        }
+        continue; // Keep original position if offset produces invalid coordinates
+      }
+      
+      dualPoints[v] = newPos;
+      pointsModified++;
+      
+      // Debug: Log sample before/after for first quad's first vertex
+      if (!sampleLogged && quad.verts[0] === v) {
+        console.log(`[dualGrid] Dual offset applied — sample before/after for vert 0:`, 
+          `before: (${p.x.toFixed(3)}, ${p.y.toFixed(3)})`, 
+          `after: (${newPos.x.toFixed(3)}, ${newPos.y.toFixed(3)})`,
+          `move: ${move.toFixed(3)}, offsetFactor: ${offsetFactor}`);
+        sampleLogged = true;
+      }
+    }
+  }
+  
+  console.log(`[applyDualOffset] Completed: ${pointsModified} points modified, returning ${dualPoints.length} dual points`);
+  return dualPoints;
+}
+
+/**
  * Relax grid using Laplacian smoothing (per design v2 section 2)
  * Iteratively moves points to average of neighbors with damping factor
  * @param {Array} points - Points array (will be modified in place)
  * @param {Map} neighborMap - Map from point index to neighbor indices
  * @param {number} iterations - Number of relaxation iterations (default: 200)
  * @param {number} damping - Damping factor (default: 0.3)
+ * @param {Object} options - Optional options object for advanced features
  * @returns {Object} Stats object with iterations used and final movement
  */
-export function relaxGrid(points, neighborMap, iterations = 200, damping = 0.3) {
+export function relaxGrid(points, neighborMap, iterations = 200, damping = 0.3, options = {}) {
   let consecutiveLowMovement = 0;
   const EARLY_TERMINATION_THRESHOLD = 0.001;
   const MIN_ITERATIONS_FOR_EARLY_TERM = 50;
@@ -555,11 +1535,38 @@ export function relaxGrid(points, neighborMap, iterations = 200, damping = 0.3) 
     let pointsMoved = 0;
     
     // Accumulate forces (Laplacian smoothing: move toward average of neighbors)
+    // Locked boundary for immutable hex border during relaxation
+    let boundaryPointsLocked = 0;
     for (let i = 0; i < points.length; i++) {
       const point = points[i];
       const neighborIndices = neighborMap.get(i) || [];
       
       if (neighborIndices.length === 0) continue;
+      
+      // Skip boundary points - they remain fixed during relaxation
+      if (point.isBoundary) {
+        boundaryPointsLocked++;
+        continue;
+      }
+      
+      // FIX 3: Soften boundary locking - allow near-boundary points to move partially
+      // Check if point is near boundary (1-2 rings from boundary)
+      // This reduces edge expansion from hard boundary barrier
+      let boundaryScale = 1.0; // Default: full movement
+      if (options?.politicsMode?.softBoundary !== false) { // Default: enabled
+        // Count how many neighbors are boundary points
+        let boundaryNeighborCount = 0;
+        for (const neighborIdx of neighborIndices) {
+          if (points[neighborIdx]?.isBoundary) {
+            boundaryNeighborCount++;
+          }
+        }
+        // If 1-3 boundary neighbors, point is near-boundary - scale movement
+        if (boundaryNeighborCount > 0) {
+          // Linear scaling: 1 neighbor = 50% movement, 2 neighbors = 33%, 3+ = 25%
+          boundaryScale = 1.0 / (boundaryNeighborCount + 1);
+        }
+      }
       
       // Calculate average position of neighbors
       let avgX = 0;
@@ -572,9 +1579,31 @@ export function relaxGrid(points, neighborMap, iterations = 200, damping = 0.3) 
       avgX /= neighborIndices.length;
       avgY /= neighborIndices.length;
       
-      // Calculate force (damped movement toward average)
-      const forceX = (avgX - point.x) * damping;
-      const forceY = (avgY - point.y) * damping;
+      // FIX 1: Variable damping based on neighbor count to balance forces
+      // Points with more neighbors (center) get less damping to prevent compression
+      // Points with fewer neighbors (edges) get more damping to allow expansion
+      // Average neighbor count in hex grid is ~6, use as normalization
+      const avgNeighborCount = 6;
+      const neighborCount = neighborIndices.length;
+      const adaptiveDamping = damping * (avgNeighborCount / Math.max(neighborCount, 1));
+      // Clamp adaptive damping to reasonable range (0.2 - 1.0)
+      const clampedDamping = Math.max(0.2, Math.min(1.0, adaptiveDamping));
+      
+      // Calculate force (damped movement toward average with adaptive damping)
+      let forceX = (avgX - point.x) * clampedDamping;
+      let forceY = (avgY - point.y) * clampedDamping;
+      
+      // FIX 3 continued: Apply boundary softening factor
+      forceX *= boundaryScale;
+      forceY *= boundaryScale;
+      
+      // Validate force values before storing
+      if (!isFinite(forceX) || !isFinite(forceY)) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`[relaxGrid] Invalid force detected for point ${i}: (${forceX}, ${forceY}), skipping`);
+        }
+        continue;
+      }
       
       forces.set(i, { x: forceX, y: forceY });
       
@@ -584,10 +1613,34 @@ export function relaxGrid(points, neighborMap, iterations = 200, damping = 0.3) 
       pointsMoved++;
     }
     
-    // Apply forces
+    // Log boundary locking on first iteration
+    if (iter === 0 && boundaryPointsLocked > 0) {
+      console.log(`[relaxGrid] Boundary points locked: ${boundaryPointsLocked} of ${points.length}`);
+    }
+    
+    // Apply forces (boundary points are not in forces map, so they won't move)
+    // Validate and clamp points to prevent NaN/Infinity
+    let invalidPointsCount = 0;
     for (const [pointIdx, force] of forces) {
-      points[pointIdx].x += force.x;
-      points[pointIdx].y += force.y;
+      const newX = points[pointIdx].x + force.x;
+      const newY = points[pointIdx].y + force.y;
+      
+      // Check for NaN/Infinity and clamp if needed
+      if (!isFinite(newX) || !isFinite(newY)) {
+        invalidPointsCount++;
+        // Skip update if invalid - keep previous position
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn(`[relaxGrid] Invalid coordinates detected for point ${pointIdx}: (${newX}, ${newY}), keeping previous position`);
+        }
+        continue;
+      }
+      
+      points[pointIdx].x = newX;
+      points[pointIdx].y = newY;
+    }
+    
+    if (invalidPointsCount > 0 && iter === 0) {
+      console.warn(`[relaxGrid] Detected ${invalidPointsCount} invalid points in iteration ${iter + 1}, skipped updates`);
     }
     
     // Early termination check (per design v2 section 2)
