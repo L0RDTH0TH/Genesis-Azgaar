@@ -2186,7 +2186,67 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   // This determines if pairs are still available at end of main loop (cleanup should catch them)
   // Or if zero pairs already (isolation happened during main loop due to merge order)
   const preCleanupTriangles = workingTriangles.filter(t => !t.removed);
+  
+  // PAIR DETECTION AUDIT: Validate active triangles before building edgeMap
+  if (debugMode && preCleanupTriangles.length > 0) {
+    const trianglesWithRemovedFlag = preCleanupTriangles.filter(t => t.removed);
+    if (trianglesWithRemovedFlag.length > 0) {
+      console.warn(`[PAIR DETECTION] WARNING: ${trianglesWithRemovedFlag.length} triangles in activeTriangles still have removed=true!`, trianglesWithRemovedFlag.map(t => t.verts));
+    }
+    console.log(`[PAIR DETECTION] Pre-cleanup: ${preCleanupTriangles.length} active triangles (filtered from ${workingTriangles.length} total)`);
+  }
+  
   const preCleanupEdgeMap = buildEdgeMap(preCleanupTriangles);
+  
+  // PAIR DETECTION AUDIT: Dump full edgeMap summary
+  if (debugMode && preCleanupTriangles.length > 0) {
+    let sharing1Count = 0;
+    let sharing2Count = 0;
+    let sharingMoreCount = 0;
+    const sharing2Edges = [];
+    
+    for (const [edgeKey, triObjects] of preCleanupEdgeMap.entries()) {
+      const sharingCount = triObjects.length;
+      if (sharingCount === 1) sharing1Count++;
+      else if (sharingCount === 2) {
+        sharing2Count++;
+        // PAIR DETECTION AUDIT: Detailed logging for sharing=2 edges
+        if (!triObjects[0].removed && !triObjects[1].removed) {
+          const tri1 = triObjects[0];
+          const tri2 = triObjects[1];
+          const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+          const isBorder = isBorderAdjacentEdge(edgeKey);
+          
+          sharing2Edges.push({
+            edgeKey,
+            tri1Verts: tri1.verts,
+            tri2Verts: tri2.verts,
+            sharedVerts: sharedVerts,
+            isBorder: isBorder,
+            tri1: tri1,
+            tri2: tri2
+          });
+          
+          if (debugMode && sharing2Edges.length <= 10) {
+            console.log(`[PAIR DETECTION] Sharing=2 edge: ${edgeKey}, tris: [${tri1.verts.join(',')}] & [${tri2.verts.join(',')}], shared verts: [${sharedVerts.join(',')}], border=${isBorder}`);
+          }
+        }
+      } else if (sharingCount > 2) {
+        sharingMoreCount++;
+        if (debugMode && sharingMoreCount <= 5) {
+          console.warn(`[PAIR DETECTION] ERROR: Edge ${edgeKey} shared by ${sharingCount} triangles (expected ≤2)!`, triObjects.map(t => t.verts));
+        }
+      }
+    }
+    
+    console.log(`[PAIR DETECTION] Pre-cleanup edgeMap summary: ${preCleanupEdgeMap.size} total edges, sharing=1: ${sharing1Count} (boundaries), sharing=2: ${sharing2Count} (pairs), sharing>2: ${sharingMoreCount} (errors)`);
+    
+    if (sharing2Count > 0 && debugMode) {
+      const borderPairs = sharing2Edges.filter(e => e.isBorder);
+      console.log(`[PAIR DETECTION] Pre-cleanup sharing=2 pairs: ${sharing2Edges.length} total (${borderPairs.length} border, ${sharing2Edges.length - borderPairs.length} interior)`);
+    }
+  }
+  
   let preCleanupRemainingPairs = 0;
   let preCleanupBorderPairs = 0;
   const preCleanupBorderPairDetails = [];
@@ -2202,15 +2262,32 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         continue; // True boundary edge - skip
       }
       
+      // PAIR DETECTION AUDIT: Verify shared vertices
+      const tri1 = triObjects[0];
+      const tri2 = triObjects[1];
+      const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+      const [v1, v2] = edgeKey.split(',').map(Number);
+      
+      if (sharedVerts.length !== 2) {
+        console.warn(`[DETECTION FAIL] Visual pair ${edgeKey} not detected correctly: sharedVerts.length=${sharedVerts.length} (expected 2), tri1=[${tri1.verts.join(',')}], tri2=[${tri2.verts.join(',')}]`);
+        continue; // Skip invalid pairs
+      }
+      
+      if (!sharedVerts.includes(v1) || !sharedVerts.includes(v2)) {
+        console.warn(`[DETECTION FAIL] Visual pair ${edgeKey} edgeKey mismatch: edgeKey verts [${v1},${v2}] not in sharedVerts [${sharedVerts.join(',')}]`);
+        continue; // Skip invalid pairs
+      }
+      
       preCleanupRemainingPairs++;
       if (isBorderAdjacentEdge(edgeKey)) {
         preCleanupBorderPairs++;
         preCleanupBorderPairDetails.push({
           edgeKey,
-          tri1Verts: triObjects[0].verts.join(','),
-          tri2Verts: triObjects[1].verts.join(','),
-          tri1: triObjects[0],
-          tri2: triObjects[1]
+          tri1Verts: tri1.verts.join(','),
+          tri2Verts: tri2.verts.join(','),
+          sharedVerts: sharedVerts.join(','),
+          tri1: tri1,
+          tri2: tri2
         });
       }
     }
@@ -2361,7 +2438,67 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   // POST-CLEANUP DIAGNOSTIC: Check remaining eligible pairs AFTER final cleanup
   // This confirms whether cleanup actually merged any remaining pairs or if something blocked it
   const postCleanupTriangles = workingTriangles.filter(t => !t.removed);
+  
+  // PAIR DETECTION AUDIT: Validate active triangles before building edgeMap
+  if (debugMode && postCleanupTriangles.length > 0) {
+    const trianglesWithRemovedFlag = postCleanupTriangles.filter(t => t.removed);
+    if (trianglesWithRemovedFlag.length > 0) {
+      console.warn(`[PAIR DETECTION] WARNING: ${trianglesWithRemovedFlag.length} triangles in post-cleanup activeTriangles still have removed=true!`, trianglesWithRemovedFlag.map(t => t.verts));
+    }
+    console.log(`[PAIR DETECTION] Post-cleanup: ${postCleanupTriangles.length} active triangles (filtered from ${workingTriangles.length} total)`);
+  }
+  
   const postCleanupEdgeMap = buildEdgeMap(postCleanupTriangles);
+  
+  // PAIR DETECTION AUDIT: Dump full edgeMap summary
+  if (debugMode && postCleanupTriangles.length > 0) {
+    let sharing1Count = 0;
+    let sharing2Count = 0;
+    let sharingMoreCount = 0;
+    const sharing2Edges = [];
+    
+    for (const [edgeKey, triObjects] of postCleanupEdgeMap.entries()) {
+      const sharingCount = triObjects.length;
+      if (sharingCount === 1) sharing1Count++;
+      else if (sharingCount === 2) {
+        sharing2Count++;
+        // PAIR DETECTION AUDIT: Detailed logging for sharing=2 edges
+        if (!triObjects[0].removed && !triObjects[1].removed) {
+          const tri1 = triObjects[0];
+          const tri2 = triObjects[1];
+          const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+          const isBorder = isBorderAdjacentEdge(edgeKey);
+          
+          sharing2Edges.push({
+            edgeKey,
+            tri1Verts: tri1.verts,
+            tri2Verts: tri2.verts,
+            sharedVerts: sharedVerts,
+            isBorder: isBorder,
+            tri1: tri1,
+            tri2: tri2
+          });
+          
+          if (debugMode && sharing2Edges.length <= 10) {
+            console.log(`[PAIR DETECTION] Post-cleanup sharing=2 edge: ${edgeKey}, tris: [${tri1.verts.join(',')}] & [${tri2.verts.join(',')}], shared verts: [${sharedVerts.join(',')}], border=${isBorder}`);
+          }
+        }
+      } else if (sharingCount > 2) {
+        sharingMoreCount++;
+        if (debugMode && sharingMoreCount <= 5) {
+          console.warn(`[PAIR DETECTION] ERROR: Edge ${edgeKey} shared by ${sharingCount} triangles (expected ≤2)!`, triObjects.map(t => t.verts));
+        }
+      }
+    }
+    
+    console.log(`[PAIR DETECTION] Post-cleanup edgeMap summary: ${postCleanupEdgeMap.size} total edges, sharing=1: ${sharing1Count} (boundaries), sharing=2: ${sharing2Count} (pairs), sharing>2: ${sharingMoreCount} (errors)`);
+    
+    if (sharing2Count > 0 && debugMode) {
+      const borderPairs = sharing2Edges.filter(e => e.isBorder);
+      console.log(`[PAIR DETECTION] Post-cleanup sharing=2 pairs: ${sharing2Edges.length} total (${borderPairs.length} border, ${sharing2Edges.length - borderPairs.length} interior)`);
+    }
+  }
+  
   let postCleanupRemainingPairs = 0;
   let postCleanupBorderPairs = 0;
   const postCleanupBorderPairDetails = [];
@@ -2377,13 +2514,30 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         continue; // True boundary edge - skip
       }
       
+      // PAIR DETECTION AUDIT: Verify shared vertices
+      const tri1 = triObjects[0];
+      const tri2 = triObjects[1];
+      const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+      const [v1, v2] = edgeKey.split(',').map(Number);
+      
+      if (sharedVerts.length !== 2) {
+        console.warn(`[DETECTION FAIL] Post-cleanup visual pair ${edgeKey} not detected correctly: sharedVerts.length=${sharedVerts.length} (expected 2), tri1=[${tri1.verts.join(',')}], tri2=[${tri2.verts.join(',')}]`);
+        continue; // Skip invalid pairs
+      }
+      
+      if (!sharedVerts.includes(v1) || !sharedVerts.includes(v2)) {
+        console.warn(`[DETECTION FAIL] Post-cleanup visual pair ${edgeKey} edgeKey mismatch: edgeKey verts [${v1},${v2}] not in sharedVerts [${sharedVerts.join(',')}]`);
+        continue; // Skip invalid pairs
+      }
+      
       postCleanupRemainingPairs++;
       if (isBorderAdjacentEdge(edgeKey)) {
         postCleanupBorderPairs++;
         postCleanupBorderPairDetails.push({
           edgeKey,
-          tri1Verts: triObjects[0].verts.join(','),
-          tri2Verts: triObjects[1].verts.join(',')
+          tri1Verts: tri1.verts.join(','),
+          tri2Verts: tri2.verts.join(','),
+          sharedVerts: sharedVerts.join(',')
         });
       }
     }

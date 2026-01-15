@@ -653,3 +653,176 @@ internalEdges.sort((a, b) => {
 
 **Implementation Date:** 2026-01-15  
 **Status:** Implemented - Ready for testing with border-priority sorting enabled
+
+---
+
+## 11. Dissolution Pair Detection Audit v1 (Iteration 34)
+
+### 11.1 Problem Statement
+
+**Issue:** Code reports pre/post-cleanup pairs = 0 (all triangles isolated), but screenshots show adjacent triangle pairs on boundaries that should be mergeable.
+
+**Root Cause Hypothesis:**
+- EdgeMap rebuilding may miss valid pairs (bug in `buildEdgeMap()`)
+- Removed flags may not be cleared correctly (triangles marked removed but still in list)
+- Shared edge detection may fail (edgeKey mismatch, vertex ordering issues)
+
+**Goal:** Debug why valid sharing=2 pairs are not detected, validate edgeMap rebuilding, removed flags, and shared edge detection.
+
+### 11.2 Enhanced EdgeMap Validation Logging
+
+**Location:** `src/core/dualGridStates.js` lines ~2006-2100
+
+**Implementation:**
+- **Pre-cleanup edgeMap dump:** Full summary of edgeMap before cleanup
+  - Total edges, sharing=1 count (boundaries), sharing=2 count (pairs), sharing>2 (errors)
+  - For each sharing=2 edge: Log edgeKey, tri1/2 indices, verts, shared verts, isBorderAdjacent
+- **Post-cleanup edgeMap dump:** Same summary after cleanup
+- **Removed flag validation:** Check for triangles with `removed=true` still in active list
+- **Shared vertex verification:** Verify shared verts exactly 2, edgeKey matches shared verts
+
+**Log Format:**
+```
+[PAIR DETECTION] Pre-cleanup: 26 active triangles (filtered from 234 total)
+[PAIR DETECTION] Pre-cleanup edgeMap summary: 78 total edges, sharing=1: 52 (boundaries), sharing=2: 0 (pairs), sharing>2: 0 (errors)
+[PAIR DETECTION] Sharing=2 edge: 72,74, tris: [72,100,74] & [72,74,55], shared verts: [72,74], border=true
+[DETECTION FAIL] Visual pair 72,74 not detected correctly: sharedVerts.length=3 (expected 2)
+```
+
+### 11.3 Removed Flag & Vertex Check
+
+**Implementation:**
+- Before building edgeMap: Log activeTriangles count, check for triangles with `removed=true`
+- For each potential pair: Verify shared verts exactly 2, edge actually in both triangles
+- If mismatch: Log `[DETECTION FAIL]` with reason (removed flag, verts mismatch, edgeKey mismatch)
+
+**Validation Checks:**
+1. **Removed Flag Check:**
+   ```javascript
+   const trianglesWithRemovedFlag = activeTriangles.filter(t => t.removed);
+   if (trianglesWithRemovedFlag.length > 0) {
+     console.warn(`[PAIR DETECTION] WARNING: ${trianglesWithRemovedFlag.length} triangles still have removed=true!`);
+   }
+   ```
+
+2. **Shared Vertex Verification:**
+   ```javascript
+   const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+   if (sharedVerts.length !== 2) {
+     console.warn(`[DETECTION FAIL] sharedVerts.length=${sharedVerts.length} (expected 2)`);
+   }
+   ```
+
+3. **EdgeKey Match Check:**
+   ```javascript
+   const [v1, v2] = edgeKey.split(',').map(Number);
+   if (!sharedVerts.includes(v1) || !sharedVerts.includes(v2)) {
+     console.warn(`[DETECTION FAIL] edgeKey verts [${v1},${v2}] not in sharedVerts [${sharedVerts.join(',')}]`);
+   }
+   ```
+
+### 11.4 Hardcoded Suspect Pairs
+
+**Implementation:**
+- Array of suspect edgeKeys from screenshots (user can update based on actual analysis)
+- Check if suspect edges exist in edgeMap
+- Log detailed info if found (sharingCount, triObjects, removed flags)
+- Warn if not found (may be merged or invalid)
+
+**Example:**
+```javascript
+const suspectEdgeKeys = [
+  "72,74",  // Example from previous logs
+  "2,52",   // Example from previous logs
+  "37,88"   // Example from previous logs
+];
+```
+
+**Status:** Placeholder array ready for user to populate with actual suspect edges from screenshots
+
+### 11.5 Expected Log Output
+
+**Pre-Cleanup:**
+```
+[PAIR DETECTION] Pre-cleanup: 26 active triangles (filtered from 234 total)
+[PAIR DETECTION] Pre-cleanup edgeMap summary: 78 total edges, sharing=1: 52 (boundaries), sharing=2: 0 (pairs), sharing>2: 0 (errors)
+[PAIR DETECTION] Pre-cleanup sharing=2 pairs: 0 total (0 border, 0 interior)
+```
+
+**If Pairs Found:**
+```
+[PAIR DETECTION] Sharing=2 edge: 72,74, tris: [72,100,74] & [72,74,55], shared verts: [72,74], border=true
+[PAIR DETECTION] Pre-cleanup sharing=2 pairs: 1 total (1 border, 0 interior)
+```
+
+**If Detection Fails:**
+```
+[DETECTION FAIL] Visual pair 72,74 not detected correctly: sharedVerts.length=3 (expected 2), tri1=[72,100,74], tri2=[72,74,55]
+[DETECTION FAIL] Visual pair 72,74 edgeKey mismatch: edgeKey verts [72,74] not in sharedVerts [72,74,100]
+```
+
+### 11.6 Test Results
+
+**Configuration:**
+- Density: 0.125 (`stepByStepDensityMultiplier`)
+- `dissolveProbability`: 1.0
+- Multiple runs: 5+ "Reset Grid" cycles
+
+**Results Table:**
+
+| Run # | Pre Active Tris | Pre Sharing=2 | Pre Border Pairs | Detection Fails | Post Sharing=2 | Post Border Pairs | Root Cause |
+|-------|----------------|---------------|-----------------|-----------------|----------------|-------------------|------------|
+| 1     | TBD            | TBD           | TBD             | TBD             | TBD            | TBD               | TBD        |
+| 2     | TBD            | TBD           | TBD             | TBD             | TBD            | TBD               | TBD        |
+| 3     | TBD            | TBD           | TBD             | TBD             | TBD            | TBD               | TBD        |
+
+**Status:** Ready for testing - Run 5+ "Reset Grid" cycles and capture edgeMap dumps
+
+### 11.7 Root Cause Analysis
+
+**Hypothesis 1: EdgeMap Rebuilding Bug**
+- `buildEdgeMap()` may not correctly identify sharing=2 edges
+- Triangle objects may not match correctly
+- **Evidence Needed:** EdgeMap dumps showing sharing=2 edges exist but not counted
+
+**Hypothesis 2: Removed Flag Not Cleared**
+- Triangles marked `removed=true` but still in active list
+- EdgeMap includes removed triangles, causing incorrect sharing counts
+- **Evidence Needed:** Logs showing triangles with `removed=true` in active list
+
+**Hypothesis 3: Shared Vertex Mismatch**
+- Triangles share more or fewer than 2 vertices
+- EdgeKey doesn't match shared vertices
+- **Evidence Needed:** `[DETECTION FAIL]` logs showing sharedVerts.length != 2 or edgeKey mismatch
+
+**Hypothesis 4: EdgeKey Format Issue**
+- EdgeKey may be incorrectly formatted (unsorted, wrong separator)
+- EdgeMap lookup fails due to format mismatch
+- **Evidence Needed:** EdgeMap dumps showing edgeKeys don't match expected format
+
+### 11.8 Recommendations & Fixes
+
+**Priority 1: Validate EdgeMap Rebuilding (IMPLEMENTED)**
+- ✅ Added full edgeMap summary dumps
+- ✅ Added sharing=2 edge detailed logging
+- ✅ Added removed flag validation
+
+**Priority 2: Fix Removed Flag Issues (IF FOUND)**
+- Clear `removed` flags before building edgeMap
+- Filter out removed triangles more aggressively
+- **Status:** ⏳ Pending evidence from logs
+
+**Priority 3: Fix Shared Vertex Detection (IF FOUND)**
+- Ensure triangles share exactly 2 vertices
+- Verify edgeKey matches shared vertices
+- **Status:** ⏳ Pending evidence from logs
+
+**Priority 4: Fix EdgeKey Format (IF FOUND)**
+- Ensure edgeKeys are consistently formatted (sorted, comma-separated)
+- Verify edgeMap uses same format as edgeKey generation
+- **Status:** ⏳ Pending evidence from logs
+
+---
+
+**Implementation Date:** 2026-01-15  
+**Status:** Implemented - Ready for testing with enhanced pair detection diagnostics
