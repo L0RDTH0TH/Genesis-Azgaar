@@ -59,8 +59,8 @@ async function generateInteractiveTerrain() {
         earlyRelaxIterations: 5, // Low iterations for early relax test
         stepByStepRender: true, // STEP-BY-STEP DEBUG: Render each pipeline stage separately for visual debugging
         stepByStepRelaxIterations: 1, // EXACT iterations for step-by-step debug (1 or 0 to isolate structural issues)
-        stepByStepDensityMultiplier: 0.5, // DENSITY REDUCTION: 0.5 = half density (increase spacing by √2) - legacy, overridden by targetPoints
-        targetPoints: 512, // AGGRESSIVE REDUCTION: Target exactly 512 points (or closest achievable)
+        stepByStepDensityMultiplier: 0.125, // DENSITY REDUCTION: 0.125 = 12.5% density (4x spacing, ~8x larger triangles) - PRIORITY over targetPoints
+        targetPoints: null, // Disabled - using densityMultiplier instead for spacing-based reduction
         skipDissolution: false, // FIX 5: Enable dissolution for quad rendering
         skipLevel1Subdivision: true, // Skip Level 1 to reduce density (preview mode)
       },

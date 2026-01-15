@@ -57,14 +57,48 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   const aspectRatio = options.politicsMode?.aspectRatio ?? 1.22;
   
   // STEP-BY-STEP DEBUG: Density reduction for investigation
-  // Target exactly 512 points (or closest achievable) while maintaining grid size
+  // Prioritize density reduction (spacing) over point count for larger triangles
   const targetPoints = options.politicsMode?.targetPoints ?? null;
   const densityMultiplier = options.politicsMode?.stepByStepDensityMultiplier ?? 1.0;
   
   let hexRings, effectiveHexSize;
   let primalPoints;
   
-  if (targetPoints !== null && targetPoints > 0) {
+  // Priority: densityMultiplier (spacing-based) over targetPoints (count-based)
+  if (densityMultiplier !== 1.0 && densityMultiplier > 0) {
+    // Density-based reduction: increase spacing, reduce rings proportionally
+    const densityScale = Math.sqrt(densityMultiplier);
+    hexRings = Math.max(1, Math.round(baseHexRings * densityScale));
+    effectiveHexSize = baseHexSize / densityScale; // Increase spacing to maintain grid size
+    
+    const expectedPoints = 3 * hexRings * (hexRings + 1) + 1;
+    const originalPoints = 3 * baseHexRings * (baseHexRings + 1) + 1;
+    
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: multiplier=${densityMultiplier}, densityScale=${densityScale.toFixed(4)}`);
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: baseHexRings=${baseHexRings}→${hexRings}, baseHexSize=${baseHexSize}→${effectiveHexSize.toFixed(2)}`);
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Expected points: ${expectedPoints} (original: ${originalPoints}, reduction: ${((1 - expectedPoints / originalPoints) * 100).toFixed(1)}%)`);
+    
+    primalPoints = createTransformedHexPoints(hexRings, effectiveHexSize, aspectRatio, rng);
+    
+    // Calculate point density and triangle area estimates
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of primalPoints) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const area = width * height;
+    const pointDensity = primalPoints.length / area;
+    
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Generated ${primalPoints.length} points`);
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Grid bounds: ${minX.toFixed(1)} to ${maxX.toFixed(1)}, ${minY.toFixed(1)} to ${maxY.toFixed(1)}`);
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Point density: ${pointDensity.toFixed(6)} points/unit² (spacing: ${effectiveHexSize.toFixed(2)})`);
+    console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Expected larger triangles (area ~${(1/densityMultiplier).toFixed(1)}x previous)`);
+    
+  } else if (targetPoints !== null && targetPoints > 0) {
     // Calculate hexRings for target point count: points ≈ 3*hexRings*(hexRings+1) + 1
     // Solve: 3*n*(n+1) + 1 = target => 3n² + 3n + 1 - target = 0
     // Using quadratic formula: n = (-3 + sqrt(9 + 12*(target-1))) / 6
@@ -336,7 +370,21 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     const minArea = triangleAreas.length > 0 ? Math.min(...triangleAreas) : 0;
     const maxArea = triangleAreas.length > 0 ? Math.max(...triangleAreas) : 0;
     
+    // Calculate point density for Stage 2
+    let stage2MinX = Infinity, stage2MaxX = -Infinity, stage2MinY = Infinity, stage2MaxY = -Infinity;
+    for (const p of points) {
+      stage2MinX = Math.min(stage2MinX, p.x);
+      stage2MaxX = Math.max(stage2MaxX, p.x);
+      stage2MinY = Math.min(stage2MinY, p.y);
+      stage2MaxY = Math.max(stage2MaxY, p.y);
+    }
+    const stage2Width = stage2MaxX - stage2MinX;
+    const stage2Height = stage2MaxY - stage2MinY;
+    const stage2Area = stage2Width * stage2Height;
+    const stage2PointDensity = points.length / stage2Area;
+    
     console.log(`[buildStalbergQuadGrid] STAGE 2 ANALYSIS: ${triangles.length} triangles, avg area: ${avgArea.toFixed(2)}, min: ${minArea.toFixed(2)}, max: ${maxArea.toFixed(2)}`);
+    console.log(`[buildStalbergQuadGrid] STAGE 2 ANALYSIS: Point density: ${stage2PointDensity.toFixed(6)} points/unit², grid area: ${stage2Area.toFixed(1)}`);
     console.log(`[buildStalbergQuadGrid] STAGE 2 SAMPLE TRIANGLES (first 10):`, JSON.stringify(sampleTriangles, null, 2));
     
     pipelineStages.stage2_triangles = triangles.map(t => ({
