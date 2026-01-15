@@ -63,6 +63,8 @@ async function generateInteractiveTerrain() {
         targetPoints: null, // Disabled - using densityMultiplier instead for spacing-based reduction
         skipDissolution: false, // FIX 5: Enable dissolution for quad rendering
         dissolveProbability: 0.85, // REFINEMENT FIX 1: Higher probability threshold (0.85) for better conversion rate
+        aggressiveMergePass: true, // AGGRESSIVE MERGE: Enable second merge pass with higher probability (0.95)
+        allowDegenerateQuads: false, // DEGENERATE ALLOWANCE: Allow quads with 3-5 vertices (default: false, strict 4 vertices)
         skipLevel1Subdivision: true, // Skip Level 1 to reduce density (preview mode)
       },
     };

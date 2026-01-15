@@ -412,8 +412,10 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     quads = triangles; // Use triangles directly
   } else {
     const dissolveProbability = options.politicsMode?.dissolveProbability ?? 0.85; // REFINEMENT FIX 1: Higher default (0.85) for better conversion
+    const aggressiveMergePass = options.politicsMode?.aggressiveMergePass ?? true; // Second aggressive merge pass
+    const allowDegenerateQuads = options.politicsMode?.allowDegenerateQuads ?? false; // Allow slightly degenerate quads
     const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
-    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender);
+    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender, aggressiveMergePass, allowDegenerateQuads);
     console.log(`[buildStalbergQuadGrid] After dissolution: ${quads.length} shapes`);
   }
   
@@ -1142,7 +1144,7 @@ function triangulateFromHex(hexPoints, hexPointIndices) {
  * @param {number} dissolveProbability - Probability of attempting dissolution (0.0-1.0, default 0.5)
  * @returns {Array} Array of quads and remaining triangles
  */
-function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false) {
+function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false, aggressiveMergePass = true, allowDegenerateQuads = false) {
   // STEP-BY-STEP DEBUG: Detailed logging
   if (debugMode) {
     console.log(`[dissolveEdgesToQuads] STARTING: ${triangles.length} input triangles, ${points.length} points, dissolveProbability=${dissolveProbability}`);
@@ -1455,13 +1457,23 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       // Merge into quad
       const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
       
-      // Validate quad (must have 4 vertices)
-      if (quad.verts.length !== 4) {
+      // Validate quad (must have 4 vertices, or allow degenerate if enabled)
+      const isValidQuad = allowDegenerateQuads 
+        ? (quad.verts.length >= 3 && quad.verts.length <= 5) // Allow 3-5 vertices for degenerate quads
+        : (quad.verts.length === 4); // Strict 4 vertices
+      
+      if (!isValidQuad) {
         degenerateQuadAttempts++;
         if (debugMode && degenerateQuadAttempts <= 10) {
-          console.log(`[dissolveEdgesToQuads] Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices (expected 4), tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
+          console.log(`[dissolveEdgesToQuads] Degenerate quad from edge ${selectedEdge}: ${quad.verts.length} vertices (expected 4${allowDegenerateQuads ? ' or 3-5 if degenerate allowed' : ''}), tri1 verts: [${tri1.verts.join(',')}], tri2 verts: [${tri2.verts.join(',')}]`);
         }
         continue; // Invalid quad
+      }
+      
+      if (allowDegenerateQuads && quad.verts.length !== 4) {
+        if (debugMode) {
+          console.log(`[dissolveEdgesToQuads] Allowing degenerate quad with ${quad.verts.length} vertices from edge ${selectedEdge}`);
+        }
       }
       
       // Mark triangles as removed
@@ -1482,6 +1494,86 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     }
   }
   
+  // AGGRESSIVE MERGE PASS: Second pass with higher probability to catch remaining merges
+  let secondPassQuads = 0;
+  let secondPassAttempts = 0;
+  let secondPassDissolved = 0;
+  
+  if (aggressiveMergePass) {
+    if (debugMode) {
+      const remainingBeforePass2 = workingTriangles.filter(t => !t.removed).length;
+      console.log(`[dissolveEdgesToQuads] Starting aggressive second merge pass (${remainingBeforePass2} triangles remaining)`);
+    }
+    
+    // Second pass: Use higher probability (0.95) and more attempts
+    const aggressiveProbability = 0.95;
+    const aggressiveMaxAttempts = workingTriangles.filter(t => !t.removed).length * 5; // More attempts for second pass
+    
+    while (secondPassAttempts < aggressiveMaxAttempts) {
+      secondPassAttempts++;
+      
+      // Rebuild edge map for remaining triangles
+      const activeTriangles = workingTriangles.filter(t => !t.removed);
+      if (activeTriangles.length < 2) break; // Need at least 2 triangles to merge
+      
+      const edgeMap = buildEdgeMap(activeTriangles);
+      
+      // Get all internal edges
+      const internalEdges = Array.from(edgeMap.entries())
+        .filter(([edgeKey, triObjects]) => triObjects.length === 2 && !triObjects[0].removed && !triObjects[1].removed)
+        .map(([edgeKey]) => edgeKey);
+      
+      if (internalEdges.length === 0) {
+        break; // No more internal edges
+      }
+      
+      // Higher probability threshold for aggressive pass
+      const rand = rng.random();
+      if (rand > aggressiveProbability) {
+        continue;
+      }
+      
+      const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
+      const selectedEdge = internalEdges[randomEdgeIndex];
+      
+      // Check if we can dissolve (with relaxed validation for aggressive pass)
+      const canDissolve = canDissolveEdge(selectedEdge, edgeMap, workingTriangles);
+      
+      if (canDissolve) {
+        const sharingTriangles = edgeMap.get(selectedEdge);
+        const [tri1, tri2] = sharingTriangles;
+        
+        // Merge into quad
+        const quad = mergeTrianglesToQuad(tri1, tri2, selectedEdge);
+        
+        // Validate quad (allow degenerate if enabled)
+        const isValidQuad = allowDegenerateQuads 
+          ? (quad.verts.length >= 3 && quad.verts.length <= 5)
+          : (quad.verts.length === 4);
+        
+        if (isValidQuad) {
+          // Mark triangles as removed
+          tri1.removed = true;
+          tri2.removed = true;
+          
+          // Add quad
+          quads.push(quad);
+          secondPassQuads++;
+          secondPassDissolved++;
+          
+          if (debugMode && secondPassDissolved <= 5) {
+            console.log(`[dissolveEdgesToQuads] Second pass: dissolved edge ${selectedEdge} into quad with ${quad.verts.length} verts: [${quad.verts.join(',')}]`);
+          }
+        }
+      }
+    }
+    
+    if (debugMode) {
+      const remainingAfterPass2 = workingTriangles.filter(t => !t.removed).length;
+      console.log(`[dissolveEdgesToQuads] Second pass complete: ${secondPassDissolved} edges dissolved, ${secondPassQuads} quads created, ${remainingAfterPass2} triangles remaining`);
+    }
+  }
+  
   // Collect remaining triangles (not dissolved)
   const remainingTriangles = workingTriangles
     .filter(t => !t.removed)
@@ -1492,12 +1584,18 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const finalQuadCount = quads.length;
     const finalTriangleCount = remainingTriangles.length;
     const totalShapes = finalQuadCount + finalTriangleCount;
-    console.log(`[dissolveEdgesToQuads] COMPLETED: ${attempts} attempts, ${edgesDissolved} edges dissolved, ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
+    const totalEdgesDissolved = edgesDissolved + secondPassDissolved;
+    const totalAttempts = attempts + secondPassAttempts;
+    
+    console.log(`[dissolveEdgesToQuads] COMPLETED: ${attempts} attempts (first pass), ${secondPassAttempts} attempts (second pass), ${totalEdgesDissolved} total edges dissolved, ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
     console.log(`[dissolveEdgesToQuads] RESULT: ${totalShapes} total shapes (${finalQuadCount} quads, ${finalTriangleCount} triangles)`);
-    console.log(`[dissolveEdgesToQuads] DISSOLUTION RATE: ${attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) : 0}% success rate`);
+    console.log(`[dissolveEdgesToQuads] DISSOLUTION RATE: ${totalAttempts > 0 ? ((totalEdgesDissolved / totalAttempts) * 100).toFixed(1) : 0}% success rate (first pass: ${attempts > 0 ? ((edgesDissolved / attempts) * 100).toFixed(1) : 0}%, second pass: ${secondPassAttempts > 0 ? ((secondPassDissolved / secondPassAttempts) * 100).toFixed(1) : 0}%)`);
     console.log(`[dissolveEdgesToQuads] TRIANGLE-TO-QUAD CONVERSION: ${finalQuadCount} quads from ${triangles.length} triangles = ${((finalQuadCount / triangles.length) * 100).toFixed(1)}% conversion rate`);
     console.log(`[dissolveEdgesToQuads] FAILURE BREAKDOWN: ${invalidEdgeAttempts} invalid edges, ${degenerateQuadAttempts} degenerate quads`);
     console.log(`[dissolveEdgesToQuads] REFINEMENT STATS: ${probabilitySkips} probability skips, ${epsilonMatches} epsilon-adjusted matches`);
+    if (aggressiveMergePass) {
+      console.log(`[dissolveEdgesToQuads] SECOND PASS: ${secondPassQuads} additional quads created, ${finalTriangleCount} triangles remaining`);
+    }
     
     // AUDIT: Export failure statistics
     const auditSummary = {
@@ -1533,7 +1631,10 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         totalShapes: totalShapes,
         quads: finalQuadCount,
         triangles: finalTriangleCount,
-        dissolutionSuccessRate: attempts > 0 ? (edgesDissolved / attempts) * 100 : 0,
+        dissolutionSuccessRate: totalAttempts > 0 ? (totalEdgesDissolved / totalAttempts) * 100 : 0,
+        firstPassSuccessRate: attempts > 0 ? (edgesDissolved / attempts) * 100 : 0,
+        secondPassSuccessRate: secondPassAttempts > 0 ? (secondPassDissolved / secondPassAttempts) * 100 : 0,
+        secondPassQuads: secondPassQuads,
         conversionRate: (finalQuadCount / triangles.length) * 100
       };
       
