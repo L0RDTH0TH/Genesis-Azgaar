@@ -444,3 +444,106 @@ for (const selectedEdge of remainingCandidates) {
 
 **Report Generated:** 2026-01-15  
 **Next Steps:** Implement Priority 1-3 fixes and verify elimination of all eligible triangle pairs.
+
+---
+
+## 9. Pre- and Post-Cleanup Pair Diagnostics
+
+### 9.1 Diagnostic Implementation
+
+**Purpose:** Determine exactly why border triangle pairs are still surviving Stage 3 dissolution by checking:
+- If eligible sharing=2 pairs (especially border-adjacent) exist **right before** the deterministic final cleanup pass
+- If pairs are still available after cleanup completes
+- Whether cleanup successfully merged pairs or if something blocked it
+
+**Implementation:**
+- **Pre-Cleanup Diagnostic:** Counts remaining sharing=2 pairs before final cleanup starts
+- **Post-Cleanup Diagnostic:** Counts remaining sharing=2 pairs after cleanup completes
+- **Enhanced Cleanup Logging:** Tracks border pair attempts and merges in cleanup loop
+
+**Code Location:** `src/core/dualGridStates.js` lines ~1978-2100
+
+### 9.2 Diagnostic Results
+
+**Test Configuration:**
+- Density: 0.125 (`stepByStepDensityMultiplier`)
+- `dissolveProbability`: 1.0 (no probability skips)
+- Multiple runs: 5+ "Reset Grid" cycles
+
+**Results Table:**
+
+| Run # | Pre Total Pairs | Pre Border Pairs | Cleanup Merges | Cleanup Border Merges | Post Total Pairs | Post Border Pairs | Analysis |
+|-------|----------------|-----------------|----------------|---------------------|-----------------|-------------------|----------|
+| 1     | TBD            | TBD             | TBD            | TBD                 | TBD             | TBD               | TBD      |
+| 2     | TBD            | TBD             | TBD            | TBD                 | TBD             | TBD               | TBD      |
+| 3     | TBD            | TBD             | TBD            | TBD                 | TBD             | TBD               | TBD      |
+| 4     | TBD            | TBD             | TBD            | TBD                 | TBD             | TBD               | TBD      |
+| 5     | TBD            | TBD             | TBD            | TBD                 | TBD             | TBD               | TBD      |
+
+**Expected Outcomes:**
+
+1. **If Pre > 0 and Post = 0:**
+   - Cleanup is working correctly
+   - Pairs were available and successfully merged
+   - Issue was in main loop selection (random bias prevented selection)
+
+2. **If Pre = 0 consistently:**
+   - Main loop order issue
+   - Pairs became isolated during main loop due to merge order
+   - Neighbors were merged first, leaving isolated triangles
+   - **Fix Required:** Add border-priority sorting to main loop candidates
+
+3. **If Pre > 0 and Post > 0:**
+   - Cleanup attempted but failed to merge
+   - Possible causes:
+     - `canDissolveEdge()` rejecting valid pairs
+     - Degenerate quad validation failing
+     - Edge map inconsistency
+   - **Fix Required:** Debug cleanup rejection reasons
+
+### 9.3 Diagnostic Logging Examples
+
+**Pre-Cleanup Diagnostic:**
+```
+[PRE-CLEANUP DIAGNOSTIC] Remaining sharing=2 pairs: 12 (border-adjacent: 8)
+[PRE-CLEANUP BORDER PAIRS DETAILS] 8 border-adjacent pairs found:
+  Border pair 1: Edge 72,74, tri1 verts [72,100,74], tri2 verts [72,74,55]
+  Border pair 2: Edge 2,52, tri1 verts [2,43,52], tri2 verts [2,52,119]
+  ...
+```
+
+**Final Cleanup Attempts:**
+```
+[FINAL CLEANUP] Attempting border pair: 72,74
+[FINAL CLEANUP] Merged border pair: 72,74 into quad with verts: [72,100,74,55]
+```
+
+**Post-Cleanup Diagnostic:**
+```
+[POST-CLEANUP DIAGNOSTIC] Remaining sharing=2 pairs: 0 (border-adjacent: 0)
+[POST-CLEANUP DIAGNOSTIC] No remaining sharing=2 pairs (all triangles are isolated)
+[CLEANUP SUMMARY] Pre-cleanup: 12 pairs (8 border) → Post-cleanup: 0 pairs (0 border)
+[CLEANUP SUMMARY] Cleanup merged: 12 pairs (8 border) from 12 attempts (8 border attempts)
+```
+
+### 9.4 Next Steps Based on Results
+
+**Scenario A: Pre > 0, Post = 0 (Cleanup Working)**
+- **Action:** Add border-priority sorting to main loop candidates
+- **Implementation:** Sort `internalEdges` array to prioritize border edges before random selection
+- **Expected Impact:** Border pairs merged earlier in main loop, fewer remaining for cleanup
+
+**Scenario B: Pre = 0 (Main Loop Order Issue)**
+- **Action:** Implement greedy border-first selection in main loop
+- **Implementation:** Replace random selection with deterministic border-first sorting
+- **Expected Impact:** Border pairs merged first, preventing isolation
+
+**Scenario C: Pre > 0, Post > 0 (Cleanup Failing)**
+- **Action:** Debug cleanup rejection reasons
+- **Implementation:** Add detailed logging in cleanup loop for rejected pairs
+- **Expected Impact:** Identify why valid pairs are rejected
+
+---
+
+**Diagnostic Implementation Date:** 2026-01-15  
+**Status:** Ready for testing - Run 5+ "Reset Grid" cycles and capture console output

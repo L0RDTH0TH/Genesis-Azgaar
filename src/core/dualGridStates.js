@@ -2003,10 +2003,61 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     console.log(`[dissolveEdgesToQuads] Final pass complete: ${finalPassMerges} additional merges (${finalPassAttempts} attempts), ${remainingAfterFinal} triangles remaining`);
   }
   
+  // PRE-CLEANUP DIAGNOSTIC: Check remaining eligible pairs BEFORE final cleanup
+  // This determines if pairs are still available at end of main loop (cleanup should catch them)
+  // Or if zero pairs already (isolation happened during main loop due to merge order)
+  const preCleanupTriangles = workingTriangles.filter(t => !t.removed);
+  const preCleanupEdgeMap = buildEdgeMap(preCleanupTriangles);
+  let preCleanupRemainingPairs = 0;
+  let preCleanupBorderPairs = 0;
+  const preCleanupBorderPairDetails = [];
+  
+  for (const [edgeKey, triObjects] of preCleanupEdgeMap.entries()) {
+    const sharingCount = triObjects.length;
+    const isInTrueBoundary = trueBoundaryEdges && trueBoundaryEdges.has(edgeKey);
+    
+    // Only count edges shared by exactly 2 triangles (eligible pairs)
+    if (sharingCount === 2 && !triObjects[0].removed && !triObjects[1].removed) {
+      // Skip true boundary edges (shared by 1 triangle AND on hull)
+      if (sharingCount === 1 && isInTrueBoundary) {
+        continue; // True boundary edge - skip
+      }
+      
+      preCleanupRemainingPairs++;
+      if (isBorderAdjacentEdge(edgeKey)) {
+        preCleanupBorderPairs++;
+        preCleanupBorderPairDetails.push({
+          edgeKey,
+          tri1Verts: triObjects[0].verts.join(','),
+          tri2Verts: triObjects[1].verts.join(','),
+          tri1: triObjects[0],
+          tri2: triObjects[1]
+        });
+      }
+    }
+  }
+  
+  if (debugMode) {
+    console.log(`[PRE-CLEANUP DIAGNOSTIC] Remaining sharing=2 pairs: ${preCleanupRemainingPairs} (border-adjacent: ${preCleanupBorderPairs})`);
+    
+    if (preCleanupBorderPairs > 0) {
+      console.log(`[PRE-CLEANUP BORDER PAIRS DETAILS] ${preCleanupBorderPairs} border-adjacent pairs found:`);
+      preCleanupBorderPairDetails.forEach((detail, idx) => {
+        console.log(`  Border pair ${idx + 1}: Edge ${detail.edgeKey}, tri1 verts [${detail.tri1Verts}], tri2 verts [${detail.tri2Verts}]`);
+      });
+    } else if (preCleanupRemainingPairs > 0) {
+      console.log(`[PRE-CLEANUP DIAGNOSTIC] ${preCleanupRemainingPairs} interior pairs found (no border pairs)`);
+    } else {
+      console.log(`[PRE-CLEANUP DIAGNOSTIC] No remaining sharing=2 pairs (all triangles are isolated)`);
+    }
+  }
+  
   // DETERMINISTIC FINAL CLEANUP PASS: Try ALL remaining candidates, prioritizing border edges
   // BORDER ISOLATION FIX: This ensures all eligible pairs are attempted, especially border ones
   let finalCleanupMerges = 0;
   let finalCleanupAttempts = 0;
+  let finalCleanupBorderMerges = 0;
+  let finalCleanupBorderAttempts = 0;
   
   const activeTrianglesForCleanup = workingTriangles.filter(t => !t.removed);
   if (activeTrianglesForCleanup.length >= 2) {
@@ -2066,6 +2117,14 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         continue;
       }
       
+      // ENHANCED LOGGING: Track border pair attempts
+      if (candidate.isBorder) {
+        finalCleanupBorderAttempts++;
+        if (debugMode && finalCleanupBorderAttempts <= 10) {
+          console.log(`[FINAL CLEANUP] Attempting border pair: ${selectedEdge}`);
+        }
+      }
+      
       const canDissolve = canDissolveEdge(selectedEdge, cleanupEdgeMap, activeTrianglesForCleanup.map(t => ({ ...t, removed: false })));
       
       if (canDissolve) {
@@ -2091,6 +2150,13 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         edgesDissolved++;
         finalCleanupMerges++;
         
+        if (candidate.isBorder) {
+          finalCleanupBorderMerges++;
+          if (debugMode && finalCleanupBorderMerges <= 10) {
+            console.log(`[FINAL CLEANUP] Merged border pair: ${selectedEdge} into quad with verts: [${quad.verts.join(',')}]`);
+          }
+        }
+        
         if (debugMode && finalCleanupMerges <= 10) {
           console.log(`[dissolveEdgesToQuads] Final cleanup: Merged edge ${selectedEdge} (border=${candidate.isBorder}) into quad with verts: [${quad.verts.join(',')}]`);
         }
@@ -2107,9 +2173,61 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     
     if (debugMode && finalCleanupMerges > 0) {
       const remainingAfterCleanup = workingTriangles.filter(t => !t.removed).length;
-      console.log(`[dissolveEdgesToQuads] Final cleanup complete: ${finalCleanupMerges} additional merges (${finalCleanupAttempts} attempts), ${remainingAfterCleanup} triangles remaining`);
+      console.log(`[dissolveEdgesToQuads] Final cleanup complete: ${finalCleanupMerges} additional merges (${finalCleanupAttempts} attempts, ${finalCleanupBorderMerges} border), ${remainingAfterCleanup} triangles remaining`);
     } else if (debugMode && remainingCandidates.length === 0) {
       console.log(`[dissolveEdgesToQuads] Final cleanup: No remaining candidates (all triangles are isolated)`);
+    }
+  }
+  
+  // POST-CLEANUP DIAGNOSTIC: Check remaining eligible pairs AFTER final cleanup
+  // This confirms whether cleanup actually merged any remaining pairs or if something blocked it
+  const postCleanupTriangles = workingTriangles.filter(t => !t.removed);
+  const postCleanupEdgeMap = buildEdgeMap(postCleanupTriangles);
+  let postCleanupRemainingPairs = 0;
+  let postCleanupBorderPairs = 0;
+  const postCleanupBorderPairDetails = [];
+  
+  for (const [edgeKey, triObjects] of postCleanupEdgeMap.entries()) {
+    const sharingCount = triObjects.length;
+    const isInTrueBoundary = trueBoundaryEdges && trueBoundaryEdges.has(edgeKey);
+    
+    // Only count edges shared by exactly 2 triangles (eligible pairs)
+    if (sharingCount === 2 && !triObjects[0].removed && !triObjects[1].removed) {
+      // Skip true boundary edges (shared by 1 triangle AND on hull)
+      if (sharingCount === 1 && isInTrueBoundary) {
+        continue; // True boundary edge - skip
+      }
+      
+      postCleanupRemainingPairs++;
+      if (isBorderAdjacentEdge(edgeKey)) {
+        postCleanupBorderPairs++;
+        postCleanupBorderPairDetails.push({
+          edgeKey,
+          tri1Verts: triObjects[0].verts.join(','),
+          tri2Verts: triObjects[1].verts.join(',')
+        });
+      }
+    }
+  }
+  
+  if (debugMode) {
+    console.log(`[POST-CLEANUP DIAGNOSTIC] Remaining sharing=2 pairs: ${postCleanupRemainingPairs} (border-adjacent: ${postCleanupBorderPairs})`);
+    
+    if (postCleanupBorderPairs > 0) {
+      console.log(`[POST-CLEANUP BORDER PAIRS DETAILS] ${postCleanupBorderPairs} border-adjacent pairs still remain:`);
+      postCleanupBorderPairDetails.forEach((detail, idx) => {
+        console.log(`  Border pair ${idx + 1}: Edge ${detail.edgeKey}, tri1 verts [${detail.tri1Verts}], tri2 verts [${detail.tri2Verts}]`);
+      });
+    } else if (postCleanupRemainingPairs > 0) {
+      console.log(`[POST-CLEANUP DIAGNOSTIC] ${postCleanupRemainingPairs} interior pairs still remain (no border pairs)`);
+    } else {
+      console.log(`[POST-CLEANUP DIAGNOSTIC] No remaining sharing=2 pairs (all triangles are isolated)`);
+    }
+    
+    // Summary comparison
+    if (preCleanupRemainingPairs > 0 || postCleanupRemainingPairs > 0) {
+      console.log(`[CLEANUP SUMMARY] Pre-cleanup: ${preCleanupRemainingPairs} pairs (${preCleanupBorderPairs} border) → Post-cleanup: ${postCleanupRemainingPairs} pairs (${postCleanupBorderPairs} border)`);
+      console.log(`[CLEANUP SUMMARY] Cleanup merged: ${finalCleanupMerges} pairs (${finalCleanupBorderMerges} border) from ${finalCleanupAttempts} attempts (${finalCleanupBorderAttempts} border attempts)`);
     }
   }
   
