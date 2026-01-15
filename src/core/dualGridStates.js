@@ -57,28 +57,128 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   const aspectRatio = options.politicsMode?.aspectRatio ?? 1.22;
   
   // STEP-BY-STEP DEBUG: Density reduction for investigation
-  // Reduce point density by half (reduce hexRings, increase hexSize to maintain grid size)
-  // Point count in hex grid ≈ 3*hexRings*(hexRings+1) + 1, so reducing hexRings reduces points
-  // To maintain grid size: reduce hexRings by √densityMultiplier, increase hexSize by 1/√densityMultiplier
+  // Target exactly 512 points (or closest achievable) while maintaining grid size
+  const targetPoints = options.politicsMode?.targetPoints ?? null;
   const densityMultiplier = options.politicsMode?.stepByStepDensityMultiplier ?? 1.0;
   
   let hexRings, effectiveHexSize;
-  if (densityMultiplier !== 1.0) {
-    // Reduce rings to reduce point count, increase size to maintain grid dimensions
-    const densityScale = Math.sqrt(densityMultiplier); // For 0.5 density, scale = 0.707
+  let primalPoints;
+  
+  if (targetPoints !== null && targetPoints > 0) {
+    // Calculate hexRings for target point count: points ≈ 3*hexRings*(hexRings+1) + 1
+    // Solve: 3*n*(n+1) + 1 = target => 3n² + 3n + 1 - target = 0
+    // Using quadratic formula: n = (-3 + sqrt(9 + 12*(target-1))) / 6
+    const discriminant = 9 + 12 * (targetPoints - 1);
+    const calculatedRings = Math.round((-3 + Math.sqrt(discriminant)) / 6);
+    
+    // Find closest achievable hexRings
+    let bestRings = calculatedRings;
+    let bestDiff = Infinity;
+    for (let r = Math.max(1, calculatedRings - 2); r <= calculatedRings + 2; r++) {
+      const pointsForRings = 3 * r * (r + 1) + 1;
+      const diff = Math.abs(pointsForRings - targetPoints);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestRings = r;
+      }
+    }
+    
+    hexRings = bestRings;
+    const expectedPoints = 3 * hexRings * (hexRings + 1) + 1;
+    
+    // Calculate hexSize to maintain grid bounds (scale inversely with rings)
+    // Original: baseHexRings rings with baseHexSize spacing
+    // Target: hexRings rings with effectiveHexSize spacing
+    // To maintain size: effectiveHexSize = baseHexSize * (baseHexRings / hexRings)
+    effectiveHexSize = baseHexSize * (baseHexRings / hexRings);
+    
+    console.log(`[buildStalbergQuadGrid] TARGET POINTS: ${targetPoints}, calculated hexRings=${calculatedRings}, using hexRings=${hexRings} (expected: ${expectedPoints} points, diff: ${Math.abs(expectedPoints - targetPoints)})`);
+    console.log(`[buildStalbergQuadGrid] TARGET POINTS: baseHexRings=${baseHexRings}→${hexRings}, baseHexSize=${baseHexSize}→${effectiveHexSize.toFixed(2)}`);
+    
+    primalPoints = createTransformedHexPoints(hexRings, effectiveHexSize, aspectRatio, rng);
+    
+    // Store original bounds before culling (for restoration)
+    let origMinX = Infinity, origMaxX = -Infinity, origMinY = Infinity, origMaxY = -Infinity;
+    for (const p of primalPoints) {
+      origMinX = Math.min(origMinX, p.x);
+      origMaxX = Math.max(origMaxX, p.x);
+      origMinY = Math.min(origMinY, p.y);
+      origMaxY = Math.max(origMaxY, p.y);
+    }
+    const origWidth = origMaxX - origMinX;
+    const origHeight = origMaxY - origMinY;
+    const origCenterX = (origMinX + origMaxX) / 2;
+    const origCenterY = (origMinY + origMaxY) / 2;
+    
+    // If not exactly target, cull excess points (prefer outer points to maintain center density)
+    if (primalPoints.length > targetPoints) {
+      const excess = primalPoints.length - targetPoints;
+      console.log(`[buildStalbergQuadGrid] TARGET POINTS: Generated ${primalPoints.length} points, culling ${excess} to reach ${targetPoints}`);
+      
+      // Sort by distance from center (furthest first) and remove excess
+      const pointsWithDist = primalPoints.map((p, idx) => ({
+        point: p,
+        idx,
+        dist: Math.sqrt(p.x * p.x + p.y * p.y)
+      }));
+      pointsWithDist.sort((a, b) => b.dist - a.dist); // Furthest first
+      
+      // Remove excess points (keep closest to center)
+      const toRemove = new Set(pointsWithDist.slice(0, excess).map(p => p.idx));
+      primalPoints = primalPoints.filter((_, idx) => !toRemove.has(idx));
+      
+      console.log(`[buildStalbergQuadGrid] TARGET POINTS: After culling: ${primalPoints.length} points`);
+      
+      // Restore original bounds by scaling remaining points
+      let newMinX = Infinity, newMaxX = -Infinity, newMinY = Infinity, newMaxY = -Infinity;
+      for (const p of primalPoints) {
+        newMinX = Math.min(newMinX, p.x);
+        newMaxX = Math.max(newMaxX, p.x);
+        newMinY = Math.min(newMinY, p.y);
+        newMaxY = Math.max(newMaxY, p.y);
+      }
+      const newWidth = newMaxX - newMinX;
+      const newHeight = newMaxY - newMinY;
+      const newCenterX = (newMinX + newMaxX) / 2;
+      const newCenterY = (newMinY + newMaxY) / 2;
+      
+      // Scale to restore original bounds
+      const scaleX = origWidth > 0 ? origWidth / newWidth : 1;
+      const scaleY = origHeight > 0 ? origHeight / newHeight : 1;
+      const scale = Math.min(scaleX, scaleY); // Use uniform scaling to maintain aspect
+      
+      for (const p of primalPoints) {
+        // Translate to origin, scale, translate back to original center
+        p.x = (p.x - newCenterX) * scale + origCenterX;
+        p.y = (p.y - newCenterY) * scale + origCenterY;
+      }
+      
+      console.log(`[buildStalbergQuadGrid] TARGET POINTS: Scaled remaining points by ${scale.toFixed(3)}x to restore original bounds`);
+    } else if (primalPoints.length < targetPoints) {
+      console.log(`[buildStalbergQuadGrid] TARGET POINTS: WARNING: Generated ${primalPoints.length} points (target: ${targetPoints}), cannot add points without breaking hex pattern`);
+    }
+    
+    // Verify bounds are maintained
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of primalPoints) {
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    console.log(`[buildStalbergQuadGrid] TARGET POINTS: Final count: ${primalPoints.length} (target: ${targetPoints}), bounds: ${minX.toFixed(1)} to ${maxX.toFixed(1)}, ${minY.toFixed(1)} to ${maxY.toFixed(1)}`);
+    
+  } else if (densityMultiplier !== 1.0) {
+    // Legacy density multiplier approach
+    const densityScale = Math.sqrt(densityMultiplier);
     hexRings = Math.max(1, Math.round(baseHexRings * densityScale));
-    effectiveHexSize = baseHexSize / densityScale; // Compensate for reduced rings
+    effectiveHexSize = baseHexSize / densityScale;
     
     console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: multiplier=${densityMultiplier}, baseHexRings=${baseHexRings}→${hexRings}, baseHexSize=${baseHexSize}→${effectiveHexSize.toFixed(2)}`);
     console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Expected point reduction: ~${Math.round(3 * baseHexRings * (baseHexRings + 1) + 1)} → ~${Math.round(3 * hexRings * (hexRings + 1) + 1)} points`);
-  } else {
-    hexRings = baseHexRings;
-    effectiveHexSize = baseHexSize;
-  }
-  
-  const primalPoints = createTransformedHexPoints(hexRings, effectiveHexSize, aspectRatio, rng);
-  
-  if (densityMultiplier !== 1.0) {
+    
+    primalPoints = createTransformedHexPoints(hexRings, effectiveHexSize, aspectRatio, rng);
+    
     const expectedAtDensity1 = Math.round(3 * baseHexRings * (baseHexRings + 1) + 1);
     const actualReduction = ((1 - primalPoints.length / expectedAtDensity1) * 100).toFixed(1);
     console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Generated ${primalPoints.length} points (expected at density 1.0: ~${expectedAtDensity1}, reduction: ${actualReduction}%)`);
@@ -92,6 +192,10 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
       maxY = Math.max(maxY, p.y);
     }
     console.log(`[buildStalbergQuadGrid] DENSITY REDUCTION: Grid bounds maintained: ${minX.toFixed(1)} to ${maxX.toFixed(1)}, ${minY.toFixed(1)} to ${maxY.toFixed(1)}`);
+  } else {
+    hexRings = baseHexRings;
+    effectiveHexSize = baseHexSize;
+    primalPoints = createTransformedHexPoints(hexRings, effectiveHexSize, aspectRatio, rng);
   }
   const hexPointIndices = primalPoints.map(p => addPoint(p));
   
