@@ -700,8 +700,17 @@ function generateInteractiveHTML(data) {
               const renderVerts = uniqueVerts.length < verts.length ? uniqueVerts : verts;
               
               if (renderVerts.length >= 3) {
+                // ITERATION 36 FIX: Highlight remaining triangles in red for visual debugging
+                const isTriangle = quad.type === 'triangle' || (quad.verts && quad.verts.length === 3);
+                const strokeColor = isTriangle ? '#ff0000' : stage.color; // Red for triangles
+                const strokeWidth = isTriangle ? '3' : '2'; // Thicker for triangles
                 const path = renderVerts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
-                layers.push(\`<path d="\${path}" fill="none" stroke="\${stage.color}" stroke-width="2" opacity="0.9" />\`);
+                const titleAttr = isTriangle ? \` title="Triangle: [\${quad.verts.join(',')}]" \` : '';
+                layers.push(\`<path d="\${path}" fill="none" stroke="\${strokeColor}" stroke-width="\${strokeWidth}" opacity="0.9"\${titleAttr} />\`);
+                if (isTriangle) {
+                  // Log triangle for debugging
+                  console.log(\`[renderPipelineStage] ITERATION 36: Highlighted remaining triangle: [\${quad.verts.join(',')}]\`);
+                }
                 quadCount++;
               }
             }

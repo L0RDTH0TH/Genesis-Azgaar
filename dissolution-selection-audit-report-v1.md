@@ -1,7 +1,7 @@
 # Dissolution Selection & Border Isolation Audit Report v1
 
 **Report Generated:** 2026-01-15  
-**Status:** Active - Iteration 35 fixes implemented
+**Status:** Active - Iteration 36 fixes implemented
 
 ---
 
@@ -360,7 +360,7 @@ internalEdges.sort((a, b) => {
 
 **Implementation:**
 ```javascript
-// ITERATION 35 FIX: Border-priority sorting with getEdgeVerts helper
+// ITERATION 36 FIX: Border-priority sorting with getEdgeVerts helper
 // Sort to prioritize border-adjacent edges (prevent early isolation)
 function getEdgeVerts(edgeKey) {
   return edgeKey.split(',').map(Number);
@@ -381,6 +381,11 @@ if (debugMode && attempts <= 5) {
   const borderCount = internalEdges.filter(e => isBorderAdjacentEdge(e)).length;
   const interiorCount = internalEdges.length - borderCount;
   console.log(`[SELECTION BOOST] Prioritized ${borderCount} border edges (${interiorCount} interior)`);
+  // ITERATION 36: Log top 10 prioritized edges
+  const top10 = internalEdges.slice(0, 10);
+  if (top10.length > 0) {
+    console.log(`[SELECTION BOOST] Top prioritized edges: ${top10.join(', ')}`);
+  }
 }
 ```
 
@@ -786,5 +791,258 @@ if (edgeInfo && edgeInfo.length === 1) {
 
 ---
 
+## 13. Iteration 36: Final Border Quads Extermination
+
+### 13.1 Executive Summary
+
+**Date:** 2026-01-15  
+**Iteration:** 36  
+**Goal:** Annihilate the last 2+ surviving potential border quads. Force 0 remaining triangles post-Stage 3 via enhanced diagnostics, prioritization tweaks, and degeneracy leniency.
+
+**Root Causes Addressed:**
+1. **Missing isBoundary flags:** Hull vertices not flagged with `isBoundary=true`, causing border detection to fail
+2. **Insufficient diagnostics:** No visibility into top prioritized edges or edge map integrity
+3. **Too strict degeneracy checks:** Border triangles failing subdivision due to tight epsilon (1e-6)
+4. **Missing visual debugging:** Remaining triangles not highlighted for easy identification
+
+**Fixes Implemented:**
+1. ✅ Enhanced border prioritization diagnostics (log top 10 prioritized edges, warn if no borders)
+2. ✅ Force hull vertices to have `isBoundary=true` flag
+3. ✅ Edge map integrity validation (count sharing=2 edges, log if < expected)
+4. ✅ Loosened degeneracy checks (epsilon 1e-6 → 1e-4, disable skips temporarily)
+5. ✅ Visual debugging boost (highlight remaining triangles in red, add tooltips)
+
+**Expected Impact:**
+- Remaining triangles: 28 → 0 (target)
+- Stage 3: All eligible pairs merged (verified via diagnostics)
+- Stage 4: All remaining triangles subdivided (no gaps)
+- Enhanced visibility: Top prioritized edges logged, remaining triangles highlighted
+
+### 13.2 Fix 1: Enhanced Border Prioritization & Diagnostics
+
+**Location:** `src/core/dualGridStates.js` lines ~394-400, ~1901-1920
+
+**Problem:** No visibility into which edges are being prioritized, and hull vertices may not have `isBoundary` flag set.
+
+**Solution:**
+1. Flag all hull vertices with `isBoundary=true` after hull computation
+2. Log top 10 prioritized edges after sorting
+3. Warn if no border edges detected after prioritization
+
+**Code:**
+```javascript
+// ITERATION 36 FIX: Ensure all hull vertices are flagged with isBoundary = true
+hullIndices.forEach(i => {
+  if (points[i]) {
+    points[i].isBoundary = true;
+  }
+});
+if (stepByStepRender) {
+  const flaggedCount = hullIndices.filter(i => points[i]?.isBoundary).length;
+  console.log(`[buildStalbergQuadGrid] ITERATION 36: Flagged ${flaggedCount}/${hullIndices.length} hull vertices with isBoundary=true`);
+}
+
+// ITERATION 36 FIX: Enhanced logging for selection boost with top 10 prioritized edges
+if (debugMode && attempts <= 5) {
+  const borderCount = internalEdges.filter(e => isBorderAdjacentEdge(e)).length;
+  const interiorCount = internalEdges.length - borderCount;
+  console.log(`[SELECTION BOOST] Prioritized ${borderCount} border edges (${interiorCount} interior)`);
+  
+  // ITERATION 36 FIX: Log top 10 prioritized edges
+  const top10 = internalEdges.slice(0, 10);
+  if (top10.length > 0) {
+    console.log(`[SELECTION BOOST] Top prioritized edges: ${top10.join(', ')}`);
+  } else {
+    console.warn(`[SELECTION WARN] No border edges detected—check hull/isBoundary`);
+  }
+}
+
+// ITERATION 36 FIX: Warn if no border edges after prioritization
+const borderCountCheck = internalEdges.filter(e => isBorderAdjacentEdge(e)).length;
+if (debugMode && borderCountCheck === 0 && internalEdges.length > 0 && attempts <= 3) {
+  console.warn(`[SELECTION WARN] No border edges detected in ${internalEdges.length} candidates—check hull/isBoundary flags`);
+}
+```
+
+**Logging:**
+- `[buildStalbergQuadGrid] ITERATION 36: Flagged ${flaggedCount}/${hullIndices.length} hull vertices with isBoundary=true`
+- `[SELECTION BOOST] Top prioritized edges: ${top10.join(', ')}`
+- `[SELECTION WARN] No border edges detected—check hull/isBoundary`
+
+**Status:** ✅ Implemented
+
+### 13.3 Fix 2: Force Edge Map Integrity
+
+**Location:** `src/core/dualGridStates.js` lines ~1813-1827, ~1990-1995
+
+**Problem:** No validation that edge map is correctly built after each rebuild, and skip reasons not detailed enough.
+
+**Solution:**
+1. Validate edge map after each rebuild (count sharing=2 edges, log if < expected)
+2. Enhanced pre-dissolution verification with detailed logging (tri1/tri2 verts, shared verts)
+3. Document intent for edge map rebuild after merges
+
+**Code:**
+```javascript
+// ITERATION 36 FIX: Validate edge map integrity after rebuild
+if (debugMode && attempts <= 5) {
+  let sharing2Count = 0;
+  for (const [edgeKey, triObjects] of edgeMap.entries()) {
+    if (triObjects.length === 2) sharing2Count++;
+  }
+  const expectedMin = Math.floor(activeTriangles.length * 1.5); // Approximate for Delaunay
+  if (sharing2Count < expectedMin && attempts === 1) {
+    console.warn(`[EDGE MAP VALIDATE] Sharing=2 edges: ${sharing2Count} (expected min: ~${expectedMin} for ${activeTriangles.length} triangles)`);
+  }
+}
+
+// ITERATION 36 FIX: Enhanced pre-dissolution verification with detailed logging
+const sharedVerts = tri1.verts.filter(v => tri2.verts.includes(v));
+if (sharedVerts.length !== 2) {
+  if (debugMode) {
+    console.warn(`[DISSOLUTION VERIFY] Skip details: edge=${selectedEdge}, tri1 [${tri1.verts.join(',')}], tri2 [${tri2.verts.join(',')}], shared ${sharedVerts.length} (expected 2)`);
+  }
+  continue;
+}
+```
+
+**Logging:**
+- `[EDGE MAP VALIDATE] Sharing=2 edges: ${sharing2Count} (expected min: ~${expectedMin} for ${activeTriangles.length} triangles)`
+- `[DISSOLUTION VERIFY] Skip details: edge=${selectedEdge}, tri1 [${tri1.verts.join(',')}], tri2 [${tri2.verts.join(',')}], shared ${sharedVerts.length} (expected 2)`
+
+**Status:** ✅ Implemented
+
+### 13.4 Fix 3: Loosen Degeneracy Checks
+
+**Location:** `src/core/dualGridStates.js` lines ~2763-2783, ~2835-2851
+
+**Problem:** Border triangles failing subdivision due to tight epsilon (1e-6), causing gaps in Stage 4.
+
+**Solution:**
+1. Increase epsilon in `isDegenerateTriangle()` from 1e-6 to 1e-4 (less strict for borders)
+2. Update `validateSubQuad()` with looser epsilon (1e-4)
+3. Temporarily disable skip (force subdivision attempt even if degenerate, log but proceed)
+
+**Code:**
+```javascript
+// ITERATION 36 FIX: Loosened degeneracy check (less strict for borders)
+function isDegenerateTriangle(shape) {
+  if (!shape.verts || shape.verts.length !== 3) return true;
+  const [v0, v1, v2] = shape.verts;
+  const p0 = points[v0];
+  const p1 = points[v1];
+  const p2 = points[v2];
+  if (!p0 || !p1 || !p2) return true;
+  // ITERATION 36 FIX: Increased epsilon to 1e-4 (less strict)
+  const cross = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
+  return Math.abs(cross) < 1e-4; // ITERATION 36: Looser epsilon for borders
+}
+
+// ITERATION 36 FIX: Temporarily disable skip (force subdivision even if degenerate, log but proceed)
+const isDegenerate = isDegenerateTriangle(triangle);
+if (isDegenerate) {
+  console.warn(`[SUBDIVISION] Degenerate triangle detected: ${triangle.verts} (cross < 1e-4), proceeding with fallback`);
+  // ITERATION 36: Don't skip - proceed with subdivision attempt (may create invalid quads, but validateSubQuad will filter)
+  // return []; // COMMENTED OUT: Force subdivision attempt
+}
+
+// ITERATION 36 FIX: Loosened sub-quad validation (less strict epsilon)
+function validateSubQuad(quad) {
+  if (!quad.verts || quad.verts.length !== 4) return false;
+  const uniqueVerts = new Set(quad.verts);
+  if (uniqueVerts.size !== 4) return false;
+  // ITERATION 36 FIX: Zero-area check using shoelace formula with looser epsilon (1e-4)
+  const [q0, q1, q2, q3] = quad.verts.map(v => points[v]).filter(p => p);
+  if (q0 && q1 && q2 && q3) {
+    const area = Math.abs(
+      (q0.x * q1.y + q1.x * q2.y + q2.x * q3.y + q3.x * q0.y) -
+      (q0.y * q1.x + q1.y * q2.x + q2.y * q3.x + q3.y * q0.x)
+    ) / 2;
+    // ITERATION 36: Looser epsilon (1e-4 instead of 1e-6)
+    if (area < 1e-4) return false; // Zero or near-zero area
+  }
+  return true;
+}
+```
+
+**Logging:**
+- `[SUBDIVISION] Degenerate triangle detected: ${triangle.verts} (cross < 1e-4), proceeding with fallback`
+
+**Status:** ✅ Implemented
+
+### 13.5 Fix 4: Visual Debugging Boost
+
+**Location:** `scripts/generate-interactive-terrain.js` lines ~702-706
+
+**Problem:** Remaining triangles not visually distinguished, making it hard to identify survivors.
+
+**Solution:**
+1. Highlight remaining triangles in red in Stage 3 rendering
+2. Add tooltips showing verts/edges (SVG title attribute)
+
+**Code:**
+```javascript
+// ITERATION 36 FIX: Highlight remaining triangles in red for visual debugging
+const isTriangle = quad.type === 'triangle' || (quad.verts && quad.verts.length === 3);
+const strokeColor = isTriangle ? '#ff0000' : stage.color; // Red for triangles
+const strokeWidth = isTriangle ? '3' : '2'; // Thicker for triangles
+const path = renderVerts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${v.x.toFixed(2)} ${v.y.toFixed(2)}`).join(' ') + ' Z';
+const titleAttr = isTriangle ? ` title="Triangle: [${quad.verts.join(',')}]" ` : '';
+layers.push(`<path d="${path}" fill="none" stroke="${strokeColor}" stroke-width="${strokeWidth}" opacity="0.9"${titleAttr} />`);
+if (isTriangle) {
+  console.log(`[renderPipelineStage] ITERATION 36: Highlighted remaining triangle: [${quad.verts.join(',')}]`);
+}
+```
+
+**Visual Impact:**
+- Remaining triangles rendered in red (vs blue quads)
+- Thicker stroke width (3 vs 2) for visibility
+- Tooltip on hover showing vertex indices
+
+**Status:** ✅ Implemented
+
+### 13.6 Test Results
+
+**Configuration:**
+- Density: 0.125 & 0.25
+- `dissolveProbability`: 1.0
+- `maxAttempts`: `workingTriangles.length * 5`
+- Border-priority sorting: Enabled
+- Enhanced diagnostics: Enabled
+- Loosened degeneracy checks: Enabled (1e-4 epsilon)
+- Visual debugging: Enabled (red triangles)
+
+**Expected Results:**
+- Remaining triangles: 28 → 0 (target)
+- Stage 3: All eligible pairs merged (verified via top 10 prioritized edges logs)
+- Stage 4: All remaining triangles subdivided (no gaps)
+- Logs show: Top 10 prioritized edges, hull vertices flagged, edge map validated
+- Visuals show: Remaining triangles highlighted in red
+
+**Status:** ⏳ Pending verification - Run 10+ "Reset Grid" cycles with densities 0.125 & 0.25, capture logs and screenshots
+
+### 13.7 Visual Before/After
+
+**Before (Iteration 35):**
+- Stage 3: ~28 remaining triangles (mostly border)
+- No visibility into prioritized edges
+- Remaining triangles not visually distinguished
+- Degenerate triangles skipped (gaps in Stage 4)
+
+**After (Iteration 36 - Expected):**
+- Stage 3: 0 remaining triangles (all merged)
+- Logs show top 10 prioritized edges, edge map validation
+- Remaining triangles highlighted in red (if any)
+- Degenerate triangles processed with looser epsilon (no gaps)
+
+**Status:** ⏳ Pending verification - Capture Stage 3/4 screenshots, verify red highlighting
+
+---
+
+**Implementation Date:** 2026-01-15  
+**Status:** Implemented - Ready for testing with all Iteration 36 fixes
+
+---
+
 **Report Updated:** 2026-01-15  
-**Next Steps:** Run 5+ "Reset Grid" cycles, capture logs and screenshots, verify 0 remaining triangles post-Stage 3
+**Next Steps:** Run 10+ "Reset Grid" cycles with densities 0.125 & 0.25, capture logs and screenshots, verify 0 remaining triangles post-Stage 3

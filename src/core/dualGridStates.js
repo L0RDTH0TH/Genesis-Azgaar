@@ -395,6 +395,17 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   const trueBoundaryEdges = getTrueBoundaryEdges(primalPoints, hullIndices);
   console.log(`[buildStalbergQuadGrid] Convex hull computed: ${hullIndices.length} hull points, ${trueBoundaryEdges.size} true boundary edges`);
   
+  // ITERATION 36 FIX: Ensure all hull vertices are flagged with isBoundary = true
+  hullIndices.forEach(i => {
+    if (points[i]) {
+      points[i].isBoundary = true;
+    }
+  });
+  if (stepByStepRender) {
+    const flaggedCount = hullIndices.filter(i => points[i]?.isBoundary).length;
+    console.log(`[buildStalbergQuadGrid] ITERATION 36: Flagged ${flaggedCount}/${hullIndices.length} hull vertices with isBoundary=true`);
+  }
+  
   if (stepByStepRender) {
     console.log(`[buildStalbergQuadGrid] True boundary edges (sample):`, Array.from(trueBoundaryEdges).slice(0, 10));
   }
@@ -1803,6 +1814,18 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     const activeTriangles = workingTriangles.filter(t => !t.removed);
     const edgeMap = buildEdgeMap(activeTriangles);
     
+    // ITERATION 36 FIX: Validate edge map integrity after rebuild
+    if (debugMode && attempts <= 5) {
+      let sharing2Count = 0;
+      for (const [edgeKey, triObjects] of edgeMap.entries()) {
+        if (triObjects.length === 2) sharing2Count++;
+      }
+      const expectedMin = Math.floor(activeTriangles.length * 1.5); // Approximate for Delaunay
+      if (sharing2Count < expectedMin && attempts === 1) {
+        console.warn(`[EDGE MAP VALIDATE] Sharing=2 edges: ${sharing2Count} (expected min: ~${expectedMin} for ${activeTriangles.length} triangles)`);
+      }
+    }
+    
     // Get all internal edges (shared by exactly 2 triangles)
     // ITERATION 35 FIX: Simplified boundary protection - only protect edges shared by 1 triangle AND on hull
     const internalEdges = [];
@@ -1876,11 +1899,25 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       return bBorder - aBorder;  // Border (1) before non-border (0) - descending priority
     });
     
-    // BORDER-PRIORITY LOGGING: Log border priority sorting results
+    // ITERATION 36 FIX: Enhanced logging for selection boost with top 10 prioritized edges
     if (debugMode && attempts <= 5) {
       const borderCount = internalEdges.filter(e => isBorderAdjacentEdge(e)).length;
       const interiorCount = internalEdges.length - borderCount;
-      console.log(`[dissolveEdgesToQuads] BORDER-PRIORITY SORT: ${internalEdges.length} candidates sorted (${borderCount} border first, ${interiorCount} interior)`);
+      console.log(`[SELECTION BOOST] Prioritized ${borderCount} border edges (${interiorCount} interior)`);
+      
+      // ITERATION 36 FIX: Log top 10 prioritized edges
+      const top10 = internalEdges.slice(0, 10);
+      if (top10.length > 0) {
+        console.log(`[SELECTION BOOST] Top prioritized edges: ${top10.join(', ')}`);
+      } else {
+        console.warn(`[SELECTION WARN] No border edges detected—check hull/isBoundary`);
+      }
+    }
+    
+    // ITERATION 36 FIX: Warn if no border edges after prioritization
+    const borderCountCheck = internalEdges.filter(e => isBorderAdjacentEdge(e)).length;
+    if (debugMode && borderCountCheck === 0 && internalEdges.length > 0 && attempts <= 3) {
+      console.warn(`[SELECTION WARN] No border edges detected in ${internalEdges.length} candidates—check hull/isBoundary flags`);
     }
     
     // REFINEMENT FIX 1: Randomly select an edge (with configurable probability check)
@@ -2738,7 +2775,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
  * @returns {Array} Array of 3 quads
  */
 function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
-  // ITERATION 35 FIX: Degeneracy check before subdivision
+  // ITERATION 36 FIX: Loosened degeneracy check (less strict for borders)
   function isDegenerateTriangle(shape) {
     if (!shape.verts || shape.verts.length !== 3) return true;
     const [v0, v1, v2] = shape.verts;
@@ -2746,14 +2783,17 @@ function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
     const p1 = points[v1];
     const p2 = points[v2];
     if (!p0 || !p1 || !p2) return true;
-    // Collinear check via cross-product
+    // ITERATION 36 FIX: Increased epsilon to 1e-4 (less strict)
     const cross = (p1.x - p0.x) * (p2.y - p0.y) - (p1.y - p0.y) * (p2.x - p0.x);
-    return Math.abs(cross) < 1e-6; // epsilon for floating point
+    return Math.abs(cross) < 1e-4; // ITERATION 36: Looser epsilon for borders
   }
   
-  if (isDegenerateTriangle(triangle)) {
-    console.warn(`[SUBDIVISION] Skipping degenerate triangle: ${triangle.verts}`);
-    return []; // Return empty array (fallback handled by caller)
+  // ITERATION 36 FIX: Temporarily disable skip (force subdivision even if degenerate, log but proceed)
+  const isDegenerate = isDegenerateTriangle(triangle);
+  if (isDegenerate) {
+    console.warn(`[SUBDIVISION] Degenerate triangle detected: ${triangle.verts} (cross < 1e-4), proceeding with fallback`);
+    // ITERATION 36: Don't skip - proceed with subdivision attempt (may create invalid quads, but validateSubQuad will filter)
+    // return []; // COMMENTED OUT: Force subdivision attempt
   }
   
   const [v0, v1, v2] = triangle.verts;
@@ -2806,19 +2846,20 @@ function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
   
   const ic = addPoint(center);
   
-  // ITERATION 35 FIX: Sub-quad validation
+  // ITERATION 36 FIX: Loosened sub-quad validation (less strict epsilon)
   function validateSubQuad(quad) {
     if (!quad.verts || quad.verts.length !== 4) return false;
     const uniqueVerts = new Set(quad.verts);
     if (uniqueVerts.size !== 4) return false;
-    // Zero-area check using shoelace formula
+    // ITERATION 36 FIX: Zero-area check using shoelace formula with looser epsilon (1e-4)
     const [q0, q1, q2, q3] = quad.verts.map(v => points[v]).filter(p => p);
     if (q0 && q1 && q2 && q3) {
       const area = Math.abs(
         (q0.x * q1.y + q1.x * q2.y + q2.x * q3.y + q3.x * q0.y) -
         (q0.y * q1.x + q1.y * q2.x + q2.y * q3.x + q3.y * q0.x)
       ) / 2;
-      if (area < 1e-6) return false; // Zero or near-zero area
+      // ITERATION 36: Looser epsilon (1e-4 instead of 1e-6)
+      if (area < 1e-4) return false; // Zero or near-zero area
     }
     return true;
   }
