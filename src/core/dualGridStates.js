@@ -1588,6 +1588,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   function buildEdgeMap(triangles) {
     const edgeMap = new Map();
     let boundaryEdges = 0;
+    let sharing2Edges = 0; // ITERATION 40: Count edges shared by exactly 2 triangles
     let multiSharedEdges = 0;
     const problematicEdges = [];
     
@@ -1837,9 +1838,27 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     };
   }
   
-  // Main dissolution loop
-  while (attempts < maxAttempts && dissolveCount < maxAttempts) {
-    attempts++;
+  // ITERATION 40 STEP 4: Multi-pass greedy matching to prevent isolation
+  // Wrap main loop in outer loop that repeats until no more merges occur
+  let totalPasses = 0;
+  let totalMergesAcrossPasses = 0;
+  
+  // ITERATION 40: Main multi-pass dissolution loop
+  while (true) {
+    totalPasses++;
+    let mergesThisPass = 0;
+    const trianglesAtPassStart = workingTriangles.filter(t => !t.removed).length;
+    
+    if (debugMode) {
+      console.log(`[MERGE PASS ${totalPasses}] Starting with ${trianglesAtPassStart} active triangles`);
+    }
+    
+    // Reset attempts counter for this pass (but keep total dissolveCount)
+    attempts = 0;
+    
+    // Main dissolution loop for this pass
+    while (attempts < maxAttempts && dissolveCount < maxAttempts) {
+      attempts++;
     
     // Rebuild edge map (triangles may have been removed)
     const activeTriangles = workingTriangles.filter(t => !t.removed);
@@ -1922,12 +1941,31 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       break; // No more internal edges to dissolve
     }
     
-    // BORDER-PRIORITY SORTING: Sort to prioritize border-adjacent edges (prevent early isolation)
-    // This ensures border pairs are merged first, preventing interior merges from orphaning them
+    // ITERATION 40 STEP 4 OPTION B: Enhanced sorting to prevent isolation
+    // Sort by: 1) Border priority, 2) Edge length (shorter = higher priority, prevents long edges from isolating neighbors)
     internalEdges.sort((a, b) => {
-      const aBorder = isBorderAdjacentEdge(a) ? 1 : 0;  // 1 if border, 0 otherwise
+      // Primary: Border priority (border edges first)
+      const aBorder = isBorderAdjacentEdge(a) ? 1 : 0;
       const bBorder = isBorderAdjacentEdge(b) ? 1 : 0;
-      return bBorder - aBorder;  // Border (1) before non-border (0) - descending priority
+      if (aBorder !== bBorder) {
+        return bBorder - aBorder; // Border first
+      }
+      
+      // Secondary: Edge length (shorter edges first - prevents long edges from isolating neighbors)
+      const [v1a, v2a] = a.split(',').map(Number);
+      const [v1b, v2b] = b.split(',').map(Number);
+      const p1a = points[v1a];
+      const p2a = points[v2a];
+      const p1b = points[v1b];
+      const p2b = points[v2b];
+      
+      if (p1a && p2a && p1b && p2b) {
+        const lenA = Math.sqrt((p2a.x - p1a.x) ** 2 + (p2a.y - p1a.y) ** 2);
+        const lenB = Math.sqrt((p2b.x - p1b.x) ** 2 + (p2b.y - p1b.y) ** 2);
+        return lenA - lenB; // Shorter edges first
+      }
+      
+      return 0; // Fallback: no change
     });
     
     // ITERATION 36 FIX: Enhanced logging for selection boost with top 10 prioritized edges
@@ -2072,7 +2110,35 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       }
       // Note: canDissolveEdge() already logs rejection reasons, so we don't duplicate here
     }
+  } // End of inner while loop (single pass)
+  
+  // ITERATION 40 STEP 4: Count merges this pass (compare edgesDissolved before/after pass)
+  const mergesThisPass = edgesDissolved - totalMergesAcrossPasses;
+  totalMergesAcrossPasses = edgesDissolved;
+  const trianglesAtPassEnd = workingTriangles.filter(t => !t.removed).length;
+  
+  if (debugMode) {
+    console.log(`[MERGE PASS ${totalPasses}] Completed: ${mergesThisPass} merges, ${trianglesAtPassStart} → ${trianglesAtPassEnd} triangles`);
   }
+  
+  // ITERATION 40 STEP 4: Break if no merges occurred this pass (all pairs processed or isolated)
+  if (mergesThisPass === 0) {
+    if (debugMode) {
+      console.log(`[MERGE PASS ${totalPasses}] No merges this pass - stopping multi-pass loop`);
+    }
+    break; // Exit outer loop - no more merges possible
+  }
+  
+  // ITERATION 40 STEP 4: Safety limit on passes (prevent infinite loops)
+  const maxPasses = 10;
+  if (totalPasses >= maxPasses) {
+    if (debugMode) {
+      console.log(`[MERGE PASS ${totalPasses}] Reached max passes limit (${maxPasses}) - stopping`);
+    }
+    break;
+  }
+  
+  } // End of outer while loop (multi-pass)
   
   // FINAL MERGE PASS: Deterministic pass to catch remaining valid merges
   // Per audit recommendation: Force-merge valid edges that were skipped due to probability
