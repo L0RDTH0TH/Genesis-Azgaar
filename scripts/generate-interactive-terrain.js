@@ -700,16 +700,27 @@ function generateInteractiveHTML(data) {
               const renderVerts = uniqueVerts.length < verts.length ? uniqueVerts : verts;
               
               if (renderVerts.length >= 3) {
-                // ITERATION 36 FIX: Highlight remaining triangles in red for visual debugging
-                const isTriangle = quad.type === 'triangle' || (quad.verts && quad.verts.length === 3);
+                // ITERATION 39 FIX: Force triangle detection by vert count only + enhanced ghost hunting diagnostics
+                // Diagnostic #1: Force detection by vert count (ignore type field)
+                // Diagnostic #2: Enhanced debug info in title + console for type mismatch detection
+                const vertCount = quad.verts?.length ?? 0;
+                const detectedType = quad.type ?? 'missing';
+                const isTriangle = vertCount === 3; // ITERATION 39: Force detection by vert count only
+
                 const strokeColor = isTriangle ? '#ff0000' : stage.color; // Red for triangles
                 const strokeWidth = isTriangle ? '3' : '2'; // Thicker for triangles
+
+                // Enhanced debug title always showing real data
+                const titleAttr = \` title="Shape #\${quadIdx}: type=\${detectedType}, verts=\${vertCount}, indices=[\${quad.verts?.join(',') || '—'}]"\`;
+
                 const path = renderVerts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
-                const titleAttr = isTriangle ? \` title="Triangle: [\${quad.verts.join(',')}]" \` : '';
                 layers.push(\`<path d="\${path}" fill="none" stroke="\${strokeColor}" stroke-width="\${strokeWidth}" opacity="0.9"\${titleAttr} />\`);
+
+                if (isTriangle && detectedType !== 'triangle') {
+                  console.warn(\`[GHOST HUNT] Type mismatch! Rendered as red triangle but type=\${detectedType}, verts=[\${quad.verts?.join(',') || '—'}]\`);
+                }
                 if (isTriangle) {
-                  // Log triangle for debugging
-                  console.log(\`[renderPipelineStage] ITERATION 36: Highlighted remaining triangle: [\${quad.verts.join(',')}]\`);
+                  console.log(\`[GHOST HUNT] Highlighted triangle: #\${quadIdx}, type=\${detectedType}, verts=[\${quad.verts?.join(',') || '—'}]\`);
                 }
                 quadCount++;
               }
