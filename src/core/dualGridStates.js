@@ -1846,7 +1846,6 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   // ITERATION 40: Main multi-pass dissolution loop
   while (true) {
     totalPasses++;
-    let mergesThisPass = 0;
     const trianglesAtPassStart = workingTriangles.filter(t => !t.removed).length;
     
     if (debugMode) {
@@ -1942,31 +1941,58 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     }
     
     // ITERATION 40 STEP 4 OPTION B: Enhanced sorting to prevent isolation
-    // Sort by: 1) Border priority, 2) Edge length (shorter = higher priority, prevents long edges from isolating neighbors)
-    internalEdges.sort((a, b) => {
-      // Primary: Border priority (border edges first)
-      const aBorder = isBorderAdjacentEdge(a) ? 1 : 0;
-      const bBorder = isBorderAdjacentEdge(b) ? 1 : 0;
-      if (aBorder !== bBorder) {
-        return bBorder - aBorder; // Border first
-      }
+    // Test different sorting strategies to reduce isolation
+    const sortMode = rng.random() < 0.5 ? 'edge-length' : 'random'; // 50% chance each
+    
+    if (sortMode === 'edge-length') {
+      // Sort by: 1) Border priority, 2) Edge length (shorter = higher priority)
+      internalEdges.sort((a, b) => {
+        // Primary: Border priority (border edges first)
+        const aBorder = isBorderAdjacentEdge(a) ? 1 : 0;
+        const bBorder = isBorderAdjacentEdge(b) ? 1 : 0;
+        if (aBorder !== bBorder) {
+          return bBorder - aBorder; // Border first
+        }
+        
+        // Secondary: Edge length (shorter edges first - prevents long edges from isolating neighbors)
+        const [v1a, v2a] = a.split(',').map(Number);
+        const [v1b, v2b] = b.split(',').map(Number);
+        const p1a = points[v1a];
+        const p2a = points[v2a];
+        const p1b = points[v1b];
+        const p2b = points[v2b];
+        
+        if (p1a && p2a && p1b && p2b) {
+          const lenA = Math.sqrt((p2a.x - p1a.x) ** 2 + (p2a.y - p1a.y) ** 2);
+          const lenB = Math.sqrt((p2b.x - p1b.x) ** 2 + (p2b.y - p1b.y) ** 2);
+          return lenA - lenB; // Shorter edges first
+        }
+        
+        return 0; // Fallback: no change
+      });
+    } else {
+      // Random shuffle: Use seeded RNG for reproducibility
+      // Keep border priority but shuffle within border/interior groups
+      const borderEdges = internalEdges.filter(e => isBorderAdjacentEdge(e));
+      const interiorEdges = internalEdges.filter(e => !isBorderAdjacentEdge(e));
       
-      // Secondary: Edge length (shorter edges first - prevents long edges from isolating neighbors)
-      const [v1a, v2a] = a.split(',').map(Number);
-      const [v1b, v2b] = b.split(',').map(Number);
-      const p1a = points[v1a];
-      const p2a = points[v2a];
-      const p1b = points[v1b];
-      const p2b = points[v2b];
+      // Shuffle each group using seeded RNG
+      const shuffle = (arr) => {
+        const shuffled = [...arr];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(rng.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+      };
       
-      if (p1a && p2a && p1b && p2b) {
-        const lenA = Math.sqrt((p2a.x - p1a.x) ** 2 + (p2a.y - p1a.y) ** 2);
-        const lenB = Math.sqrt((p2b.x - p1b.x) ** 2 + (p2b.y - p1b.y) ** 2);
-        return lenA - lenB; // Shorter edges first
-      }
-      
-      return 0; // Fallback: no change
-    });
+      internalEdges.length = 0;
+      internalEdges.push(...shuffle(borderEdges), ...shuffle(interiorEdges));
+    }
+    
+    if (debugMode && totalPasses === 1 && attempts <= 3) {
+      console.log(`[SORT MODE] ${sortMode} (border edges: ${internalEdges.filter(e => isBorderAdjacentEdge(e)).length}, interior: ${internalEdges.length - internalEdges.filter(e => isBorderAdjacentEdge(e)).length})`);
+    }
     
     // ITERATION 36 FIX: Enhanced logging for selection boost with top 10 prioritized edges
     if (debugMode && attempts <= 5) {
@@ -2139,6 +2165,119 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   }
   
   } // End of outer while loop (multi-pass)
+  
+  // ITERATION 40 STEP 5: Boundary Handling Cleanup Pass
+  // Post-multi-pass cleanup: Identify and handle boundary survivors
+  if (debugMode) {
+    console.log(`[BOUNDARY CLEANUP] Starting boundary cleanup pass`);
+  }
+  
+  const survivorsBeforeCleanup = workingTriangles.filter(t => !t.removed);
+  const boundarySurvivors = [];
+  const interiorSurvivors = [];
+  
+  // Build edge map for all original triangles to check boundary status
+  const originalEdgeMap = buildEdgeMap(triangles.map(t => ({ ...t, removed: false })));
+  
+  survivorsBeforeCleanup.forEach(tri => {
+    const triEdges = [
+      getEdgeKey(tri.verts[0], tri.verts[1]),
+      getEdgeKey(tri.verts[1], tri.verts[2]),
+      getEdgeKey(tri.verts[2], tri.verts[0])
+    ];
+    
+    // Count how many edges were originally boundary (sharing=1) or on hull
+    let boundaryEdgeCount = 0;
+    let onHull = false;
+    
+    triEdges.forEach(edgeKey => {
+      const originalSharing = originalEdgeMap.get(edgeKey);
+      if (originalSharing && originalSharing.length === 1) {
+        boundaryEdgeCount++;
+      }
+      if (trueBoundaryEdges && trueBoundaryEdges.has(edgeKey)) {
+        onHull = true;
+      }
+      // Check if vertices are on hull
+      const [v1, v2] = edgeKey.split(',').map(Number);
+      if (hullIndices && (hullIndices.includes(v1) || hullIndices.includes(v2))) {
+        onHull = true;
+      }
+    });
+    
+    // Classify as boundary if: on hull OR has 2+ boundary edges OR has boundary vertices
+    const isBoundary = onHull || boundaryEdgeCount >= 2 || 
+      tri.verts.some(v => points[v]?.isBoundary);
+    
+    if (isBoundary) {
+      boundarySurvivors.push({ tri, boundaryEdgeCount, onHull });
+    } else {
+      interiorSurvivors.push(tri);
+    }
+  });
+  
+  if (debugMode) {
+    console.log(`[BOUNDARY CLEANUP] Found ${boundarySurvivors.length} boundary survivors, ${interiorSurvivors.length} interior survivors`);
+  }
+  
+  // Check for "pseudo-adjacent" survivors via shared edges with quads
+  // Log potential missed early merges
+  const missedMergeCandidates = [];
+  const quadEdgeSet = new Set();
+  quads.forEach(quad => {
+    if (quad.verts && quad.verts.length >= 3) {
+      for (let i = 0; i < quad.verts.length; i++) {
+        const v1 = quad.verts[i];
+        const v2 = quad.verts[(i + 1) % quad.verts.length];
+        quadEdgeSet.add(getEdgeKey(v1, v2));
+      }
+    }
+  });
+  
+  survivorsBeforeCleanup.forEach(tri => {
+    const triEdges = [
+      getEdgeKey(tri.verts[0], tri.verts[1]),
+      getEdgeKey(tri.verts[1], tri.verts[2]),
+      getEdgeKey(tri.verts[2], tri.verts[0])
+    ];
+    
+    const sharedWithQuads = triEdges.filter(e => quadEdgeSet.has(e));
+    if (sharedWithQuads.length > 0) {
+      missedMergeCandidates.push({
+        tri,
+        sharedEdges: sharedWithQuads,
+        reason: 'shares_edges_with_quads'
+      });
+    }
+  });
+  
+  if (debugMode && missedMergeCandidates.length > 0) {
+    console.log(`[BOUNDARY CLEANUP] Found ${missedMergeCandidates.length} survivors sharing edges with quads (potential missed early merges)`);
+    missedMergeCandidates.slice(0, 5).forEach((candidate, idx) => {
+      console.log(`  Candidate ${idx + 1}: verts=[${candidate.tri.verts.join(',')}], shared edges: [${candidate.sharedEdges.join(', ')}]`);
+    });
+  }
+  
+  // For boundary survivors: Log but don't force-remove (safety - may create holes)
+  // Instead, log them for analysis
+  boundarySurvivors.forEach(({ tri, boundaryEdgeCount, onHull }, idx) => {
+    const isIsolated = !finalEdgeMap || (() => {
+      const triEdges = [
+        getEdgeKey(tri.verts[0], tri.verts[1]),
+        getEdgeKey(tri.verts[1], tri.verts[2]),
+        getEdgeKey(tri.verts[2], tri.verts[0])
+      ];
+      return !triEdges.some(e => {
+        const sharing = finalEdgeMap?.get(e);
+        return sharing && sharing.length === 2;
+      });
+    })();
+    
+    if (debugMode) {
+      const reason = isIsolated ? 'isolated_boundary' : 'boundary_with_partner';
+      console.log(`[BOUNDARY CLEANUP] Kept boundary survivor ${idx + 1}: verts=[${tri.verts.join(',')}], reason=${reason}, boundaryEdges=${boundaryEdgeCount}, onHull=${onHull}`);
+    }
+  });
   
   // FINAL MERGE PASS: Deterministic pass to catch remaining valid merges
   // Per audit recommendation: Force-merge valid edges that were skipped due to probability
