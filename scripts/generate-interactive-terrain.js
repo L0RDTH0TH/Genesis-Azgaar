@@ -364,9 +364,6 @@ function generateInteractiveHTML(data) {
     // BULLETPROOF: Catch errors during module initialization
     try {
       console.log('[BULLETPROOF-INIT] Module loading started');
-    } catch (err) {
-      console.error('[BULLETPROOF-ERROR] Module initialization failed:', err);
-    }
     
     // Embedded dual-grid data
     const DUAL_GRID_DATA = ${JSON.stringify(data, null, 2)};
@@ -863,18 +860,18 @@ function generateInteractiveHTML(data) {
       console.log('[AUDIT-STEP2] Starting Canvas render for stage ' + stageKey);
       
       // CANVAS-ONLY-PROOF: Log at start of every render
-      console.log('[CANVAS-ONLY-PROOF] Rendering stage ' + stageKey + ' using Canvas2DRenderer – SVG disabled');
+      console.log('[CANVAS-ONLY-PROOF] Rendering stage ' + stageKey + ' using Canvas2DRenderer - SVG disabled');
       
       // CANVAS-ONLY-PROOF: Force remove any SVG elements from DOM
       const existingSVGs = document.querySelectorAll('svg');
       if (existingSVGs.length > 0) {
-        console.warn('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED – Removing', existingSVGs.length, 'SVG elements');
+        console.warn('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED - Removing', existingSVGs.length, 'SVG elements');
         existingSVGs.forEach(svg => svg.remove());
       }
       
       // CANVAS-ONLY-PROOF: Guard against SVG rendering
       if (document.querySelector('svg')) {
-        throw new Error('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED – ABORTING');
+        throw new Error('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED - ABORTING');
       }
       
       if (!PIPELINE_STAGES) {
@@ -1021,13 +1018,13 @@ function generateInteractiveHTML(data) {
       const canvasProof = document.getElementById('canvas-proof');
       if (canvasProof) {
         canvasProof.classList.add('visible');
-        console.log('[CANVAS-ONLY-PROOF] Red banner displayed – SVG is dead here');
+        console.log('[CANVAS-ONLY-PROOF] Red banner displayed - SVG is dead here');
       }
       
       // CANVAS-ONLY-PROOF: Final SVG check
       const finalSVGCheck = document.querySelector('svg');
       if (finalSVGCheck) {
-        console.error('[CANVAS-ONLY-PROOF] SVG STILL EXISTS AFTER CLEANUP – Removing:', finalSVGCheck);
+        console.error('[CANVAS-ONLY-PROOF] SVG STILL EXISTS AFTER CLEANUP - Removing:', finalSVGCheck);
         finalSVGCheck.remove();
       }
       
@@ -1129,8 +1126,8 @@ function generateInteractiveHTML(data) {
     // ============================================================
     function renderPipelineStage(stageKey) {
       // CANVAS-ONLY-PROOF: SVG rendering is DISABLED
-      console.error('[CANVAS-ONLY-PROOF] SVG RENDERING BLOCKED – renderPipelineStage() called but SVG is disabled');
-      throw new Error('[CANVAS-ONLY-PROOF] SVG rendering is disabled – use Canvas renderer only');
+      console.error('[CANVAS-ONLY-PROOF] SVG RENDERING BLOCKED - renderPipelineStage() called but SVG is disabled');
+      throw new Error('[CANVAS-ONLY-PROOF] SVG rendering is disabled - use Canvas renderer only');
       
       // Code below is disabled but kept for reference
       /*
@@ -1344,7 +1341,7 @@ function generateInteractiveHTML(data) {
                 // ID SPECIFICATION v1.0: Enhanced debug title with ID and lineage
                 const idStr = quad.id ? 'ID: ' + quad.id : 'No ID (fallback)';
                 const lineageStr = quad.lineage?.length ? 'Lineage: [' + quad.lineage.join(', ') + ']' : 'Original';
-                const titleAttr = ' title="' + idStr + ', Type: ' + detectedType + ', Verts: ' + vertCount + ', ' + lineageStr + ', Indices: [' + (quad.verts?.join(',') || '—') + ']"';
+                const titleAttr = ' title="' + idStr + ', Type: ' + detectedType + ', Verts: ' + vertCount + ', ' + lineageStr + ', Indices: [' + (quad.verts?.join(',') || 'none') + ']"';
 
                 const path = renderVerts.map((v, i) => (i === 0 ? 'M' : 'L') + ' ' + v.x.toFixed(2) + ' ' + v.y.toFixed(2)).join(' ') + ' Z';
 
@@ -1359,13 +1356,13 @@ function generateInteractiveHTML(data) {
                   triangleCount++;
                   
                   // VISUAL FIX: Enhanced logging
-                  console.log('[VISUAL-FIX] Applied red fill + thick stroke + layer to triangle: ' + idStr + ', verts=[' + (quad.verts?.join(',') || '—') + ']');
+                  console.log('[VISUAL-FIX] Applied red fill + thick stroke + layer to triangle: ' + idStr + ', verts=[' + (quad.verts?.join(',') || 'none') + ']');
                   
                   // ID SPECIFICATION v1.0: Enhanced logging with IDs
                   if (detectedType !== 'triangle') {
-                    console.warn('[GHOST HUNT] Type mismatch! ' + idStr + ', type=' + detectedType + ', verts=[' + (quad.verts?.join(',') || '—') + ']');
+                    console.warn('[GHOST HUNT] Type mismatch! ' + idStr + ', type=' + detectedType + ', verts=[' + (quad.verts?.join(',') || 'none') + ']');
                   }
-                  console.log('[RENDER TRIANGLE] ' + idStr + ', verts=[' + (quad.verts?.join(',') || '—') + '], type=' + detectedType + ', ' + lineageStr);
+                  console.log('[RENDER TRIANGLE] ' + idStr + ', verts=[' + (quad.verts?.join(',') || 'none') + '], type=' + detectedType + ', ' + lineageStr);
                 } else {
                   // Quads: Keep original blue style (backward compatible)
                   // GHOST-FIX #1: crispEdges prevents blue stroke bleed creating fake triangles at junctions
@@ -1717,16 +1714,16 @@ function generateInteractiveHTML(data) {
               // CANVAS-ONLY-PROOF: Final verification - no SVG should exist
               const svgCheck = document.querySelector('svg');
               if (svgCheck) {
-                console.error('[CANVAS-ONLY-PROOF] CRITICAL: SVG LEAK AFTER CANVAS RENDER – Removing:', svgCheck);
+                console.error('[CANVAS-ONLY-PROOF] CRITICAL: SVG LEAK AFTER CANVAS RENDER - Removing:', svgCheck);
                 svgCheck.remove();
-                throw new Error('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED AFTER RENDER – ABORTING');
+                throw new Error('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED AFTER RENDER - ABORTING');
               }
               return;
             } else {
               // CANVAS-ONLY-PROOF: Canvas failed - DO NOT FALL BACK TO SVG
               console.error('[CANVAS-ONLY-PROOF] Canvas rendering failed for stage:', currentStage, '- NOT falling back to SVG (SVG is disabled)');
               const statusEl = document.getElementById('status');
-              statusEl.textContent = '❌ Canvas render failed for ' + currentStage + ' – SVG fallback disabled (Canvas-only mode)';
+              statusEl.textContent = '❌ Canvas render failed for ' + currentStage + ' - SVG fallback disabled (Canvas-only mode)';
               statusEl.className = 'status';
               return;
             }
@@ -2314,7 +2311,7 @@ function generateInteractiveHTML(data) {
         resetBtn.addEventListener('click', async () => {
           try {
             console.log('[STAGE-START] Reset Grid');
-            quadTerrain.clear();
+      quadTerrain.clear();
             await renderSVG();
             const statusEl = document.getElementById('status');
             if (statusEl) statusEl.textContent = 'Grid reset - Click to generate terrain';
@@ -2339,7 +2336,7 @@ function generateInteractiveHTML(data) {
         clearBtn.addEventListener('click', async () => {
           try {
             console.log('[STAGE-START] Clear Terrain');
-            quadTerrain.clear();
+      quadTerrain.clear();
             await renderSVG();
             const statusEl = document.getElementById('status');
             if (statusEl) statusEl.textContent = 'Terrain cleared - Click to generate terrain';
@@ -2360,13 +2357,13 @@ function generateInteractiveHTML(data) {
     
     // STEP-BY-STEP DEBUG: Stage selector (BULLETPROOF: Wrapped in try/catch)
     try {
-      if (PIPELINE_STAGES) {
+    if (PIPELINE_STAGES) {
         console.log('[BULLETPROOF-INIT] Pipeline stages available:', Object.keys(PIPELINE_STAGES));
-        const stageSelect = document.getElementById('stageSelect');
-        if (stageSelect) {
-          // Initialize to show final stage
-          currentStage = 'final';
-          stageSelect.value = 'final';
+      const stageSelect = document.getElementById('stageSelect');
+      if (stageSelect) {
+        // Initialize to show final stage
+        currentStage = 'final';
+        stageSelect.value = 'final';
           console.log('[BULLETPROOF-INIT] Initialized stage selector, showing:', currentStage);
           
           stageSelect.addEventListener('change', async (e) => {
@@ -2385,13 +2382,13 @@ function generateInteractiveHTML(data) {
               }
               alert('Stage change failed: ' + err.message);
             }
-          });
-          
-          // Initial render will happen after DOM is ready
-        } else {
-          console.error('[BULLETPROOF-ERROR] Stage selector element not found');
-        }
+        });
+        
+        // Initial render will happen after DOM is ready
       } else {
+          console.error('[BULLETPROOF-ERROR] Stage selector element not found');
+      }
+    } else {
         console.log('[BULLETPROOF-INIT] No pipeline stages available - using normal rendering');
       }
     } catch (err) {
@@ -2546,13 +2543,13 @@ function generateInteractiveHTML(data) {
       setTimeout(() => {
         try {
           const canvas = document.getElementById('canvas-renderer');
-          const container = document.getElementById('svg-container');
+        const container = document.getElementById('svg-container');
           const hasCanvasContent = canvas && canvas.getContext('2d') && canvas.width > 0 && canvas.height > 0;
           const hasSVGContent = container && container.innerHTML && container.innerHTML.trim() !== '';
           
           if (!hasCanvasContent && !hasSVGContent && typeof drawTestPattern === 'function') {
             console.warn('[BULLETPROOF-WARN] No content after render - drawing test pattern');
-            drawTestPattern();
+          drawTestPattern();
           }
         } catch (err) {
           console.error('[BULLETPROOF-ERROR] Fallback check failed:', err);
