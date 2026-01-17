@@ -247,8 +247,8 @@ function validateOption(key, value) {
       }
       const defaultRendering = DEFAULT_OPTIONS.rendering;
       const mode = value.mode || defaultRendering.mode;
-      const validModes = ['canvas2d', 'webgl'];
-      const validMode = validModes.includes(mode) ? mode : defaultRendering.mode;
+      const validRenderingModes = ['canvas2d', 'webgl'];
+      const validMode = validRenderingModes.includes(mode) ? mode : defaultRendering.mode;
       
       return {
         mode: validMode,

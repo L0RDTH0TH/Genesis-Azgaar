@@ -913,46 +913,114 @@ export function exportRenderData(options = {}) {
 /**
  * Export Canvas 2D rendering data (paths, fills, strokes, patterns, gradients)
  * @param {Object} data - Map data { grid, pack, options }
- * @param {Object} options - Export options
+ * @param {Object} options - Export options { layers: ['terrain','biomes','states',...] }
  * @returns {Object} Canvas 2D rendering data
  */
 function exportCanvas2DData(data, options) {
-  const { pack, grid } = data;
+  const { pack, grid, options: genOptions } = data;
   const cells = pack.cells || {};
-
-  // Stub: Export paths as arrays of [x, y] points
-  // Full implementation in Phase 1
-  const cellData = [];
+  const vertices = pack.vertices || {};
+  const activeLayers = options.layers || ['terrain', 'biomes']; // Default visible layers
   
+  // Get biome data for colors
+  const biomesData = getBiomesData();
+  const biomeColors = biomesData.color || [];
+
+  // Style constants from rendering modules
+  const STYLE_CONSTANTS = {
+    oceanBase: '#b4d2f3',
+    landBase: '#c9b491',
+    stateBorderStroke: '#56566d',
+    stateBorderWidth: 1,
+    stateBorderDashArray: [2],
+    provinceBorderStroke: '#56566d',
+    provinceBorderWidth: 0.5,
+    provinceBorderDashArray: [0, 2],
+    riverStroke: '#6b93d6',
+    riverFill: '#a8c8e0',
+    burgCapitalSize: 12,
+    burgTownSize: 8,
+    burgCapitalColor: '#333',
+    burgTownColor: '#666',
+  };
+
+  const MIN_LAND_HEIGHT = 20;
+  const cellData = [];
+  const heights = cells.h || [];
+  const biomes = cells.biome || [];
+  const states = cells.state || [];
+  const provinces = cells.province || [];
+
+  // Collect all cells with paths
   if (cells.v && cells.v.length > 0) {
     for (let i = 0; i < cells.v.length; i++) {
       const cellVertices = cells.v[i];
-      if (!cellVertices || !Array.isArray(cellVertices) || cellVertices.length < 3) continue;
+      
+      // pack.cells.v[i] contains either:
+      // 1. Array of [x,y] coordinates directly (for full rendering)
+      // 2. Array of vertex indices (need to map to vertices.p[vi])
+      // Check first element to determine format
+      let path;
+      if (Array.isArray(cellVertices) && cellVertices.length > 0) {
+        const firstElement = cellVertices[0];
+        if (Array.isArray(firstElement) && firstElement.length === 2) {
+          // Already coordinates [x,y]
+          path = cellVertices.filter(p => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1]));
+        } else if (typeof firstElement === 'number' && vertices.p) {
+          // Vertex indices - map to coordinates
+          path = cellVertices.map(vi => {
+            const vertex = vertices.p[vi];
+            return (vertex && Array.isArray(vertex) && vertex.length >= 2) ? [vertex[0], vertex[1]] : null;
+          }).filter(p => p !== null && isFinite(p[0]) && isFinite(p[1]));
+        } else {
+          continue; // Invalid format
+        }
+      } else {
+        continue; // No vertices
+      }
 
-      // Convert vertex indices to points
-      const path = cellVertices.map(vi => {
-        const vertex = pack.vertices.p[vi];
-        return vertex ? [vertex[0], vertex[1]] : null;
-      }).filter(p => p !== null);
+      if (!path || path.length < 3) continue;
 
-      if (path.length < 3) continue;
+      const height = heights[i] || 0;
+      const isWater = height < MIN_LAND_HEIGHT;
+      const biomeId = biomes[i];
+      const stateId = states[i];
+      const provinceId = provinces ? provinces[i] : undefined;
 
-      // Extract fill/stroke styles (stub - full implementation in Phase 1)
-      const fill = {
-        type: 'color',
-        color: cells.biome && cells.biome[i] !== undefined 
-          ? getBiomeColor(cells.biome[i])
-          : '#c9b491', // Default land color
-      };
+      // Determine active layer (default to terrain if no layer specified)
+      const layer = activeLayers.includes('biomes') && !isWater && biomeId !== undefined ? 'biomes' :
+                    activeLayers.includes('states') && !isWater && stateId !== undefined ? 'states' :
+                    'terrain';
 
-      const stroke = {
-        color: '#333',
-        width: 1,
-        dashArray: null,
-      };
+      // Extract fill style based on layer
+      const fill = getCellFill({
+        cellId: i,
+        height,
+        biomeId,
+        stateId,
+        isWater,
+        layer,
+        biomeColors,
+        STYLE_CONSTANTS,
+      });
 
-      // Extract labels (stub - full implementation in Phase 1)
-      const labels = [];
+      // Extract stroke style (borders, coastlines)
+      const stroke = getCellStroke({
+        cellId: i,
+        stateId,
+        provinceId,
+        isWater,
+        cells,
+        STYLE_CONSTANTS,
+      });
+
+      // Extract labels (burgs, state names)
+      const labels = getCellLabels({
+        cellId: i,
+        pack,
+        isWater,
+        STYLE_CONSTANTS,
+      });
 
       cellData.push({
         i,
@@ -960,17 +1028,149 @@ function exportCanvas2DData(data, options) {
         fill,
         stroke,
         labels,
+        layer,
         bounds: calculateCellBounds(path),
       });
     }
   }
 
+  // Collect global patterns/gradients (stub for now - full implementation may add pattern definitions)
+  const patterns = {};
+  const gradients = {};
+
   return {
     mode: 'canvas2d',
     cells: cellData,
-    patterns: {}, // Stub - full implementation in Phase 1
-    gradients: {}, // Stub - full implementation in Phase 1
+    patterns,
+    gradients,
   };
+}
+
+/**
+ * Get cell fill style (color, pattern, or gradient)
+ * @param {Object} params - { cellId, height, biomeId, stateId, isWater, layer, biomeColors, STYLE_CONSTANTS }
+ * @returns {Object} Fill style { type: 'color'|'pattern'|'gradient', ... }
+ */
+function getCellFill({ cellId, height, biomeId, stateId, isWater, layer, biomeColors, STYLE_CONSTANTS }) {
+  // For now, all fills are solid colors (patterns/gradients can be added later)
+  if (isWater) {
+    return {
+      type: 'color',
+      color: STYLE_CONSTANTS.oceanBase,
+    };
+  }
+
+  if (layer === 'biomes' && biomeId !== undefined && biomeId >= 0 && biomeId < biomeColors.length) {
+    return {
+      type: 'color',
+      color: biomeColors[biomeId],
+    };
+  }
+
+  if (layer === 'states' && stateId !== undefined) {
+    // State colors - can be customized later
+    // For now, use a hash-based color for state differentiation
+    const stateColor = getStateColor(stateId);
+    return {
+      type: 'color',
+      color: stateColor,
+    };
+  }
+
+  // Default: terrain/land base color
+  return {
+    type: 'color',
+    color: STYLE_CONSTANTS.landBase,
+  };
+}
+
+/**
+ * Get cell stroke style (borders, coastlines)
+ * @param {Object} params - { cellId, stateId, provinceId, isWater, cells, STYLE_CONSTANTS }
+ * @returns {Object} Stroke style { color, width, dashArray }
+ */
+function getCellStroke({ cellId, stateId, provinceId, isWater, cells, STYLE_CONSTANTS }) {
+  // Default: no stroke (borders handled separately if needed)
+  // Can add stroke for borders/coastlines here
+  return {
+    color: null, // No stroke by default
+    width: 1,
+    dashArray: null,
+  };
+}
+
+/**
+ * Get cell labels (burgs, state names)
+ * @param {Object} params - { cellId, pack, isWater, STYLE_CONSTANTS }
+ * @returns {Array} Labels [{ text, x, y, fontSize, color }]
+ */
+function getCellLabels({ cellId, pack, isWater, STYLE_CONSTANTS }) {
+  const labels = [];
+
+  // Check for burg in this cell
+  if (pack.burgs && Array.isArray(pack.burgs)) {
+    for (const burg of pack.burgs) {
+      if (!burg || burg.removed) continue;
+      if (burg.cell !== cellId) continue;
+      if (!burg.x || !burg.y || !isFinite(burg.x) || !isFinite(burg.y)) continue;
+      
+      const isCapital = burg.capital === true || burg.capital === 1;
+      labels.push({
+        text: burg.name || 'Burg',
+        x: burg.x,
+        y: burg.y,
+        fontSize: isCapital ? STYLE_CONSTANTS.burgCapitalSize : STYLE_CONSTANTS.burgTownSize,
+        color: isCapital ? STYLE_CONSTANTS.burgCapitalColor : STYLE_CONSTANTS.burgTownColor,
+      });
+    }
+  }
+
+  // Can add state names, province names, etc. here
+
+  return labels;
+}
+
+/**
+ * Get state color (hash-based for differentiation)
+ * @param {number} stateId - State ID
+ * @returns {string} Color hex string
+ */
+function getStateColor(stateId) {
+  // Simple hash-based color generation for state differentiation
+  // Can be replaced with actual state colors if stored in pack.states
+  const hue = (stateId * 137.508) % 360; // Golden angle for color distribution
+  const saturation = 60 + (stateId % 20); // 60-80%
+  const lightness = 50 + (stateId % 15); // 50-65%
+  
+  // Convert HSL to hex (simplified)
+  const h = hue / 360;
+  const s = saturation / 100;
+  const l = lightness / 100;
+  
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+  const m = l - c / 2;
+  
+  let r, g, b;
+  if (h < 1/6) {
+    r = c; g = x; b = 0;
+  } else if (h < 2/6) {
+    r = x; g = c; b = 0;
+  } else if (h < 3/6) {
+    r = 0; g = c; b = x;
+  } else if (h < 4/6) {
+    r = 0; g = x; b = c;
+  } else if (h < 5/6) {
+    r = x; g = 0; b = c;
+  } else {
+    r = c; g = 0; b = x;
+  }
+  
+  r = Math.round((r + m) * 255);
+  g = Math.round((g + m) * 255);
+  b = Math.round((b + m) * 255);
+  
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 /**

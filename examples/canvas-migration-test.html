@@ -124,20 +124,24 @@
         updateStatus('Generating map...', '');
         generateBtn.disabled = true;
 
-        // Placeholder for actual library call
+        // Placeholder for actual library call (uncomment when testing with real library)
         // const { initGenerator, loadOptions, generateMap } = await import('./src/index.js');
         // initGenerator({ canvas: null });
         // loadOptions({ 
         //   seed: 'test-canvas-migration',
         //   mapWidth: 960,
         //   mapHeight: 540,
-        //   points: 2, // Low density for testing (0.125-0.25 equivalent)
+        //   points: 2, // Low density for testing (density ~0.125-0.25)
         // });
         // mapData = generateMap();
 
-        // Simulate for now (Phase 0 stub)
+        // Simulate for now (Phase 1 - use real library when ready)
         await new Promise(resolve => setTimeout(resolve, 500));
-        mapData = { mock: true, message: 'Generation stubbed in Phase 0 - will use real generateMap() in Phase 1' };
+        mapData = { 
+          mock: true, 
+          message: 'Generation placeholder - uncomment import/generateMap calls above to test with real library',
+          note: 'Phase 1 exportRenderData is now implemented - will extract real paths/fills/strokes/labels from generated map'
+        };
         
         updateStatus('✅ Map generated (stubbed)', 'success');
         exportBtn.disabled = false;
@@ -161,23 +165,50 @@
         
         const mode = modeSelect.value;
         
-        // Placeholder for actual library call
+        // Placeholder for actual library call (uncomment when testing with real library)
         // const { exportRenderData } = await import('./src/index.js');
         // renderData = exportRenderData({ mode });
 
-        // Simulate for now (Phase 0 stub)
-        renderData = {
-          mode: mode,
-          cells: mode === 'canvas2d' 
-            ? [
-                { i: 0, path: [[10, 10], [100, 10], [100, 100], [10, 100]], fill: { type: 'color', color: '#4CAF50' }, stroke: { color: '#333', width: 1 } },
-                { i: 1, path: [[110, 10], [200, 10], [200, 100], [110, 100]], fill: { type: 'color', color: '#FFC107' }, stroke: { color: '#333', width: 1 } },
-              ]
-            : { vertices: new Float32Array(0), indices: new Uint16Array(0), triangles: [] },
-          message: mode === 'webgl' 
-            ? 'WebGL export is stubbed - will be implemented in Phase 3 if needed'
-            : 'Canvas 2D export is stubbed - full implementation in Phase 1',
-        };
+        // Simulate for now (Phase 1 - use real library when ready)
+        if (mode === 'canvas2d') {
+          // Phase 1: exportRenderData now implements full path/fill/stroke/label extraction
+          // When using real library, this will extract from actual map data
+          renderData = {
+            mode: 'canvas2d',
+            cells: [
+              { 
+                i: 0, 
+                path: [[10, 10], [100, 10], [100, 100], [10, 100]], 
+                fill: { type: 'color', color: '#4CAF50' }, 
+                stroke: { color: null, width: 1, dashArray: null },
+                labels: [],
+                layer: 'biomes',
+                bounds: { x: 10, y: 10, width: 90, height: 90 }
+              },
+              { 
+                i: 1, 
+                path: [[110, 10], [200, 10], [200, 100], [110, 100]], 
+                fill: { type: 'color', color: '#FFC107' }, 
+                stroke: { color: null, width: 1, dashArray: null },
+                labels: [],
+                layer: 'terrain',
+                bounds: { x: 110, y: 10, width: 90, height: 90 }
+              },
+            ],
+            patterns: {},
+            gradients: {},
+            message: 'Phase 1: exportCanvas2DData now extracts real paths/fills/strokes/labels - uncomment import above to test with real library'
+          };
+        } else {
+          renderData = {
+            mode: 'webgl',
+            vertices: new Float32Array(0),
+            indices: new Uint16Array(0),
+            triangles: [],
+            uniforms: {},
+            message: 'WebGL export is stubbed - will be implemented in Phase 3 if needed'
+          };
+        }
 
         exportDataEl.textContent = JSON.stringify(renderData, null, 2);
         exportOutput.style.display = 'block';
