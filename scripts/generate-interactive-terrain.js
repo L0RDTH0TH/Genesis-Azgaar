@@ -364,6 +364,9 @@ function generateInteractiveHTML(data) {
     // BULLETPROOF: Catch errors during module initialization
     try {
       console.log('[BULLETPROOF-INIT] Module loading started');
+    } catch (err) {
+      console.error('[BULLETPROOF-ERROR] Module initialization failed:', err);
+    }
     
     // Embedded dual-grid data
     const DUAL_GRID_DATA = ${JSON.stringify(data, null, 2)};
