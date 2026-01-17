@@ -62,6 +62,13 @@ const DEFAULT_OPTIONS = {
   
   // Rendering options (Phase 5)
   fullRendering: false, // Use full Voronoi pack for polygon rendering (slower but better quality)
+  
+  // Canvas-only migration options (Phase 0 - Option 1 & 3 prep)
+  rendering: {
+    mode: 'canvas2d', // 'canvas2d' | 'webgl' - Renderer mode
+    useWebGL: false, // Attempt to use WebGL if available
+    fallbackTo2D: true, // Fallback to Canvas 2D if WebGL unavailable
+  },
 
   // Dual-grid politics (experimental)
   useDualGridPolitics: false, // Enable dual-grid politics mode (experimental)
@@ -232,6 +239,21 @@ function validateOption(key, value) {
           15,
           30
         ),
+      };
+    case 'rendering':
+      // Validate rendering object
+      if (!value || typeof value !== 'object') {
+        return DEFAULT_OPTIONS.rendering;
+      }
+      const defaultRendering = DEFAULT_OPTIONS.rendering;
+      const mode = value.mode || defaultRendering.mode;
+      const validModes = ['canvas2d', 'webgl'];
+      const validMode = validModes.includes(mode) ? mode : defaultRendering.mode;
+      
+      return {
+        mode: validMode,
+        useWebGL: value.useWebGL === true ? true : (value.useWebGL === false ? false : defaultRendering.useWebGL),
+        fallbackTo2D: value.fallbackTo2D !== false, // Default true
       };
     default:
       return value;

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvas-Only Migration Test (Phase 0)</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 24px;
+    }
+    .controls {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+    }
+    button {
+      padding: 8px 16px;
+      margin-right: 10px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    #map-preview {
+      background: #e8f4f8;
+      border: 2px solid #4a4a4a;
+      border-radius: 5px;
+      display: block;
+    }
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+    .status.error {
+      background: #4a2a2a;
+      color: #ff6666;
+    }
+    .status.success {
+      background: #2a4a2a;
+      color: #66ff66;
+    }
+    pre {
+      background: #2a2a2a;
+      padding: 10px;
+      border-radius: 5px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎨 Canvas-Only Migration Test (Phase 0)</h1>
+    <div class="controls">
+      <button id="generateBtn">Generate Map</button>
+      <button id="exportBtn">Export Render Data</button>
+      <button id="renderBtn">Render to Canvas</button>
+      <label style="margin-left: 20px; color: #aaa;">
+        Mode:
+        <select id="modeSelect" style="margin-left: 8px; padding: 4px; background: #2a2a2a; color: #fff; border: 1px solid #666; border-radius: 4px;">
+          <option value="canvas2d" selected>Canvas 2D</option>
+          <option value="webgl">WebGL (Stub)</option>
+        </select>
+      </label>
+    </div>
+    <canvas id="map-preview" width="960" height="540"></canvas>
+    <div id="status" class="status">Ready - Click "Generate Map" to start</div>
+    <div id="exportOutput" style="display: none; margin-top: 15px;">
+      <h3>Export Data Preview:</h3>
+      <pre id="exportData"></pre>
+    </div>
+  </div>
+
+  <script type="module">
+    // Import library (assuming bundled or using import maps)
+    // In real usage, this would be: import { initGenerator, loadOptions, generateMap, exportRenderData, getRenderer } from './path/to/library.js';
+    // For now, we'll use a placeholder that shows the expected API
+
+    const statusEl = document.getElementById('status');
+    const canvas = document.getElementById('map-preview');
+    const generateBtn = document.getElementById('generateBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const renderBtn = document.getElementById('renderBtn');
+    const modeSelect = document.getElementById('modeSelect');
+    const exportOutput = document.getElementById('exportOutput');
+    const exportDataEl = document.getElementById('exportData');
+
+    let mapData = null;
+    let renderData = null;
+    let renderer = null;
+
+    function updateStatus(message, type = '') {
+      statusEl.textContent = message;
+      statusEl.className = 'status' + (type ? ' ' + type : '');
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      try {
+        updateStatus('Generating map...', '');
+        generateBtn.disabled = true;
+
+        // Placeholder for actual library call
+        // const { initGenerator, loadOptions, generateMap } = await import('./src/index.js');
+        // initGenerator({ canvas: null });
+        // loadOptions({ 
+        //   seed: 'test-canvas-migration',
+        //   mapWidth: 960,
+        //   mapHeight: 540,
+        //   points: 2, // Low density for testing (0.125-0.25 equivalent)
+        // });
+        // mapData = generateMap();
+
+        // Simulate for now (Phase 0 stub)
+        await new Promise(resolve => setTimeout(resolve, 500));
+        mapData = { mock: true, message: 'Generation stubbed in Phase 0 - will use real generateMap() in Phase 1' };
+        
+        updateStatus('✅ Map generated (stubbed)', 'success');
+        exportBtn.disabled = false;
+        renderBtn.disabled = false;
+      } catch (error) {
+        updateStatus(`❌ Error: ${error.message}`, 'error');
+        console.error('Generation error:', error);
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+
+    exportBtn.addEventListener('click', () => {
+      try {
+        if (!mapData) {
+          updateStatus('❌ Generate map first', 'error');
+          return;
+        }
+
+        updateStatus('Exporting render data...', '');
+        
+        const mode = modeSelect.value;
+        
+        // Placeholder for actual library call
+        // const { exportRenderData } = await import('./src/index.js');
+        // renderData = exportRenderData({ mode });
+
+        // Simulate for now (Phase 0 stub)
+        renderData = {
+          mode: mode,
+          cells: mode === 'canvas2d' 
+            ? [
+                { i: 0, path: [[10, 10], [100, 10], [100, 100], [10, 100]], fill: { type: 'color', color: '#4CAF50' }, stroke: { color: '#333', width: 1 } },
+                { i: 1, path: [[110, 10], [200, 10], [200, 100], [110, 100]], fill: { type: 'color', color: '#FFC107' }, stroke: { color: '#333', width: 1 } },
+              ]
+            : { vertices: new Float32Array(0), indices: new Uint16Array(0), triangles: [] },
+          message: mode === 'webgl' 
+            ? 'WebGL export is stubbed - will be implemented in Phase 3 if needed'
+            : 'Canvas 2D export is stubbed - full implementation in Phase 1',
+        };
+
+        exportDataEl.textContent = JSON.stringify(renderData, null, 2);
+        exportOutput.style.display = 'block';
+        
+        updateStatus(`✅ Render data exported (mode: ${mode})`, 'success');
+      } catch (error) {
+        updateStatus(`❌ Export error: ${error.message}`, 'error');
+        console.error('Export error:', error);
+      }
+    });
+
+    renderBtn.addEventListener('click', () => {
+      try {
+        if (!renderData) {
+          updateStatus('❌ Export render data first', 'error');
+          return;
+        }
+
+        updateStatus('Rendering to canvas...', '');
+        
+        const mode = modeSelect.value;
+        
+        // Placeholder for actual library call
+        // const { getRenderer } = await import('./src/index.js');
+        // renderer = getRenderer(canvas, { mode, fallbackTo2D: true });
+
+        // Simulate for now (Phase 0 stub)
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        if (mode === 'canvas2d' && renderData.cells && Array.isArray(renderData.cells)) {
+          // Stub rendering: draw sample cells
+          renderData.cells.forEach(cell => {
+            if (!cell.path || cell.path.length < 3) return;
+            
+            ctx.fillStyle = cell.fill?.color || '#ffffff';
+            ctx.strokeStyle = cell.stroke?.color || '#333';
+            ctx.lineWidth = cell.stroke?.width || 1;
+            
+            ctx.beginPath();
+            ctx.moveTo(cell.path[0][0], cell.path[0][1]);
+            for (let i = 1; i < cell.path.length; i++) {
+              ctx.lineTo(cell.path[i][0], cell.path[i][1]);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          });
+        } else if (mode === 'webgl') {
+          updateStatus('⚠️ WebGL rendering is stubbed - falling back to Canvas 2D', 'error');
+          // Would use PixiRenderer in Phase 3
+        }
+        
+        updateStatus('✅ Rendered to canvas (stub - full rendering in Phase 1)', 'success');
+      } catch (error) {
+        updateStatus(`❌ Render error: ${error.message}`, 'error');
+        console.error('Render error:', error);
+      }
+    });
+
+    // Test WebGL fallback
+    modeSelect.addEventListener('change', () => {
+      if (modeSelect.value === 'webgl') {
+        updateStatus('⚠️ WebGL mode selected - will fallback to Canvas 2D if unavailable', '');
+      }
+    });
+  </script>
+</body>
+</html>

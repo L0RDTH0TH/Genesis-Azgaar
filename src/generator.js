@@ -42,12 +42,16 @@ import {
   assignVariantsToQuads,
   mapDualGridStatesToPack,
 } from './core/index.js';
+import { getDefaultBiomes as getBiomesData } from './core/biomes.js';
 import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
 import { renderMap } from './rendering/canvas.js';
 import { renderMapSVG } from './rendering/svg.js';
+import { Canvas2DRenderer } from './rendering/canvas2d.js';
+import { PixiRenderer } from './rendering/webgl.js';
 import {
   validateSkipPhases,
+  validatePhaseNames,
   validatePhaseDependencies,
   resolvePhaseDependencies,
   executePhaseWithWrapper,
@@ -210,15 +214,15 @@ function getPhaseFunction(phase) {
   switch (phase) {
     case PHASES.VORONOI:
       return ({ stateData, rng, DelaunatorClass }) => {
-        const grid = createVoronoiDiagram(
-          {
+  const grid = createVoronoiDiagram(
+    {
             mapWidth: stateData.options.mapWidth,
             mapHeight: stateData.options.mapHeight,
             cellsDesired: stateData.options.cellsDesired,
-          },
-          rng,
-          DelaunatorClass
-        );
+    },
+    rng,
+    DelaunatorClass
+  );
         return { ...stateData, grid };
       };
       
@@ -276,36 +280,36 @@ function getPhaseFunction(phase) {
     case PHASES.PACK_CREATION:
       return ({ stateData, DelaunatorClass }) => {
         const useFullPack = stateData.options.fullRendering === true || state.canvas !== null;
-        let pack;
-        
-        if (useFullPack) {
+  let pack;
+  
+  if (useFullPack) {
           pack = createPackFromGrid({ grid: stateData.grid, options: stateData.options, DelaunatorClass });
-        } else {
+  } else {
           pack = createSimplifiedPack(stateData.grid, stateData.options);
           pack.cells.h = stateData.grid.cells.h;
-          for (let i = 0; i < pack.cells.i.length; i++) {
-            pack.cells.g[i] = i;
-          }
-        }
+    for (let i = 0; i < pack.cells.i.length; i++) {
+      pack.cells.g[i] = i;
+    }
+  }
         return { ...stateData, pack };
       };
-      
+
     case PHASES.RIVERS:
       return ({ stateData, rng }) => {
-        generateRivers({
+  generateRivers({
           grid: stateData.grid,
           pack: stateData.pack,
           options: stateData.options,
-          rng,
+    rng,
           precipitation: stateData.grid.cells.prec,
           allowErosion: stateData.options.allowErosion !== false,
-        });
+  });
         return stateData;
       };
       
     case PHASES.BIOMES:
       return ({ stateData }) => {
-        const biomesData = getDefaultBiomes();
+  const biomesData = getDefaultBiomes();
         assignBiomes({ pack: stateData.pack, grid: stateData.grid, options: stateData.options, biomesData });
         return stateData;
       };
@@ -346,7 +350,7 @@ function getPhaseFunction(phase) {
           assignPatternsToQuads(stateData.pack.dualGrid, stateData.pack, stateData.options);
           assignVariantsToQuads(stateData.pack.dualGrid, stateData.options);
           mapDualGridStatesToPack(stateData.pack.dualGrid, stateData.pack, stateData.grid, stateData.options, rng);
-        }
+  }
         return stateData;
       };
       
@@ -366,12 +370,12 @@ function getPhaseFunction(phase) {
       return ({ stateData, rng }) => {
         if (stateData.options.religionsNumber > 0) {
           generateReligions({ pack: stateData.pack, options: stateData.options, rng });
-        } else {
+  } else {
           stateData.pack.religions = [{ name: 'No religion', i: 0 }];
           if (!stateData.pack.cells.religion) {
             stateData.pack.cells.religion = createTypedArray({ maxValue: 65535, length: stateData.pack.cells.i.length });
-          }
-        }
+    }
+  }
         return stateData;
       };
       
@@ -877,5 +881,191 @@ export function loadMapData(jsonData) {
       throw error;
     }
     throw new InvalidOptionError('jsonData', jsonData, `Failed to load map data: ${error.message}`);
+  }
+}
+
+/**
+ * Export rendering data for Canvas-only migration (Option 1 & 3)
+ * Returns Canvas 2D path-based JSON or WebGL mesh data
+ * @param {Object} options - Export options { mode: 'canvas2d'|'webgl', ... }
+ * @returns {Object} Rendering data (paths for Canvas 2D or meshes for WebGL)
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ */
+export function exportRenderData(options = {}) {
+  requireInitialized();
+
+  if (!state.data) {
+    throw new NoDataError();
+  }
+
+  const mode = options.mode || 'canvas2d';
+  
+  if (mode === 'canvas2d') {
+    return exportCanvas2DData(state.data, options);
+  } else if (mode === 'webgl') {
+    return exportWebGLData(state.data, options);
+  } else {
+    throw new InvalidOptionError('options.mode', mode, `Invalid mode: ${mode}. Must be 'canvas2d' or 'webgl'`);
+  }
+}
+
+/**
+ * Export Canvas 2D rendering data (paths, fills, strokes, patterns, gradients)
+ * @param {Object} data - Map data { grid, pack, options }
+ * @param {Object} options - Export options
+ * @returns {Object} Canvas 2D rendering data
+ */
+function exportCanvas2DData(data, options) {
+  const { pack, grid } = data;
+  const cells = pack.cells || {};
+
+  // Stub: Export paths as arrays of [x, y] points
+  // Full implementation in Phase 1
+  const cellData = [];
+  
+  if (cells.v && cells.v.length > 0) {
+    for (let i = 0; i < cells.v.length; i++) {
+      const cellVertices = cells.v[i];
+      if (!cellVertices || !Array.isArray(cellVertices) || cellVertices.length < 3) continue;
+
+      // Convert vertex indices to points
+      const path = cellVertices.map(vi => {
+        const vertex = pack.vertices.p[vi];
+        return vertex ? [vertex[0], vertex[1]] : null;
+      }).filter(p => p !== null);
+
+      if (path.length < 3) continue;
+
+      // Extract fill/stroke styles (stub - full implementation in Phase 1)
+      const fill = {
+        type: 'color',
+        color: cells.biome && cells.biome[i] !== undefined 
+          ? getBiomeColor(cells.biome[i])
+          : '#c9b491', // Default land color
+      };
+
+      const stroke = {
+        color: '#333',
+        width: 1,
+        dashArray: null,
+      };
+
+      // Extract labels (stub - full implementation in Phase 1)
+      const labels = [];
+
+      cellData.push({
+        i,
+        path,
+        fill,
+        stroke,
+        labels,
+        bounds: calculateCellBounds(path),
+      });
+    }
+  }
+
+  return {
+    mode: 'canvas2d',
+    cells: cellData,
+    patterns: {}, // Stub - full implementation in Phase 1
+    gradients: {}, // Stub - full implementation in Phase 1
+  };
+}
+
+/**
+ * Export WebGL rendering data (meshes, triangles, shader uniforms)
+ * @param {Object} data - Map data { grid, pack, options }
+ * @param {Object} options - Export options
+ * @returns {Object} WebGL rendering data
+ */
+function exportWebGLData(data, options) {
+  console.warn('[exportWebGLData] WebGL export is stubbed - not yet implemented');
+  
+  // Stub: Return empty mesh data
+  // Full implementation in Phase 3 (if needed)
+  return {
+    mode: 'webgl',
+    vertices: new Float32Array(0),
+    indices: new Uint16Array(0),
+    triangles: [],
+    uniforms: {},
+  };
+}
+
+/**
+ * Helper: Get biome color (stub - full implementation in Phase 1)
+ * @param {number} biomeId - Biome ID
+ * @returns {string} Color hex string
+ */
+function getBiomeColor(biomeId) {
+  try {
+    const biomesData = getBiomesData();
+    const colors = biomesData.color || [];
+    if (biomeId >= 0 && biomeId < colors.length) {
+      return colors[biomeId];
+    }
+  } catch (error) {
+    // Fallback if biomes not available
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('[getBiomeColor] Biome data not available, using default color');
+    }
+  }
+  return '#4CAF50'; // Default green
+}
+
+/**
+ * Helper: Calculate cell bounds from path
+ * @param {Array<Array<number>>} path - Array of [x, y] points
+ * @returns {Object} Bounds { x, y, width, height }
+ */
+function calculateCellBounds(path) {
+  if (!path || path.length === 0) {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of path) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+/**
+ * Get renderer instance (factory for Canvas 2D or WebGL renderer)
+ * @param {HTMLCanvasElement} canvas - Canvas element
+ * @param {Object} options - Renderer options { mode: 'canvas2d'|'webgl', fallbackTo2D: true, ... }
+ * @returns {Renderer} Renderer instance (Canvas2DRenderer or PixiRenderer)
+ * @throws {InvalidOptionError} If mode is invalid or WebGL unavailable
+ */
+export function getRenderer(canvas, options = {}) {
+  const mode = options.mode || 'canvas2d';
+  const fallbackTo2D = options.fallbackTo2D !== false;
+
+  if (mode === 'canvas2d') {
+    return new Canvas2DRenderer(canvas, options);
+  } else if (mode === 'webgl') {
+    try {
+      return new PixiRenderer(canvas, options);
+    } catch (error) {
+      if (fallbackTo2D) {
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('[getRenderer] WebGL not available, falling back to Canvas 2D');
+        }
+        return new Canvas2DRenderer(canvas, options);
+      }
+      throw new InvalidOptionError('options.mode', mode, `WebGL not available: ${error.message}`);
+    }
+  } else {
+    throw new InvalidOptionError('options.mode', mode, `Invalid mode: ${mode}. Must be 'canvas2d' or 'webgl'`);
   }
 }

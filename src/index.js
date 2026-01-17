@@ -16,6 +16,8 @@ export {
   renderPreviewSVG,
   loadMapData,
   resetGeneratorState,
+  exportRenderData,
+  getRenderer,
 } from './generator.js';
 
 // Utility exports (for advanced usage)
@@ -24,3 +26,8 @@ export { RNG } from './utils/rng.js';
 
 // Re-export core modules for advanced usage
 export * from './core/index.js';
+
+// Re-export renderers for advanced usage
+export { Canvas2DRenderer } from './rendering/canvas2d.js';
+export { PixiRenderer } from './rendering/webgl.js';
+export { Renderer } from './rendering/renderer-interface.js';

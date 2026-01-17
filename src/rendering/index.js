@@ -16,3 +16,8 @@ export {
   drawBurgsSVG,
   drawFeaturesSVG,
 } from './svg.js';
+
+// Canvas-only migration renderers (Phase 0)
+export { Canvas2DRenderer } from './canvas2d.js';
+export { PixiRenderer } from './webgl.js';
+export { Renderer } from './renderer-interface.js';
