@@ -1586,7 +1586,7 @@ function generateInteractiveHTML(data) {
         }
         
         // Build complete SVG (use mapWidth/mapHeight for container size, viewBox for scaling)
-        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + mapWidth + '" height="' + mapHeight + '" viewBox="' + viewBoxX + ' ' + viewBoxY + ' ' + viewBoxWidth + ' ' + viewBoxHeight + '" preserveAspectRatio="xMidYMid meet" overflow="visible">\n' + layers.join('\\n') + '\n</svg>';
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + mapWidth + '" height="' + mapHeight + '" viewBox="' + viewBoxX + ' ' + viewBoxY + ' ' + viewBoxWidth + ' ' + viewBoxHeight + '" preserveAspectRatio="xMidYMid meet" overflow="visible">' + '\\n' + layers.join('\\n') + '\\n' + '</svg>';
         
         // Clear container fully before rendering
         container.innerHTML = '';
