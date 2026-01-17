@@ -358,6 +358,9 @@ function generateInteractiveHTML(data) {
       alert('Unhandled promise rejection: ' + errorMsg);
     });
     
+    // SYNTAX-CHECK: Page loaded - no syntax errors so far
+    console.log('[SYNTAX-CHECK] Page loaded - no syntax errors so far');
+    
     // BULLETPROOF: Catch errors during module initialization
     try {
       console.log('[BULLETPROOF-INIT] Module loading started');
@@ -1277,16 +1280,15 @@ function generateInteractiveHTML(data) {
         let selfIntersectingCount = 0;
         
         // VISUAL FIX #4 (Optional): Red glow filter in defs (commented out by default)
-        const redGlowFilter = \`
-        <defs>
-          <filter id="redGlow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="2.5" result="blur"/>
-            <feMerge>
-              <feMergeNode in="blur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>\`;
+        const redGlowFilter = '<defs>' +
+          '<filter id="redGlow" x="-50%" y="-50%" width="200%" height="200%">' +
+            '<feGaussianBlur stdDeviation="2.5" result="blur"/>' +
+            '<feMerge>' +
+              '<feMergeNode in="blur"/>' +
+              '<feMergeNode in="SourceGraphic"/>' +
+            '</feMerge>' +
+          '</filter>' +
+        '</defs>';
         // Uncomment next line to enable red glow on triangles:
         // layers.push(redGlowFilter);
         
@@ -1460,7 +1462,7 @@ function generateInteractiveHTML(data) {
         const finalPoints = stage.data.dualPoints || stage.data.points;
         if (!finalPoints || !Array.isArray(finalPoints) || finalPoints.length === 0) {
           console.warn('No final points available');
-          layers.push(\`<text x="0" y="0" font-size="24" fill="red" text-anchor="middle">No final data</text>\`);
+          layers.push('<text x="0" y="0" font-size="24" fill="red" text-anchor="middle">No final data</text>');
         } else {
           const finalCentroidX = finalPoints.reduce((sum, p) => sum + (p.x || 0), 0) / finalPoints.length;
           const finalCentroidY = finalPoints.reduce((sum, p) => sum + (p.y || 0), 0) / finalPoints.length;
@@ -1842,10 +1844,10 @@ function generateInteractiveHTML(data) {
         });
         
         // Draw faint blue circle r=500 at origin
-        layers.push(\`<circle cx="0" cy="0" r="500" fill="none" stroke="blue" stroke-width="1" opacity="0.3" />\`);
+        layers.push('<circle cx="0" cy="0" r="500" fill="none" stroke="blue" stroke-width="1" opacity="0.3" />');
         
         // Keep red 100×100 origin debug rect
-        layers.push(\`<rect x="0" y="0" width="100" height="100" fill="red" opacity="0.8" stroke="black" stroke-width="2" />\`);
+        layers.push('<rect x="0" y="0" width="100" height="100" fill="red" opacity="0.8" stroke="black" stroke-width="2" />');
         console.log('Debug red rect added at (0,0)');
         
         // Debug: Add colored dots for first point (using transformed coordinates)
@@ -1858,7 +1860,7 @@ function generateInteractiveHTML(data) {
           const firstDualOriginal = dualPoints[0];
           const firstDualTransformed = renderPoints[0];
           layers.push('<circle cx="' + firstDualTransformed.x + '" cy="' + firstDualTransformed.y + '" r="6" fill="lime" opacity="0.9" />');
-          console.log(\`Debug markers: Green dot = first transformed point, Lime dot = first dual (transformed)\`);
+          console.log('Debug markers: Green dot = first transformed point, Lime dot = first dual (transformed)');
         }
         
         // FIX 5: Enable quad rendering with rounded dual corners
@@ -2153,10 +2155,10 @@ function generateInteractiveHTML(data) {
         console.error('Render crashed:', err.message, err.stack);
         const container = document.getElementById('svg-container');
         if (container) {
-          container.innerHTML = \`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
-            <rect x="0" y="0" width="960" height="540" fill="#f8e8e8" />
-            <text x="480" y="270" font-family="Arial" font-size="24" fill="red" text-anchor="middle">Render Error - check console</text>
-          </svg>\`;
+          container.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">' +
+            '<rect x="0" y="0" width="960" height="540" fill="#f8e8e8" />' +
+            '<text x="480" y="270" font-family="Arial" font-size="24" fill="red" text-anchor="middle">Render Error - check console</text>' +
+          '</svg>';
         }
       }
     }
@@ -2170,10 +2172,10 @@ function generateInteractiveHTML(data) {
       }
       
       // Create a simple SVG test pattern
-      const testSVG = \`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" style="background: rgba(0,255,0,0.2);">
-        <rect x="50" y="50" width="860" height="440" fill="rgba(0,255,0,0.2)" stroke="green" stroke-width="2" />
-        <text x="100" y="270" font-family="Arial" font-size="30" fill="blue">TEST RENDER - GRID SHOULD BE HERE</text>
-      </svg>\`;
+      const testSVG = '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" style="background: rgba(0,255,0,0.2);">' +
+        '<rect x="50" y="50" width="860" height="440" fill="rgba(0,255,0,0.2)" stroke="green" stroke-width="2" />' +
+        '<text x="100" y="270" font-family="Arial" font-size="30" fill="blue">TEST RENDER - GRID SHOULD BE HERE</text>' +
+      '</svg>';
       container.innerHTML = testSVG;
       console.log('Test pattern drawn - canvas should show green rect + blue text');
     }
