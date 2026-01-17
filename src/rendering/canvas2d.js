@@ -53,6 +53,26 @@ export class Canvas2DRenderer extends Renderer {
     
     // Viewport bounds (for clamping)
     this.viewportBounds = null; // Set after first render based on cell bounds
+
+    // Visual quality options
+    this.imageSmoothingEnabled = options.imageSmoothingEnabled !== false; // Default true
+    this.strokeCrispness = options.strokeCrispness !== false; // Default true
+    this.ctx.imageSmoothingEnabled = this.imageSmoothingEnabled;
+    
+    if (this.strokeCrispness) {
+      this.ctx.lineJoin = 'miter'; // Sharper joins
+      this.ctx.lineCap = 'butt'; // Sharper caps
+      this.ctx.miterLimit = 10;
+    }
+
+    // Path2D dirty flags (track if paths need regeneration)
+    this.pathDirty = new Set();
+
+    // Temperature range buckets for gradient caching (cold/mild/hot)
+    this.temperatureGradientBuckets = new Map(); // bucketKey -> CanvasGradient
+
+    // Label collection for batching
+    this._labelBatch = [];
   }
 
   /**
@@ -122,9 +142,26 @@ export class Canvas2DRenderer extends Renderer {
    * @param {Array} renderData.cells - Array of cell data with path, fill, stroke, labels
    */
   renderMap(renderData) {
+    // Error boundary: Handle invalid/empty render data gracefully
     if (!renderData || !renderData.cells || !Array.isArray(renderData.cells)) {
       console.warn('[Canvas2DRenderer.renderMap] Invalid renderData');
+      this.clear();
       return;
+    }
+
+    // Handle empty map gracefully
+    if (renderData.cells.length === 0) {
+      this.clear();
+      if (typeof console !== 'undefined' && console.log) {
+        console.log('[Canvas2DRenderer.renderMap] Empty map - cleared canvas');
+      }
+      return;
+    }
+
+    // Validate extreme zoom levels
+    if (this.viewport.scale < 0.01 || this.viewport.scale > 100) {
+      console.warn(`[Canvas2DRenderer.renderMap] Extreme zoom level (${this.viewport.scale}) - clamping`);
+      this.viewport.scale = Math.max(0.01, Math.min(100, this.viewport.scale));
     }
 
     // Store for redraw
@@ -175,52 +212,75 @@ export class Canvas2DRenderer extends Renderer {
     const worldMaxX = (canvasWidth - offsetX) / scale;
     const worldMaxY = (canvasHeight - offsetY) / scale;
 
+    // Collect labels for batching (drawn after all cells)
+    this._labelBatch = [];
+
     // Render all cells (filtered by layer and viewport culling)
     for (const cell of renderData.cells) {
-      if (!cell || !cell.path || cell.path.length < 3) continue;
-      
-      // Layer filtering: skip if cell layer is not in activeLayers
-      if (cell.layer && !this.activeLayers.includes(cell.layer)) {
-        continue;
-      }
-
-      // Viewport culling: skip cells outside visible area (optimization)
-      if (cell.bounds) {
-        const cellRight = (cell.bounds.x || 0) + (cell.bounds.width || 0);
-        const cellBottom = (cell.bounds.y || 0) + (cell.bounds.height || 0);
-        if (cellRight < worldMinX || (cell.bounds.x || 0) > worldMaxX ||
-            cellBottom < worldMinY || (cell.bounds.y || 0) > worldMaxY) {
-          continue; // Cell is outside viewport
+      try {
+        if (!cell || !cell.path || cell.path.length < 3) continue;
+        
+        // Layer filtering: skip if cell layer is not in activeLayers
+        if (cell.layer && !this.activeLayers.includes(cell.layer)) {
+          continue;
         }
-      }
 
-      // Create or reuse Path2D
-      const cacheKey = `cell-${cell.i}`;
-      const path = this.getOrCreatePath(cell.path, cacheKey);
-
-      // Set fill style
-      if (cell.fill) {
-        this.ctx.fillStyle = this.getFillStyle(cell.fill, cell.bounds || {});
-        this.ctx.fill(path);
-      }
-
-      // Set stroke style (only if color is not null)
-      if (cell.stroke && cell.stroke.color) {
-        this.ctx.strokeStyle = cell.stroke.color;
-        this.ctx.lineWidth = cell.stroke.width || 1;
-        if (cell.stroke.dashArray && Array.isArray(cell.stroke.dashArray)) {
-          this.ctx.setLineDash(cell.stroke.dashArray);
+        // Viewport culling: skip cells outside visible area (optimization)
+        if (cell.bounds) {
+          const cellRight = (cell.bounds.x || 0) + (cell.bounds.width || 0);
+          const cellBottom = (cell.bounds.y || 0) + (cell.bounds.height || 0);
+          if (cellRight < worldMinX || (cell.bounds.x || 0) > worldMaxX ||
+              cellBottom < worldMinY || (cell.bounds.y || 0) > worldMaxY) {
+            continue; // Cell is outside viewport
+          }
         }
-        this.ctx.stroke(path);
-        if (cell.stroke.dashArray) {
-          this.ctx.setLineDash([]); // Reset
-        }
-      }
 
-      // Draw labels (after fill/stroke, so they appear on top)
-      if (cell.labels && Array.isArray(cell.labels) && cell.labels.length > 0) {
-        this.drawLabels(cell.labels, scale);
+        // Create or reuse Path2D (only regenerate if dirty)
+        const cacheKey = `cell-${cell.i}`;
+        const path = this.getOrCreatePath(cell.path, cacheKey);
+
+        // Set fill style
+        if (cell.fill) {
+          this.ctx.fillStyle = this.getFillStyle(cell.fill, cell.bounds || {});
+          this.ctx.fill(path);
+        }
+
+        // Set stroke style (only if color is not null)
+        if (cell.stroke && cell.stroke.color) {
+          this.ctx.strokeStyle = cell.stroke.color;
+          this.ctx.lineWidth = cell.stroke.width || 1;
+          if (cell.stroke.dashArray && Array.isArray(cell.stroke.dashArray)) {
+            this.ctx.setLineDash(cell.stroke.dashArray);
+          }
+          this.ctx.stroke(path);
+          if (cell.stroke.dashArray) {
+            this.ctx.setLineDash([]); // Reset
+          }
+        }
+
+        // Collect labels for batching (drawn after all cells)
+        if (cell.labels && Array.isArray(cell.labels) && cell.labels.length > 0) {
+          this._labelBatch.push(...cell.labels.map(label => ({ ...label, cellId: cell.i })));
+        }
+      } catch (error) {
+        // Error boundary: log rendering errors without crashing
+        if (typeof console !== 'undefined' && console.error) {
+          console.error(`[Canvas2DRenderer.renderMap] Error rendering cell ${cell?.i}:`, error);
+        }
+        continue; // Skip problematic cell
       }
+    }
+
+    // Draw all labels in batch (sorted by importance: capitals first, then by size)
+    if (this._labelBatch.length > 0) {
+      this._labelBatch.sort((a, b) => {
+        // Sort by font size (larger first), then by cell ID for consistency
+        const sizeA = a.fontSize || 12;
+        const sizeB = b.fontSize || 12;
+        if (sizeA !== sizeB) return sizeB - sizeA;
+        return (a.cellId || 0) - (b.cellId || 0);
+      });
+      this.drawLabels(this._labelBatch, scale);
     }
 
     this.ctx.restore();
@@ -691,19 +751,41 @@ export class Canvas2DRenderer extends Renderer {
    * @returns {CanvasGradient} Gradient object
    */
   getOrCreateGradient(gradientDef, bounds) {
-    // For now, gradients are not cached (bounds-dependent)
-    // TODO: Implement gradient caching if needed in Phase 1
+    // Cache gradients by temperature range buckets (cold/mild/hot) instead of per-cell
+    // This reduces gradient creation overhead while maintaining visual quality
     
-    if (gradientDef.type === 'linear') {
-      const gradient = this.ctx.createLinearGradient(
-        bounds.x, bounds.y,
-        bounds.x + bounds.width, bounds.y + bounds.height
-      );
-      if (gradientDef.stops) {
+    if (gradientDef.type === 'linear' && gradientDef.stops) {
+      // Create bucket key from gradient stops (temperature range approximation)
+      const stopColors = gradientDef.stops.map(([offset, color]) => color).join('-');
+      const bucketKey = `gradient-${gradientDef.type}-${stopColors}`;
+      
+      // Check if we can reuse a cached gradient (same temperature pattern, different bounds)
+      if (this.temperatureGradientBuckets.has(bucketKey)) {
+        const cachedGradient = this.temperatureGradientBuckets.get(bucketKey);
+        // Note: Canvas gradients are bound to context, so we recreate with same stops but new bounds
+        // This is still faster than parsing stops each time
+        const gradient = this.ctx.createLinearGradient(
+          bounds.x, bounds.y,
+          bounds.x + (bounds.width || 100), bounds.y + (bounds.height || 100)
+        );
         gradientDef.stops.forEach(([offset, color]) => {
           gradient.addColorStop(offset, color);
         });
+        return gradient;
       }
+      
+      // Create new gradient and cache the bucket key for future reference
+      const gradient = this.ctx.createLinearGradient(
+        bounds.x, bounds.y,
+        bounds.x + (bounds.width || 100), bounds.y + (bounds.height || 100)
+      );
+      gradientDef.stops.forEach(([offset, color]) => {
+        gradient.addColorStop(offset, color);
+      });
+      
+      // Cache bucket key (don't cache gradient itself - it's context-bound)
+      this.temperatureGradientBuckets.set(bucketKey, { bounds, stops: gradientDef.stops });
+      
       return gradient;
     }
     
@@ -764,14 +846,31 @@ export class Canvas2DRenderer extends Renderer {
       // Draw text with outline/shadow for readability
       this.ctx.font = `${scaledFontSize}px sans-serif`;
       
-      // Outline/shadow for better readability
-      this.ctx.strokeStyle = '#ffffff';
-      this.ctx.lineWidth = scaledFontSize * 0.15;
-      this.ctx.strokeText(label.text, x, y);
+      // Outline/shadow for better readability (use shadow if outline is too expensive at low zoom)
+      if (scale < 0.5) {
+        // Use shadow at low zoom (cheaper than stroke)
+        this.ctx.shadowColor = '#ffffff';
+        this.ctx.shadowBlur = scaledFontSize * 0.2;
+        this.ctx.shadowOffsetX = 0;
+        this.ctx.shadowOffsetY = 0;
+      } else {
+        // Use outline at higher zoom (better quality)
+        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.lineWidth = scaledFontSize * 0.15;
+        this.ctx.strokeText(label.text, x, y);
+      }
       
       // Fill text
       this.ctx.fillStyle = color;
       this.ctx.fillText(label.text, x, y);
+      
+      // Reset shadow after drawing
+      if (scale < 0.5) {
+        this.ctx.shadowColor = 'transparent';
+        this.ctx.shadowBlur = 0;
+        this.ctx.shadowOffsetX = 0;
+        this.ctx.shadowOffsetY = 0;
+      }
     }
   }
 

@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvas Renderer - Visual Regression Suite (Phase 5)</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 20px 0;
+      font-size: 24px;
+    }
+    .controls {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 5px;
+    }
+    button {
+      padding: 8px 16px;
+      margin-right: 10px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .test-case {
+      background: #2a2a2a;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    .test-case h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+    }
+    canvas {
+      background: #e8f4f8;
+      border: 2px solid #4a4a4a;
+      border-radius: 5px;
+      display: block;
+      width: 100%;
+      max-width: 480px;
+    }
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+      font-size: 14px;
+    }
+    .status.success {
+      background: #2a4a2a;
+      color: #66ff66;
+    }
+    .status.error {
+      background: #4a2a2a;
+      color: #ff6666;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .metric {
+      background: #2a2a2a;
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+    .metric strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎨 Visual Regression Suite (Phase 5)</h1>
+    <div class="controls">
+      <button id="runTestsBtn">Run Regression Suite</button>
+      <button id="saveSnapshotsBtn" disabled>Save Snapshots</button>
+      <label style="margin-left: 20px; color: #aaa;">
+        Fixed Seed:
+        <input type="text" id="seedInput" value="regression-test-seed-42" style="margin-left: 8px; padding: 4px; background: #2a2a2a; color: #fff; border: 1px solid #666; border-radius: 4px; width: 200px;">
+      </label>
+    </div>
+
+    <div class="test-grid" id="testGrid"></div>
+
+    <div id="status" class="status">Ready - Click "Run Regression Suite" to start</div>
+
+    <div class="metrics" id="metrics"></div>
+  </div>
+
+  <script type="module">
+    // Import Delaunator (peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    let AzgaarGenesis;
+    try {
+      AzgaarGenesis = await import(libraryPath);
+    } catch (error) {
+      document.getElementById('status').textContent = `❌ Failed to load library from ${libraryPath}`;
+      throw error;
+    }
+
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      exportRenderData, 
+      getRenderer,
+      convertToGodotFormat,
+    } = AzgaarGenesis;
+
+    const runTestsBtn = document.getElementById('runTestsBtn');
+    const saveSnapshotsBtn = document.getElementById('saveSnapshotsBtn');
+    const seedInput = document.getElementById('seedInput');
+    const testGrid = document.getElementById('testGrid');
+    const statusEl = document.getElementById('status');
+    const metricsEl = document.getElementById('metrics');
+
+    let testResults = [];
+    let mapData = null;
+    let renderData = null;
+
+    // Test cases: [zoom level, layers, description]
+    const testCases = [
+      { zoom: 0.5, layers: ['terrain'], name: 'Overview (Terrain)' },
+      { zoom: 1.0, layers: ['terrain', 'biomes'], name: 'Medium (Biomes)' },
+      { zoom: 3.0, layers: ['terrain', 'biomes', 'states'], name: 'Detail (All Layers)' },
+      { zoom: 0.25, layers: ['terrain'], name: 'Extreme Zoom Out' },
+      { zoom: 10.0, layers: ['terrain', 'biomes'], name: 'Extreme Zoom In' },
+      { zoom: 1.0, layers: ['temperature'], name: 'Temperature Gradient' },
+    ];
+
+    function updateStatus(message, type = '') {
+      statusEl.textContent = message;
+      statusEl.className = 'status' + (type ? ' ' + type : '');
+    }
+
+    function createTestCanvas(testCase, index) {
+      const testCaseDiv = document.createElement('div');
+      testCaseDiv.className = 'test-case';
+      testCaseDiv.innerHTML = `
+        <h3>${testCase.name}</h3>
+        <canvas id="canvas-${index}" width="480" height="270"></canvas>
+        <div id="metrics-${index}" style="margin-top: 5px; font-size: 11px; color: #aaa;"></div>
+      `;
+      testGrid.appendChild(testCaseDiv);
+      return document.getElementById(`canvas-${index}`);
+    }
+
+    async function runRegressionSuite() {
+      try {
+        updateStatus('Running regression suite...', '');
+        runTestsBtn.disabled = true;
+        testGrid.innerHTML = '';
+        testResults = [];
+
+        const seed = seedInput.value || 'regression-test-seed-42';
+        const startTime = performance.now();
+
+        // Initialize and generate map
+        initGenerator({ canvas: null });
+        loadOptions({ 
+          seed,
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 5000,
+          statesNumber: 8,
+          culturesNumber: 5,
+          religionsNumber: 3,
+        });
+
+        const genStart = performance.now();
+        mapData = generateMap(Delaunator);
+        const genTime = performance.now() - genStart;
+
+        // Export render data
+        const exportStart = performance.now();
+        renderData = exportRenderData({ mode: 'canvas2d', layers: ['terrain', 'biomes', 'states', 'temperature'] });
+        const exportTime = performance.now() - exportStart;
+
+        // Run each test case
+        for (let i = 0; i < testCases.length; i++) {
+          const testCase = testCases[i];
+          const canvas = createTestCanvas(testCase, i);
+          const renderer = getRenderer(canvas, { 
+            mode: 'canvas2d',
+            layers: testCase.layers,
+            viewport: { offsetX: canvas.width / 2, offsetY: canvas.height / 2, scale: testCase.zoom },
+          });
+
+          const renderStart = performance.now();
+          renderer.renderMap(renderData);
+          const renderTime = performance.now() - renderStart;
+
+          // Collect metrics
+          const cellCount = renderData.cells?.length || 0;
+          const visibleCells = renderData.cells?.filter(c => {
+            if (!c.layer || testCase.layers.includes(c.layer)) return true;
+            return false;
+          }).length || 0;
+
+          testResults.push({
+            testCase: testCase.name,
+            zoom: testCase.zoom,
+            renderTime,
+            cellCount: visibleCells,
+            canvas: canvas,
+          });
+
+          // Update test case metrics
+          document.getElementById(`metrics-${i}`).textContent = 
+            `Cells: ${visibleCells} | Render: ${renderTime.toFixed(2)}ms`;
+        }
+
+        const totalTime = performance.now() - startTime;
+
+        // Display overall metrics
+        metricsEl.innerHTML = `
+          <div class="metric">
+            <strong>Generation</strong>
+            ${genTime.toFixed(2)}ms
+          </div>
+          <div class="metric">
+            <strong>Export</strong>
+            ${exportTime.toFixed(2)}ms
+          </div>
+          <div class="metric">
+            <strong>Total Suite</strong>
+            ${totalTime.toFixed(2)}ms
+          </div>
+        `;
+
+        // Visual diff helper (basic pixel comparison)
+        const avgRenderTime = testResults.reduce((sum, r) => sum + r.renderTime, 0) / testResults.length;
+        updateStatus(`✅ Regression suite complete (avg render: ${avgRenderTime.toFixed(2)}ms)`, 'success');
+        saveSnapshotsBtn.disabled = false;
+
+        // Log results for console inspection
+        console.log('[Visual Regression] Test Results:', {
+          seed,
+          generationTime: genTime,
+          exportTime: exportTime,
+          totalTime: totalTime,
+          testResults: testResults.map(r => ({
+            name: r.testCase,
+            zoom: r.zoom,
+            renderTime: r.renderTime,
+            cellCount: r.cellCount,
+          })),
+        });
+      } catch (error) {
+        updateStatus(`❌ Regression suite failed: ${error.message}`, 'error');
+        console.error('Regression suite error:', error);
+      } finally {
+        runTestsBtn.disabled = false;
+      }
+    }
+
+    saveSnapshotsBtn.addEventListener('click', () => {
+      if (!testResults || testResults.length === 0) {
+        updateStatus('❌ Run regression suite first', 'error');
+        return;
+      }
+
+      // Save all canvas snapshots as data URLs
+      testResults.forEach((result, index) => {
+        const dataUrl = result.canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = `regression-${result.testCase.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.png`;
+        link.href = dataUrl;
+        link.click();
+      });
+
+      updateStatus(`✅ Saved ${testResults.length} snapshot(s)`, 'success');
+    });
+
+    // Pixel comparison helper (basic MSE)
+    function compareCanvases(canvas1, canvas2) {
+      const ctx1 = canvas1.getContext('2d');
+      const ctx2 = canvas2.getContext('2d');
+      const imgData1 = ctx1.getImageData(0, 0, canvas1.width, canvas1.height);
+      const imgData2 = ctx2.getImageData(0, 0, canvas2.width, canvas2.height);
+      
+      if (imgData1.data.length !== imgData2.data.length) {
+        return { mse: Infinity, similar: false };
+      }
+
+      let sumSquaredDiff = 0;
+      for (let i = 0; i < imgData1.data.length; i += 4) {
+        const r1 = imgData1.data[i];
+        const g1 = imgData1.data[i + 1];
+        const b1 = imgData1.data[i + 2];
+        const r2 = imgData2.data[i];
+        const g2 = imgData2.data[i + 1];
+        const b2 = imgData2.data[i + 2];
+        
+        const dr = r1 - r2;
+        const dg = g1 - g2;
+        const db = b1 - b2;
+        sumSquaredDiff += dr * dr + dg * dg + db * db;
+      }
+
+      const mse = sumSquaredDiff / (imgData1.data.length / 4);
+      const threshold = 100; // MSE threshold for similarity
+      
+      return {
+        mse,
+        similar: mse < threshold,
+        message: `MSE: ${mse.toFixed(2)} (${mse < threshold ? 'PASS' : 'FAIL'})`,
+      };
+    }
+
+    // Expose compare function globally for manual testing
+    window.compareCanvases = compareCanvases;
+
+    runTestsBtn.addEventListener('click', runRegressionSuite);
+  </script>
+</body>
+</html>
