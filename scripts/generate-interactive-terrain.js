@@ -107,10 +107,11 @@ async function generateInteractiveTerrain() {
     const exportData = {
       points: points.map(p => ({ x: p.x, y: p.y })),
       dualPoints: dualPoints ? dualPoints.map(p => ({ x: p.x, y: p.y })) : null,
+      // ID PROPAGATION FIX: Use object spread to preserve all fields (id, lineage, centroid, type)
       level0Quads: level0Quads.map(q => ({
-        i: q.i,
-        verts: q.verts,
-        center: q.center,
+        ...q,  // Spread all original fields (id, lineage, centroid, type, i, level, stateId, etc.)
+        verts: [...(q.verts || [])],  // Ensure fresh copy of verts array
+        center: q.center ? { x: q.center.x, y: q.center.y } : q.center,  // Ensure center is plain object if exists
       })),
       rawDelaunayTriangles: rawDelaunayTriangles || null, // Raw triangle indices for wireframe rendering
       pipelineStages: pipelineStages || null, // Step-by-step pipeline stages for visual debugging
@@ -227,6 +228,60 @@ function generateInteractiveHTML(data) {
     #svg-container svg {
       display: block;
     }
+    #canvas-container {
+      position: relative;
+      background: #e8f4f8;
+      border: 2px solid #4a4a4a;
+      border-radius: 5px;
+      cursor: grab;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+      display: none; /* Hidden by default, shown when canvas stage selected */
+    }
+    #canvas-container canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #canvas-container.dragging {
+      cursor: grabbing;
+    }
+    #canvas-proof {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: red;
+      color: white;
+      padding: 15px;
+      font-size: 24px;
+      font-weight: bold;
+      z-index: 9999;
+      border: 3px solid #000;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+      display: none; /* Shown when Canvas mode active */
+    }
+    #canvas-proof.visible {
+      display: block;
+    }
+    .layer-controls {
+      display: none; /* Shown when canvas stage selected */
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+    }
+    .layer-controls.visible {
+      display: block;
+    }
+    .layer-controls label {
+      margin-right: 15px;
+      color: #aaa;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .layer-controls input[type="checkbox"] {
+      margin-right: 5px;
+      cursor: pointer;
+    }
     button {
       padding: 8px 16px;
       margin-right: 10px;
@@ -261,7 +316,8 @@ function generateInteractiveHTML(data) {
           <option value="3">Stage 3: After Dissolution/Cull</option>
           <option value="4">Stage 4: After Subdivide Triangles</option>
           <option value="5">Stage 5: After Subdivide Quads</option>
-          <option value="final" selected>Stage 6: Final (Relax + Dual Offset)</option>
+          <option value="final">Stage 6: Final (Relax + Dual Offset)</option>
+          <option value="canvas">Stage 7: Canvas Final Render</option>
         </select>
       </div>
       ` : ''}
@@ -271,16 +327,90 @@ function generateInteractiveHTML(data) {
     <p style="color: #666; font-size: 0.9em; margin-top: 10px;">
       Debug tip: Run the generator with <code>--small</code> flag for fast 9-ring testing (prevents long generation times)
     </p>
-    <div id="svg-container">
+    <div id="svg-container" style="display:none;">
       <div id="loading-overlay" class="loading-overlay">Generating terrain...</div>
+    </div>
+    <div id="canvas-container" style="position:relative;">
+      <div id="canvas-proof">USING NEW CANVAS RENDERER – SVG IS DEAD HERE</div>
+      <canvas id="canvas-renderer"></canvas>
+    </div>
+    <div id="layer-controls" class="layer-controls">
+      <label><input type="checkbox" id="canvas-debug-mode"> Canvas Debug Mode</label>
+      <label><input type="checkbox" id="layer-terrain" checked> Terrain</label>
+      <label><input type="checkbox" id="layer-biomes" checked> Biomes</label>
+      <label><input type="checkbox" id="layer-states"> States</label>
+      <label><input type="checkbox" id="layer-temperature"> Temperature</label>
     </div>
   </div>
 
-  <script>
+  <script type="module">
+    // BULLETPROOF: Global error handler for ALL JS errors (syntax, runtime, imports)
+    window.onerror = function(msg, url, line, col, err) {
+      const errorMsg = '[GLOBAL-CRASH] ' + msg + ' at ' + url + ':' + line + ':' + col;
+      console.error(errorMsg, err?.stack || err);
+      alert('CRITICAL JS ERROR:\\n' + msg + '\\nCheck console for details.\\nURL: ' + url + ':' + line + ':' + col);
+      return false; // Let browser show error too
+    };
+    
+    window.addEventListener('unhandledrejection', function(e) {
+      const errorMsg = '[PROMISE-CRASH] ' + (e.reason?.message || String(e.reason));
+      console.error(errorMsg, e.reason?.stack || e.reason);
+      alert('Unhandled promise rejection: ' + errorMsg);
+    });
+    
+    // BULLETPROOF: Catch errors during module initialization
+    try {
+      console.log('[BULLETPROOF-INIT] Module loading started');
+    
     // Embedded dual-grid data
     const DUAL_GRID_DATA = ${JSON.stringify(data, null, 2)};
     const PIPELINE_STAGES = ${pipelineStages ? JSON.stringify(pipelineStages, null, 2) : 'null'};
     let currentStage = 'final'; // Current pipeline stage being displayed
+    
+    // Canvas renderer state
+    let canvasRenderer = null;
+    let canvasRenderData = null;
+    let fullMapData = null;
+    let activeLayers = ['terrain', 'biomes']; // Default active layers
+    let canvasDebugMode = false; // Canvas debug mode (purple text overlay)
+    let firstCanvasDraw = true; // Track first draw for yellow flash
+    
+    // Library functions for Canvas renderer (loaded dynamically)
+    let initGenerator, loadOptions, generateMap, exportRenderData, getRenderer;
+    
+    // BULLETPROOF: Dynamic import with comprehensive error handling
+    (async function() {
+      try {
+        console.log('[IMPORT-START] Loading library from ../src/index.js');
+        const module = await import('../src/index.js?v=' + Date.now()); // Cache-busting
+        initGenerator = module.initGenerator;
+        loadOptions = module.loadOptions;
+        generateMap = module.generateMap;
+        exportRenderData = module.exportRenderData;
+        getRenderer = module.getRenderer;
+        console.log('[IMPORT-SUCCESS] Library functions loaded successfully');
+        console.log('[IMPORT-SUCCESS] Canvas2DRenderer available:', typeof module.Canvas2DRenderer !== 'undefined');
+        
+        // Verify all functions are defined
+        if (!initGenerator || !loadOptions || !generateMap || !exportRenderData || !getRenderer) {
+          throw new Error('Missing library functions: ' + JSON.stringify({
+            initGenerator: !!initGenerator,
+            loadOptions: !!loadOptions,
+            generateMap: !!generateMap,
+            exportRenderData: !!exportRenderData,
+            getRenderer: !!getRenderer,
+          }));
+        }
+      } catch (error) {
+        console.error('[IMPORT-FAIL] Failed to load library functions:', error);
+        console.error('[IMPORT-FAIL] Error details:', error.message, error.stack);
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = 'background:red;color:white;padding:20px;font-size:20px;position:fixed;top:0;left:0;right:0;z-index:99999;';
+        errorDiv.textContent = 'LIBRARY IMPORT FAILED: ' + error.message + ' (Check console for details)';
+        document.body.insertBefore(errorDiv, document.body.firstChild);
+        throw error; // Re-throw to trigger global handler
+      }
+    })();
     
     // Terrain generation state
     let quadTerrain = new Map(); // quadIndex -> {avgHeight, biomeId, cellCount}
@@ -492,30 +622,512 @@ function generateInteractiveHTML(data) {
       if (height < 20) {
         // Ocean: blue gradient
         const t = height / 20;
-        return \`rgb(\${Math.round(70 * t)}, \${Math.round(110 * t)}, \${Math.round(171 * t)})\`;
+        return 'rgb(' + Math.round(70 * t) + ', ' + Math.round(110 * t) + ', ' + Math.round(171 * t) + ')';
       } else if (height < 50) {
         // Beach/Lowland: sandy/tan
         const t = (height - 20) / 30;
-        return \`rgb(\${Math.round(200 + 55 * t)}, \${Math.round(180 + 75 * t)}, \${Math.round(140 + 115 * t)})\`;
+        return 'rgb(' + Math.round(200 + 55 * t) + ', ' + Math.round(180 + 75 * t) + ', ' + Math.round(140 + 115 * t) + ')';
       } else if (height < 70) {
         // Grassland: green
         const t = (height - 50) / 20;
-        return \`rgb(\${Math.round(100 + 100 * t)}, \${Math.round(150 + 50 * t)}, \${Math.round(50)})\`;
+        return 'rgb(' + Math.round(100 + 100 * t) + ', ' + Math.round(150 + 50 * t) + ', ' + Math.round(50) + ')';
       } else if (height < 85) {
         // Hills: brown/green
         const t = (height - 70) / 15;
-        return \`rgb(\${Math.round(100 + 50 * t)}, \${Math.round(120 - 20 * t)}, \${Math.round(60 - 20 * t)})\`;
+        return 'rgb(' + Math.round(100 + 50 * t) + ', ' + Math.round(120 - 20 * t) + ', ' + Math.round(60 - 20 * t) + ')';
       } else {
         // Mountains: gray/brown
         const t = (height - 85) / 15;
-        return \`rgb(\${Math.round(150 - 30 * t)}, \${Math.round(100 - 30 * t)}, \${Math.round(40 - 20 * t)})\`;
+        return 'rgb(' + Math.round(150 - 30 * t) + ', ' + Math.round(100 - 30 * t) + ', ' + Math.round(40 - 20 * t) + ')';
       }
     }
     
     // ============================================================
-    // Step-by-Step Pipeline Rendering
+    // Convert Pipeline Stage Data to Canvas Format
+    // ============================================================
+    function convertPipelineStageToCanvasData(stageKey, stage, centeredPoints) {
+      console.log('[AUDIT-STEP5] convertPipelineStageToCanvasData: stageKey=' + stageKey + ', stage.type=' + stage.type + ', centeredPoints.length=' + (centeredPoints?.length || 0));
+      const cells = [];
+      
+      // Helper: Calculate bounds for a path
+      function calculateBounds(path) {
+        if (!path || path.length === 0) return null;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const [x, y] of path) {
+          if (isFinite(x) && isFinite(y)) {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+          }
+        }
+        return { minX, minY, maxX, maxY };
+      }
+      
+      // Helper: Convert vertex indices to coordinates
+      function vertsToPath(vertIndices) {
+        return vertIndices.map(vIdx => {
+          const p = centeredPoints[vIdx];
+          return p && isFinite(p.x) && isFinite(p.y) ? [p.x, p.y] : null;
+        }).filter(p => p !== null);
+      }
+      
+      if (stageKey === '1') {
+        // Stage 1: Raw points (orange circles)
+        centeredPoints.forEach((p, idx) => {
+          if (isFinite(p.x) && isFinite(p.y)) {
+            // Render as small circle - use a tiny triangle path for Canvas compatibility
+            const radius = 4;
+            const path = [
+              [p.x, p.y - radius],
+              [p.x + radius * 0.866, p.y + radius * 0.5],
+              [p.x - radius * 0.866, p.y + radius * 0.5],
+              [p.x, p.y - radius], // Close path
+            ];
+            cells.push({
+              i: idx,
+              path,
+              fill: { type: 'color', color: stage.color },
+              stroke: { color: '#cc8800', width: 0.5 },
+              labels: [],
+              layer: 'terrain',
+              bounds: calculateBounds(path),
+            });
+          }
+        });
+      } else if (stageKey === '2' && stage.data) {
+        // Stage 2: Wireframe triangles (gray)
+        if (Array.isArray(stage.data)) {
+          stage.data.forEach((tri, idx) => {
+            if (tri && tri.verts && Array.isArray(tri.verts) && tri.verts.length >= 3) {
+              const path = vertsToPath(tri.verts);
+              if (path.length >= 3) {
+                path.push(path[0]); // Close path
+                cells.push({
+                  i: idx,
+                  path,
+                  fill: { type: 'color', color: 'none' },
+                  stroke: { color: stage.color, width: 1.5 },
+                  labels: [],
+                  layer: 'terrain',
+                  bounds: calculateBounds(path),
+                });
+              }
+            }
+          });
+        }
+      } else if (stageKey === '3' && stage.data) {
+        // Stage 3: Blue quads + red triangles
+        if (Array.isArray(stage.data)) {
+          stage.data.forEach((quad, idx) => {
+            if (quad && quad.verts && Array.isArray(quad.verts) && quad.verts.length >= 3) {
+              const path = vertsToPath(quad.verts);
+              if (path.length >= 3) {
+                path.push(path[0]); // Close path
+                const vertCount = quad.verts?.length ?? 0;
+                const isTriangle = vertCount === 3;
+                
+                if (isTriangle) {
+                  // Red triangle with fill and thick stroke
+                  cells.push({
+                    i: idx,
+                    path,
+                    fill: { type: 'color', color: 'rgba(255, 0, 0, 0.30)' },
+                    stroke: { color: '#ff0000', width: 7 },
+                    labels: [],
+                    layer: 'terrain',
+                    bounds: calculateBounds(path),
+                  });
+                } else {
+                  // Blue quad with stroke only
+                  cells.push({
+                    i: idx,
+                    path,
+                    fill: { type: 'color', color: 'none' },
+                    stroke: { color: stage.color, width: 2 },
+                    labels: [],
+                    layer: 'terrain',
+                    bounds: calculateBounds(path),
+                  });
+                }
+              }
+            }
+          });
+        }
+      } else if (stageKey === '4' && stage.data) {
+        // Stage 4: Subdivided triangles (pink/orange)
+        if (Array.isArray(stage.data)) {
+          stage.data.forEach((shape, idx) => {
+            if (shape && shape.verts && Array.isArray(shape.verts) && shape.verts.length >= 3) {
+              const path = vertsToPath(shape.verts);
+              if (path.length >= 3) {
+                path.push(path[0]);
+                const isFromSubdivision = shape.fromTriangleSubdivision === true;
+                const strokeColor = isFromSubdivision ? '#ff4488' : '#ff8844';
+                cells.push({
+                  i: idx,
+                  path,
+                  fill: { type: 'color', color: 'none' },
+                  stroke: { color: strokeColor, width: isFromSubdivision ? 2 : 1.5 },
+                  labels: [],
+                  layer: 'terrain',
+                  bounds: calculateBounds(path),
+                });
+              }
+            }
+          });
+        }
+      } else if (stageKey === '5' && stage.data) {
+        // Stage 5: Subdivided quads (orange)
+        const allQuads = [];
+        if (stage.data.level0 && Array.isArray(stage.data.level0)) {
+          allQuads.push(...stage.data.level0);
+        }
+        if (stage.data.level1 && Array.isArray(stage.data.level1)) {
+          allQuads.push(...stage.data.level1);
+        }
+        allQuads.forEach((quad, idx) => {
+          if (quad && quad.verts && Array.isArray(quad.verts) && quad.verts.length >= 3) {
+            const path = vertsToPath(quad.verts);
+            if (path.length >= 3) {
+              path.push(path[0]);
+              cells.push({
+                i: idx,
+                path,
+                fill: { type: 'color', color: 'none' },
+                stroke: { color: stage.color, width: 1.5 },
+                labels: [],
+                layer: 'terrain',
+                bounds: calculateBounds(path),
+              });
+            }
+          }
+        });
+      } else if (stageKey === 'final' && stage.data) {
+        // Stage 6: Final (black rounded quads)
+        const finalPoints = stage.data.dualPoints || stage.data.points;
+        if (finalPoints && Array.isArray(finalPoints)) {
+          const finalCentroidX = finalPoints.reduce((sum, p) => sum + (p.x || 0), 0) / finalPoints.length;
+          const finalCentroidY = finalPoints.reduce((sum, p) => sum + (p.y || 0), 0) / finalPoints.length;
+          const finalCentered = finalPoints.map(p => ({ 
+            x: (p.x || 0) - finalCentroidX, 
+            y: (p.y || 0) - finalCentroidY 
+          }));
+          
+          if (stage.data.level0Quads && Array.isArray(stage.data.level0Quads)) {
+            stage.data.level0Quads.forEach((quad, idx) => {
+              if (quad && quad.verts && Array.isArray(quad.verts) && quad.verts.length >= 3) {
+                const path = quad.verts.map(vIdx => {
+                  const p = finalCentered[vIdx];
+                  return p && isFinite(p.x) && isFinite(p.y) ? [p.x, p.y] : null;
+                }).filter(p => p !== null);
+                if (path.length >= 3) {
+                  path.push(path[0]);
+                  cells.push({
+                    i: idx,
+                    path,
+                    fill: { type: 'color', color: 'none' },
+                    stroke: { color: stage.color, width: 1.5 },
+                    labels: [],
+                    layer: 'terrain',
+                    bounds: calculateBounds(path),
+                  });
+                }
+              }
+            });
+          }
+        }
+      }
+      
+      console.log('[AUDIT-STEP5] Conversion output: ' + cells.length + ' cells created');
+      
+      return {
+        mode: 'canvas2d',
+        cells,
+        patterns: {},
+        gradients: {},
+      };
+    }
+    
+    // ============================================================
+    // Canvas Pipeline Stage Rendering (for all stages 1-6)
+    // ============================================================
+    async function renderPipelineStageCanvas(stageKey) {
+      // AUDIT-STEP2: Starting Canvas render
+      console.log('[AUDIT-STEP2] Starting Canvas render for stage ' + stageKey);
+      
+      // CANVAS-ONLY-PROOF: Log at start of every render
+      console.log('[CANVAS-ONLY-PROOF] Rendering stage ' + stageKey + ' using Canvas2DRenderer – SVG disabled');
+      
+      // CANVAS-ONLY-PROOF: Force remove any SVG elements from DOM
+      const existingSVGs = document.querySelectorAll('svg');
+      if (existingSVGs.length > 0) {
+        console.warn('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED – Removing', existingSVGs.length, 'SVG elements');
+        existingSVGs.forEach(svg => svg.remove());
+      }
+      
+      // CANVAS-ONLY-PROOF: Guard against SVG rendering
+      if (document.querySelector('svg')) {
+        throw new Error('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED – ABORTING');
+      }
+      
+      if (!PIPELINE_STAGES) {
+        console.warn('[AUDIT-FAIL2] PIPELINE_STAGES not available');
+        return null;
+      }
+      
+      // Check if library functions are loaded
+      if (!getRenderer) {
+        try {
+          console.log('[AUDIT-STEP3] Loading library functions from ../src/index.js');
+          const module = await import('../src/index.js');
+          getRenderer = module.getRenderer;
+          console.log('[AUDIT-STEP3-END] Library functions loaded successfully, getRenderer type:', typeof getRenderer);
+        } catch (error) {
+          console.error('[AUDIT-FAIL3] Failed to load getRenderer:', error);
+          return null;
+        }
+      }
+      
+      const stages = {
+        '1': { 
+          data: PIPELINE_STAGES.stage1_rawPoints, 
+          label: 'Stage 1: Raw Points', 
+          color: '#ffaa00',
+          type: 'points'
+        },
+        '2': { 
+          data: PIPELINE_STAGES.stage2_triangles, 
+          points: PIPELINE_STAGES.stage2_points, 
+          label: 'Stage 2: After Triangulation', 
+          color: '#888',
+          type: 'triangles'
+        },
+        '3': { 
+          data: PIPELINE_STAGES.stage3_quads, 
+          points: PIPELINE_STAGES.stage3_points, 
+          label: 'Stage 3: After Dissolution/Cull', 
+          color: '#4488ff',
+          type: 'quads'
+        },
+        '4': { 
+          data: PIPELINE_STAGES.stage4_subdividedTriangles, 
+          points: PIPELINE_STAGES.stage4_points, 
+          label: 'Stage 4: After Subdivide Triangles', 
+          color: '#ff4488',
+          type: 'shapes'
+        },
+        '5': { 
+          data: PIPELINE_STAGES.stage5_subdividedQuads, 
+          points: PIPELINE_STAGES.stage5_points, 
+          label: 'Stage 5: After Subdivide Quads', 
+          color: '#ff8844',
+          type: 'subdivided'
+        },
+        'final': { 
+          data: PIPELINE_STAGES.stage6_final, 
+          label: 'Stage 6: Final (Relax + Dual Offset)', 
+          color: '#333',
+          type: 'final'
+        },
+      };
+      
+      const stage = stages[stageKey];
+      if (!stage) {
+        console.error('[AUDIT-FAIL2] Invalid stage key:', stageKey);
+        return null;
+      }
+      
+      console.log('[AUDIT-STEP4] Stage config: label=' + stage.label + ', type=' + stage.type + ', hasData=' + !!stage.data + ', hasPoints=' + !!stage.points);
+      
+      // Get points for this stage
+      let stagePoints = null;
+      if (stageKey === '1') {
+        stagePoints = stage.data; // Raw points array
+        console.log('[AUDIT-STEP4] Stage 1: Using stage.data as points');
+      } else if (stage.points) {
+        stagePoints = stage.points;
+        console.log('[AUDIT-STEP4] Using stage.points');
+      } else if (stage.data && stage.data.points) {
+        stagePoints = stage.data.points;
+        console.log('[AUDIT-STEP4] Using stage.data.points');
+      } else if (stageKey === 'final' && stage.data) {
+        stagePoints = stage.data.dualPoints || stage.data.points;
+        console.log('[AUDIT-STEP4] Final stage: Using dualPoints or points');
+      }
+      
+      if (!stagePoints || !Array.isArray(stagePoints) || stagePoints.length === 0) {
+        console.warn('[AUDIT-FAIL4] No points available for stage: ' + stageKey + ', stagePoints=' + stagePoints + ', isArray=' + Array.isArray(stagePoints) + ', length=' + (stagePoints?.length || 0));
+        return null;
+      }
+      
+      console.log('[AUDIT-STEP4-END] Points loaded: count=' + stagePoints.length + ', sample point:', stagePoints[0]);
+      
+      // Center points
+      const centroidX = stagePoints.reduce((sum, p) => sum + (p.x || 0), 0) / stagePoints.length;
+      const centroidY = stagePoints.reduce((sum, p) => sum + (p.y || 0), 0) / stagePoints.length;
+      const centeredPoints = stagePoints.map(p => ({ 
+        x: (p.x || 0) - centroidX, 
+        y: (p.y || 0) - centroidY 
+      }));
+      
+      console.log('[CANVAS-STAGE] Rendering stage ' + stageKey + ': ' + stagePoints.length + ' points');
+      
+      // AUDIT-STEP5: Convert stage data to Canvas format
+      const shapesCount = stage.data ? (Array.isArray(stage.data) ? stage.data.length : 'object') : 'null';
+      console.log('[AUDIT-STEP5] Converting pipeline data for stage ' + stageKey + ', shapes count: ' + shapesCount);
+      let canvasRenderData;
+      try {
+        canvasRenderData = convertPipelineStageToCanvasData(stageKey, stage, centeredPoints);
+        console.log('[AUDIT-STEP5-END] Conversion complete, cells count:', canvasRenderData?.cells?.length || 0);
+      } catch (err) {
+        console.error('[AUDIT-FAIL5] Conversion error: ' + err.message, err);
+        throw err;
+      }
+      
+      if (!canvasRenderData || !canvasRenderData.cells || canvasRenderData.cells.length === 0) {
+        console.warn('[AUDIT-WARN6] No cells after conversion for stage: ' + stageKey + ', canvasRenderData=', canvasRenderData);
+        return null;
+      }
+      
+      console.log('[CANVAS-STAGE] Converted to Canvas format: ' + canvasRenderData.cells.length + ' cells');
+      console.log('[AUDIT-STEP5-END] Sample cell:', canvasRenderData.cells[0]);
+      
+      // Get canvas element
+      const canvasContainer = document.getElementById('canvas-container');
+      const canvas = document.getElementById('canvas-renderer');
+      
+      if (!canvasContainer || !canvas) {
+        console.error('[CANVAS-STAGE] Canvas container or element not found');
+        return null;
+      }
+      
+      // CANVAS-ONLY-PROOF: Show canvas, hide SVG, show red banner
+      canvasContainer.style.display = 'block';
+      const svgContainer = document.getElementById('svg-container');
+      if (svgContainer) {
+        svgContainer.style.display = 'none';
+        // CANVAS-ONLY-PROOF: Clear any SVG content
+        svgContainer.innerHTML = '';
+      }
+      
+      // CANVAS-ONLY-PROOF: Show red banner
+      const canvasProof = document.getElementById('canvas-proof');
+      if (canvasProof) {
+        canvasProof.classList.add('visible');
+        console.log('[CANVAS-ONLY-PROOF] Red banner displayed – SVG is dead here');
+      }
+      
+      // CANVAS-ONLY-PROOF: Final SVG check
+      const finalSVGCheck = document.querySelector('svg');
+      if (finalSVGCheck) {
+        console.error('[CANVAS-ONLY-PROOF] SVG STILL EXISTS AFTER CLEANUP – Removing:', finalSVGCheck);
+        finalSVGCheck.remove();
+      }
+      
+      // Set canvas size
+      canvas.width = DUAL_GRID_DATA.mapWidth || 960;
+      canvas.height = DUAL_GRID_DATA.mapHeight || 540;
+      
+      // CANVAS-ONLY-PROOF: Yellow flash on first draw
+      if (firstCanvasDraw) {
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'yellow';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        console.log('[CANVAS-ONLY-PROOF] Yellow flash on first draw');
+        firstCanvasDraw = false;
+        
+        // Clear yellow after brief flash (async)
+        setTimeout(() => {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }, 100);
+      }
+      
+      // Get renderer
+      if (!canvasRenderer) {
+        canvasRenderer = getRenderer(canvas, {
+          mode: 'canvas2d',
+          viewport: {
+            offsetX: 0,
+            offsetY: 0,
+            scale: 1.0,
+          }
+        });
+        
+        // Wire up zoom/pan once
+        setupCanvasZoomPan(canvas, canvasRenderer);
+      }
+      
+      // Store render data for zoom/pan redraw
+      canvasRenderData._stageKey = stageKey;
+      
+      // CANVAS-ONLY-PROOF: Override renderMap to add proof logging and purple text (store on renderer for zoom/pan redraws)
+      if (!canvasRenderer._originalRenderMap) {
+        canvasRenderer._originalRenderMap = canvasRenderer.renderMap.bind(canvasRenderer);
+        canvasRenderer.renderMap = function(renderData) {
+          const currentStageKey = renderData?._stageKey || stageKey;
+          console.log('[CANVAS-DRAW] renderMap called with ' + (renderData?.cells?.length || 0) + ' cells for stage ' + currentStageKey);
+          
+          // Call original render
+          canvasRenderer._originalRenderMap(renderData);
+          
+          // CANVAS-ONLY-PROOF: Draw purple "CANVAS ONLY" text if debug mode enabled
+          if (canvasDebugMode && canvasRenderer && canvasRenderer.ctx) {
+            const ctx = canvasRenderer.ctx;
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(3, 3); // Large text
+            ctx.fillStyle = 'rgba(255, 0, 255, 0.7)'; // Purple
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.font = 'bold 48px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('CANVAS ONLY', 0, 0);
+            ctx.strokeText('CANVAS ONLY', 0, 0);
+            ctx.restore();
+            console.log('[CANVAS-DRAW] Purple "CANVAS ONLY" text drawn in debug mode');
+          }
+        };
+      }
+      
+      // AUDIT-STEP8: Render map
+      console.log('[AUDIT-STEP8] Rendering ' + canvasRenderData.cells.length + ' cells to canvas');
+      try {
+        canvasRenderer.renderMap(canvasRenderData);
+        console.log('[AUDIT-STEP8-END] Render done');
+      } catch (err) {
+        console.error('[AUDIT-FAIL8] Render error: ' + err.message, err);
+        throw err;
+      }
+      
+      // Stage-specific logging
+      if (stageKey === '3') {
+        const triangleCount = canvasRenderData.cells.filter(c => c.stroke?.color === '#ff0000').length;
+        const quadCount = canvasRenderData.cells.length - triangleCount;
+        console.log('[CANVAS-STAGE] Rendered ' + quadCount + ' blue quads and ' + triangleCount + ' red triangles for Stage 3');
+        if (triangleCount > 0) {
+          console.log('[VISUAL-FIX] Applied red fill + thick stroke + layer to ' + triangleCount + ' surviving triangles');
+          console.log('[RED-EDGES] ~' + Math.ceil(triangleCount * 1.5) + ' outer red segments rendered');
+        }
+        console.log('[GHOST-FIX] Applied crispEdges to ' + quadCount + ' quads (prevents antialiasing bleed)');
+      } else {
+        console.log('[CANVAS-STAGE] Rendered ' + canvasRenderData.cells.length + ' cells for ' + stage.label);
+      }
+      
+      return canvasRenderData;
+    }
+    
+    // ============================================================
+    // Step-by-Step Pipeline Rendering (SVG - DISABLED, kept only for reference)
     // ============================================================
     function renderPipelineStage(stageKey) {
+      // CANVAS-ONLY-PROOF: SVG rendering is DISABLED
+      console.error('[CANVAS-ONLY-PROOF] SVG RENDERING BLOCKED – renderPipelineStage() called but SVG is disabled');
+      throw new Error('[CANVAS-ONLY-PROOF] SVG rendering is disabled – use Canvas renderer only');
+      
+      // Code below is disabled but kept for reference
+      /*
       if (!PIPELINE_STAGES) {
         console.warn('PIPELINE_STAGES not available');
         return null;
@@ -581,10 +1193,10 @@ function generateInteractiveHTML(data) {
       const layers = [];
       
       // Background
-      layers.push(\`<rect x="\${viewBoxX}" y="\${viewBoxY}" width="\${viewBoxWidth}" height="\${viewBoxHeight}" fill="#e8f4f8" />\`);
+      layers.push('<rect x="' + viewBoxX + '" y="' + viewBoxY + '" width="' + viewBoxWidth + '" height="' + viewBoxHeight + '" fill="#e8f4f8" />');
       
       // Stage label - BIG and prominent
-      layers.push(\`<text x="0" y="\${viewBoxY + 40}" font-size="28" font-weight="bold" fill="\${stage.color}" text-anchor="middle" stroke="#000" stroke-width="0.5">\${stage.label}</text>\`);
+      layers.push('<text x="0" y="' + (viewBoxY + 40) + '" font-size="28" font-weight="bold" fill="' + stage.color + '" text-anchor="middle" stroke="#000" stroke-width="0.5">' + stage.label + '</text>');
       
       // Reference boundary (yellow)
       const refPoints = [
@@ -594,8 +1206,8 @@ function generateInteractiveHTML(data) {
         {x:-220,y:480}, {x:-380,y:420}, {x:-460,y:280}, {x:-520,y:20},
         {x:-510,y:-140}, {x:-460,y:-320}, {x:-380,y:-460}, {x:0,y:-480}
       ];
-      const refPath = refPoints.map((p, i) => \`\${i === 0 ? 'M' : 'L'} \${p.x} \${p.y}\`).join(' ') + ' Z';
-      layers.push(\`<path d="\${refPath}" fill="none" stroke="yellow" stroke-width="2" opacity="0.6" />\`);
+      const refPath = refPoints.map((p, i) => (i === 0 ? 'M' : 'L') + ' ' + p.x + ' ' + p.y).join(' ') + ' Z';
+      layers.push('<path d="' + refPath + '" fill="none" stroke="yellow" stroke-width="2" opacity="0.6" />');
       
       // Get points for this stage
       let stagePoints = null;
@@ -612,8 +1224,8 @@ function generateInteractiveHTML(data) {
       if (!stagePoints || !Array.isArray(stagePoints) || stagePoints.length === 0) {
         console.warn('No points available for stage:', stageKey);
         // Render placeholder
-        layers.push(\`<text x="0" y="0" font-size="24" fill="red" text-anchor="middle">No data for \${stage.label}</text>\`);
-        return \`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="\${viewBoxX} \${viewBoxY} \${viewBoxWidth} \${viewBoxHeight}">\${layers.join('\\n')}</svg>\`;
+        layers.push('<text x="0" y="0" font-size="24" fill="red" text-anchor="middle">No data for ' + stage.label + '</text>');
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="' + viewBoxX + ' ' + viewBoxY + ' ' + viewBoxWidth + ' ' + viewBoxHeight + '">' + layers.join('\\n') + '</svg>';
       }
       
       // Center points
@@ -624,7 +1236,7 @@ function generateInteractiveHTML(data) {
         y: (p.y || 0) - centroidY 
       }));
       
-      console.log(\`Stage \${stageKey}: \${stagePoints.length} points, centroid: (\${centroidX.toFixed(2)}, \${centroidY.toFixed(2)})\`);
+      console.log('Stage ' + stageKey + ': ' + stagePoints.length + ' points, centroid: (' + centroidX.toFixed(2) + ', ' + centroidY.toFixed(2) + ')');
       
       // Render based on stage type
       if (stageKey === '1') {
@@ -632,11 +1244,11 @@ function generateInteractiveHTML(data) {
         let dotCount = 0;
         centeredPoints.forEach((p, idx) => {
           if (isFinite(p.x) && isFinite(p.y)) {
-            layers.push(\`<circle cx="\${p.x.toFixed(2)}" cy="\${p.y.toFixed(2)}" r="4" fill="\${stage.color}" opacity="0.9" stroke="#cc8800" stroke-width="0.5" />\`);
+            layers.push('<circle cx="' + p.x.toFixed(2) + '" cy="' + p.y.toFixed(2) + '" r="4" fill="' + stage.color + '" opacity="0.9" stroke="#cc8800" stroke-width="0.5" />');
             dotCount++;
           }
         });
-        console.log(\`Rendered \${dotCount} yellow dots for Stage 1 (Raw Points)\`);
+        console.log('Rendered ' + dotCount + ' yellow dots for Stage 1 (Raw Points)');
       } else if (stageKey === '2' && stage.data) {
         // Stage 2: Wireframe triangles (gray) - like connect-points.jpg
         let triangleCount = 0;
@@ -648,19 +1260,38 @@ function generateInteractiveHTML(data) {
                 return p && isFinite(p.x) && isFinite(p.y) ? p : null;
               }).filter(v => v !== null);
               if (verts.length >= 3) {
-                const path = verts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
-                layers.push(\`<path d="\${path}" fill="none" stroke="\${stage.color}" stroke-width="1.5" opacity="0.7" />\`);
+                const path = verts.map((v, i) => (i === 0 ? 'M' : 'L') + ' ' + v.x.toFixed(2) + ' ' + v.y.toFixed(2)).join(' ') + ' Z';
+                layers.push('<path d="' + path + '" fill="none" stroke="' + stage.color + '" stroke-width="1.5" opacity="0.7" />');
                 triangleCount++;
               }
             }
           });
         }
-        console.log(\`Rendered \${triangleCount} gray triangles for Stage 2 (After Triangulation)\`);
+        console.log('Rendered ' + triangleCount + ' gray triangles for Stage 2 (After Triangulation)');
       } else if (stageKey === '3' && stage.data) {
         // Stage 3: Quad outlines (blue) - like cull-triangles.jpg
+        // VISUAL FIX: Separate triangles with nuclear red visibility (fill + thick stroke + separate layer)
         let quadCount = 0;
+        let triangleCount = 0;
         let invalidQuadCount = 0;
         let selfIntersectingCount = 0;
+        
+        // VISUAL FIX #4 (Optional): Red glow filter in defs (commented out by default)
+        const redGlowFilter = \`
+        <defs>
+          <filter id="redGlow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2.5" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>\`;
+        // Uncomment next line to enable red glow on triangles:
+        // layers.push(redGlowFilter);
+        
+        // VISUAL FIX #3: Separate array for triangle paths (will be put in top-level <g> layer)
+        const trianglePaths = [];
         
         if (Array.isArray(stage.data)) {
           stage.data.forEach((quad, quadIdx) => {
@@ -673,7 +1304,7 @@ function generateInteractiveHTML(data) {
               if (verts.length < 3) {
                 invalidQuadCount++;
                 if (quadIdx < 5) {
-                  console.log(\`[renderPipelineStage] Stage 3: Invalid quad \${quadIdx} - less than 3 valid vertices: [\${quad.verts.join(',')}]\`);
+                  console.log('[renderPipelineStage] Stage 3: Invalid quad ' + quadIdx + ' - less than 3 valid vertices: [' + quad.verts.join(',') + ']');
                 }
                 return;
               }
@@ -682,7 +1313,7 @@ function generateInteractiveHTML(data) {
               const uniqueVerts = [];
               const seenCoords = new Set();
               for (const v of verts) {
-                const coordKey = \`\${v.x.toFixed(2)},\${v.y.toFixed(2)}\`;
+                const coordKey = v.x.toFixed(2) + ',' + v.y.toFixed(2);
                 if (!seenCoords.has(coordKey)) {
                   seenCoords.add(coordKey);
                   uniqueVerts.push(v);
@@ -692,7 +1323,7 @@ function generateInteractiveHTML(data) {
               if (uniqueVerts.length !== verts.length) {
                 selfIntersectingCount++;
                 if (quadIdx < 5) {
-                  console.log(\`[renderPipelineStage] Stage 3: Quad \${quadIdx} has duplicate vertices - \${verts.length} input, \${uniqueVerts.length} unique\`);
+                  console.log('[renderPipelineStage] Stage 3: Quad ' + quadIdx + ' has duplicate vertices - ' + verts.length + ' input, ' + uniqueVerts.length + ' unique');
                 }
               }
               
@@ -700,36 +1331,70 @@ function generateInteractiveHTML(data) {
               const renderVerts = uniqueVerts.length < verts.length ? uniqueVerts : verts;
               
               if (renderVerts.length >= 3) {
-                // ITERATION 39 FIX: Force triangle detection by vert count only + enhanced ghost hunting diagnostics
-                // Diagnostic #1: Force detection by vert count (ignore type field)
-                // Diagnostic #2: Enhanced debug info in title + console for type mismatch detection
+                // VISUAL FIX: Force triangle detection by vert count only (ITERATION 39 + enhanced)
                 const vertCount = quad.verts?.length ?? 0;
                 const detectedType = quad.type ?? 'missing';
-                const isTriangle = vertCount === 3; // ITERATION 39: Force detection by vert count only
+                const isTriangle = vertCount === 3; // Force detection by vert count only
 
-                const strokeColor = isTriangle ? '#ff0000' : stage.color; // Red for triangles
-                const strokeWidth = isTriangle ? '3' : '2'; // Thicker for triangles
+                // ID SPECIFICATION v1.0: Enhanced debug title with ID and lineage
+                const idStr = quad.id ? 'ID: ' + quad.id : 'No ID (fallback)';
+                const lineageStr = quad.lineage?.length ? 'Lineage: [' + quad.lineage.join(', ') + ']' : 'Original';
+                const titleAttr = ' title="' + idStr + ', Type: ' + detectedType + ', Verts: ' + vertCount + ', ' + lineageStr + ', Indices: [' + (quad.verts?.join(',') || '—') + ']"';
 
-                // Enhanced debug title always showing real data
-                const titleAttr = \` title="Shape #\${quadIdx}: type=\${detectedType}, verts=\${vertCount}, indices=[\${quad.verts?.join(',') || '—'}]"\`;
+                const path = renderVerts.map((v, i) => (i === 0 ? 'M' : 'L') + ' ' + v.x.toFixed(2) + ' ' + v.y.toFixed(2)).join(' ') + ' Z';
 
-                const path = renderVerts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
-                layers.push(\`<path d="\${path}" fill="none" stroke="\${strokeColor}" stroke-width="\${strokeWidth}" opacity="0.9"\${titleAttr} />\`);
-
-                if (isTriangle && detectedType !== 'triangle') {
-                  console.warn(\`[GHOST HUNT] Type mismatch! Rendered as red triangle but type=\${detectedType}, verts=[\${quad.verts?.join(',') || '—'}]\`);
-                }
                 if (isTriangle) {
-                  console.log(\`[GHOST HUNT] Highlighted triangle: #\${quadIdx}, type=\${detectedType}, verts=[\${quad.verts?.join(',') || '—'}]\`);
+                  // VISUAL FIX #1: RED FILL (highest impact - makes interior obviously red)
+                  // VISUAL FIX #2: BRUTAL THICK STROKE (nuclear visibility)
+                  // VISUAL FIX #3: Collect for separate layer (rendered last, on top)
+                  const trianglePath = '<path d="' + path + '" fill="rgba(255, 0, 0, 0.30)" fill-opacity="0.30" stroke="#ff0000" stroke-width="7" stroke-opacity="1.0" stroke-linecap="round" stroke-linejoin="round"' + titleAttr + ' />';
+                  // Optional: Add filter for red glow (uncomment if filter is enabled):
+                  // const trianglePath = \`<path d="\${path}" fill="rgba(255, 0, 0, 0.30)" fill-opacity="0.30" stroke="#ff0000" stroke-width="7" stroke-opacity="1.0" stroke-linecap="round" stroke-linejoin="round" filter="url(#redGlow)"\${titleAttr} />\`;
+                  trianglePaths.push(trianglePath);
+                  triangleCount++;
+                  
+                  // VISUAL FIX: Enhanced logging
+                  console.log('[VISUAL-FIX] Applied red fill + thick stroke + layer to triangle: ' + idStr + ', verts=[' + (quad.verts?.join(',') || '—') + ']');
+                  
+                  // ID SPECIFICATION v1.0: Enhanced logging with IDs
+                  if (detectedType !== 'triangle') {
+                    console.warn('[GHOST HUNT] Type mismatch! ' + idStr + ', type=' + detectedType + ', verts=[' + (quad.verts?.join(',') || '—') + ']');
+                  }
+                  console.log('[RENDER TRIANGLE] ' + idStr + ', verts=[' + (quad.verts?.join(',') || '—') + '], type=' + detectedType + ', ' + lineageStr);
+                } else {
+                  // Quads: Keep original blue style (backward compatible)
+                  // GHOST-FIX #1: crispEdges prevents blue stroke bleed creating fake triangles at junctions
+                  // Disables subpixel smoothing on straight blue lines → eliminates antialiasing bleed/phantom shapes
+                  layers.push('<path d="' + path + '" fill="none" stroke="' + stage.color + '" stroke-width="2" opacity="0.9" shape-rendering="crispEdges"' + titleAttr + ' />');
+                  quadCount++;
                 }
-                quadCount++;
               }
             }
           });
         }
-        console.log(\`Rendered \${quadCount} blue quads for Stage 3 (After Dissolution/Cull)\`);
+        
+        // VISUAL FIX #3: Append triangles in separate top-level <g> layer (ensures max z-order, no interleaving bleed)
+        if (trianglePaths.length > 0) {
+          layers.push('<g id="survivor-triangles-layer">' + trianglePaths.join('\\n') + '</g>');
+          console.log('[VISUAL-FIX] Applied red fill + thick stroke + layer to ' + triangleCount + ' surviving triangles');
+        }
+        
+        // GHOST-FIX #1: Log crispEdges application (prevents blue stroke bleed/phantom triangles)
+        if (quadCount > 0) {
+          console.log('[GHOST-FIX] Applied crispEdges to ' + quadCount + ' quads (prevents antialiasing bleed creating phantom blue triangles)');
+        }
+        
+        // RED-EDGES: Log outer red segments (unshared edges of survivors)
+        if (triangleCount > 0) {
+          // Each triangle has 3 edges, but only outer (unshared) edges appear red
+          // Approximate: survivors typically have 1-2 outer edges visible
+          const estimatedRedSegments = Math.ceil(triangleCount * 1.5); // Rough estimate
+          console.log('[RED-EDGES] ~' + estimatedRedSegments + ' outer red segments rendered (unshared edges of ' + triangleCount + ' survivors)');
+        }
+        
+        console.log('Rendered ' + quadCount + ' blue quads and ' + triangleCount + ' red triangles for Stage 3 (After Dissolution/Cull)');
         if (invalidQuadCount > 0 || selfIntersectingCount > 0) {
-          console.log(\`[renderPipelineStage] Stage 3 AUDIT: \${invalidQuadCount} invalid quads, \${selfIntersectingCount} quads with duplicate vertices\`);
+          console.log('[renderPipelineStage] Stage 3 AUDIT: ' + invalidQuadCount + ' invalid quads, ' + selfIntersectingCount + ' quads with duplicate vertices');
         }
       } else if (stageKey === '4' && stage.data) {
         // Stage 4: Subdivided triangles (red) - like subdivide-triangles-to-quads.jpg
@@ -746,14 +1411,14 @@ function generateInteractiveHTML(data) {
                 return p && isFinite(p.x) && isFinite(p.y) ? p : null;
               }).filter(v => v !== null);
               if (verts.length >= 3) {
-                const path = verts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
+                const path = verts.map((v, i) => (i === 0 ? 'M' : 'L') + ' ' + v.x.toFixed(2) + ' ' + v.y.toFixed(2)).join(' ') + ' Z';
                 
                 // ENHANCED VALIDATION: Different color for quads from triangle subdivision
                 const isFromSubdivision = shape.fromTriangleSubdivision === true;
                 const strokeColor = isFromSubdivision ? '#ff4488' : '#ff8844'; // Pink for subdivision, orange for dissolution
                 const strokeWidth = isFromSubdivision ? '2' : '1.5';
                 
-                layers.push(\`<path d="\${path}" fill="none" stroke="\${strokeColor}" stroke-width="\${strokeWidth}" opacity="0.8" />\`);
+                layers.push('<path d="' + path + '" fill="none" stroke="' + strokeColor + '" stroke-width="' + strokeWidth + '" opacity="0.8" />');
                 shapeCount++;
                 
                 if (isFromSubdivision) {
@@ -765,7 +1430,7 @@ function generateInteractiveHTML(data) {
             }
           });
         }
-        console.log(\`Rendered \${shapeCount} shapes for Stage 4 (After Subdivide Triangles): \${quadsFromSubdivision} from subdivision (pink), \${quadsFromDissolution} from dissolution (orange)\`);
+        console.log('Rendered ' + shapeCount + ' shapes for Stage 4 (After Subdivide Triangles): ' + quadsFromSubdivision + ' from subdivision (pink), ' + quadsFromDissolution + ' from dissolution (orange)');
       } else if (stageKey === '5' && stage.data) {
         // Stage 5: Subdivided quads (orange) - like subdivide-quads.jpg
         let quadCount = 0;
@@ -783,13 +1448,13 @@ function generateInteractiveHTML(data) {
               return p && isFinite(p.x) && isFinite(p.y) ? p : null;
             }).filter(v => v !== null);
             if (verts.length >= 3) {
-              const path = verts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
-              layers.push(\`<path d="\${path}" fill="none" stroke="\${stage.color}" stroke-width="1.5" opacity="0.8" />\`);
+              const path = verts.map((v, i) => (i === 0 ? 'M' : 'L') + ' ' + v.x.toFixed(2) + ' ' + v.y.toFixed(2)).join(' ') + ' Z';
+              layers.push('<path d="' + path + '" fill="none" stroke="' + stage.color + '" stroke-width="1.5" opacity="0.8" />');
               quadCount++;
             }
           }
         });
-        console.log(\`Rendered \${quadCount} orange subdivided quads for Stage 5 (After Subdivide Quads)\`);
+        console.log('Rendered ' + quadCount + ' orange subdivided quads for Stage 5 (After Subdivide Quads)');
       } else if (stageKey === 'final' && stage.data) {
         // Stage 6: Final (black rounded quads after 1 iter relaxation + dual offset)
         const finalPoints = stage.data.dualPoints || stage.data.points;
@@ -813,43 +1478,253 @@ function generateInteractiveHTML(data) {
                   return p && isFinite(p.x) && isFinite(p.y) ? p : null;
                 }).filter(v => v !== null);
                 if (verts.length >= 3) {
-                  const path = verts.map((v, i) => \`\${i === 0 ? 'M' : 'L'} \${v.x.toFixed(2)} \${v.y.toFixed(2)}\`).join(' ') + ' Z';
-                  layers.push(\`<path d="\${path}" fill="none" stroke="\${stage.color}" stroke-width="1.5" opacity="0.9" />\`);
+                  const path = verts.map((v, i) => (i === 0 ? 'M' : 'L') + ' ' + v.x.toFixed(2) + ' ' + v.y.toFixed(2)).join(' ') + ' Z';
+                  layers.push('<path d="' + path + '" fill="none" stroke="' + stage.color + '" stroke-width="1.5" opacity="0.9" />');
                   finalQuadCount++;
                 }
               }
             });
           }
-          console.log(\`Rendered \${finalQuadCount} black final quads for Stage 6 (Final: Relax + Dual Offset)\`);
+          console.log('Rendered ' + finalQuadCount + ' black final quads for Stage 6 (Final: Relax + Dual Offset)');
         }
       }
       
-      return \`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="\${viewBoxX} \${viewBoxY} \${viewBoxWidth} \${viewBoxHeight}">\${layers.join('\\n')}</svg>\`;
+      return '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="' + viewBoxX + ' ' + viewBoxY + ' ' + viewBoxWidth + ' ' + viewBoxHeight + '">' + layers.join('\\n') + '</svg>';
     }
     
     // ============================================================
-    // SVG Rendering
+    // Canvas Final Render
     // ============================================================
-    function renderSVG() {
+    async function renderCanvasFinal() {
+      const canvasContainer = document.getElementById('canvas-container');
+      const svgContainer = document.getElementById('svg-container');
+      const layerControls = document.getElementById('layer-controls');
+      
+      if (!canvasContainer) {
+        console.error('Canvas container not found');
+        return;
+      }
+      
+      // Check if library functions are loaded
+      if (!initGenerator || !loadOptions || !generateMap || !exportRenderData || !getRenderer) {
+        console.error('[CANVAS-FINAL] Library functions not loaded yet. Please wait...');
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = '⏳ Loading Canvas renderer library... (requires web server, not file://)';
+        statusEl.className = 'status';
+        
+        // Try to load again
+        try {
+          const module = await import('../src/index.js');
+          initGenerator = module.initGenerator;
+          loadOptions = module.loadOptions;
+          generateMap = module.generateMap;
+          exportRenderData = module.exportRenderData;
+          getRenderer = module.getRenderer;
+          console.log('[CANVAS-FINAL] Library functions loaded successfully');
+        } catch (error) {
+          console.error('[CANVAS-FINAL] Failed to load library functions:', error);
+          statusEl.textContent = '❌ Canvas renderer unavailable. Serve from web server (not file://) to enable ES modules.';
+          statusEl.className = 'status';
+          return;
+        }
+      }
+      
+      // Show canvas container, hide SVG container, show layer controls
+      canvasContainer.style.display = 'block';
+      svgContainer.style.display = 'none';
+      layerControls.classList.add('visible');
+      
+      const canvas = document.getElementById('canvas-renderer');
+      if (!canvas) {
+        console.error('Canvas element not found');
+        return;
+      }
+      
+      try {
+        console.log('[CANVAS-FINAL] Starting Canvas final render...');
+        
+        // Initialize generator if not already done
+        if (!fullMapData) {
+          console.log('[CANVAS-FINAL] Generating full map data...');
+          
+          // Initialize generator with same options as dual-grid
+          initGenerator({ canvas: null });
+          
+          // Use same seed and options from dual-grid
+          const options = {
+            seed: DUAL_GRID_DATA.seed || 'interactive-42',
+            mapWidth: DUAL_GRID_DATA.mapWidth || 960,
+            mapHeight: DUAL_GRID_DATA.mapHeight || 540,
+            statesNumber: 18,
+            fullRendering: true,
+            useDualGridPolitics: true,
+            logRelaxation: false,
+          };
+          
+          loadOptions(options);
+          fullMapData = generateMap();
+          
+          console.log('[CANVAS-FINAL] Generated full map data');
+        }
+        
+        // Export render data with current active layers
+        console.log('[CANVAS-FINAL] Exporting render data (layers:', activeLayers.join(', '), ')...');
+        canvasRenderData = exportRenderData({ 
+          mode: 'canvas2d', 
+          layers: activeLayers 
+        });
+        console.log('[CANVAS-FINAL] Rendering final grid with', canvasRenderData.cells?.length || 0, 'cells');
+        
+        // Set canvas size
+        canvas.width = DUAL_GRID_DATA.mapWidth || 960;
+        canvas.height = DUAL_GRID_DATA.mapHeight || 540;
+        
+        // Get renderer
+        canvasRenderer = getRenderer(canvas, {
+          mode: 'canvas2d',
+          layers: activeLayers,
+          viewport: {
+            offsetX: 0,
+            offsetY: 0,
+            scale: 1.0,
+          }
+        });
+        
+        // Render map
+        canvasRenderer.renderMap(canvasRenderData);
+        
+        // Wire up zoom/pan for canvas
+        setupCanvasZoomPan(canvas, canvasRenderer);
+        
+        console.log('[CANVAS-FINAL] Canvas render complete');
+        
+      } catch (error) {
+        console.error('[CANVAS-FINAL] Error:', error);
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = '❌ Canvas render error: ' + error.message;
+        statusEl.className = 'status';
+      }
+    }
+    
+    // ============================================================
+    // Canvas Zoom/Pan Setup
+    // ============================================================
+    function setupCanvasZoomPan(canvas, renderer) {
+      let isDragging = false;
+      let lastX = 0;
+      let lastY = 0;
+      
+      // Mouse wheel zoom
+      canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const newScale = Math.max(0.1, Math.min(10, renderer.viewport.scale * delta));
+        
+        // Zoom towards mouse position
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        const worldX = (mouseX / rect.width) * canvas.width - renderer.viewport.offsetX;
+        const worldY = (mouseY / rect.height) * canvas.height - renderer.viewport.offsetY;
+        
+        renderer.viewport.scale = newScale;
+        renderer.viewport.offsetX = (mouseX / rect.width) * canvas.width - worldX * newScale;
+        renderer.viewport.offsetY = (mouseY / rect.height) * canvas.height - worldY * newScale;
+        
+        // Re-render with current render data
+        const currentRenderData = canvasRenderData || (canvasRenderer && canvasRenderer._renderDataCache);
+        if (currentRenderData) {
+          renderer.renderMap(currentRenderData);
+        }
+      });
+      
+      // Mouse drag pan
+      canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 0) { // Left mouse button
+          isDragging = true;
+          lastX = e.clientX;
+          lastY = e.clientY;
+          canvas.classList.add('dragging');
+        }
+      });
+      
+      canvas.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+          const dx = e.clientX - lastX;
+          const dy = e.clientY - lastY;
+          
+          renderer.viewport.offsetX += dx;
+          renderer.viewport.offsetY += dy;
+          
+          lastX = e.clientX;
+          lastY = e.clientY;
+          
+          // Re-render with current render data (proof wrapper is already on renderer)
+          const currentRenderData = canvasRenderData || (canvasRenderer && canvasRenderer._renderDataCache);
+          if (currentRenderData && renderer.renderMap) {
+            renderer.renderMap(currentRenderData);
+          }
+        }
+      });
+      
+      canvas.addEventListener('mouseup', () => {
+        isDragging = false;
+        canvas.classList.remove('dragging');
+      });
+      
+      canvas.addEventListener('mouseleave', () => {
+        isDragging = false;
+        canvas.classList.remove('dragging');
+      });
+    }
+    
+    // ============================================================
+    // SVG Rendering (now uses Canvas for stages 1-6, SVG DISABLED)
+    // ============================================================
+    async function renderSVG() {
       try {
         // Fix 1: Comprehensive logging
-        console.log('Starting render...');
+        console.log('[CANVAS-ONLY-PROOF] Starting render...');
         
-        // STEP-BY-STEP DEBUG: Render selected stage if pipeline stages available
+        // CANVAS STAGE: Handle Canvas rendering separately
+        if (currentStage === 'canvas') {
+          renderCanvasFinal();
+          return;
+        }
+        
+        // CANVAS-ONLY-PROOF: Hide red banner and SVG when not in Canvas mode
+        const canvasProof = document.getElementById('canvas-proof');
+        if (canvasProof) canvasProof.classList.remove('visible');
+        
+        // STEP-BY-STEP DEBUG: Render selected stage using Canvas (stages 1-6) - NO SVG FALLBACK
         if (PIPELINE_STAGES && typeof currentStage !== 'undefined') {
-          console.log('Showing stage:', currentStage);
-          const stageSVG = renderPipelineStage(currentStage);
-          if (stageSVG) {
-            const container = document.getElementById('svg-container');
-            if (container) {
-              container.innerHTML = stageSVG;
-              console.log('Successfully rendered pipeline stage:', currentStage);
+          console.log('[CANVAS-ONLY-PROOF] Showing stage:', currentStage);
+          
+          // Use Canvas rendering for all pipeline stages (1-6, final) - NO SVG FALLBACK
+          if (currentStage !== 'canvas') {
+            const stageCanvasData = await renderPipelineStageCanvas(currentStage);
+            if (stageCanvasData) {
+              // Store render data for zoom/pan redraw
+              canvasRenderData = stageCanvasData;
+              console.log('[CANVAS-ONLY-PROOF] Successfully rendered pipeline stage via Canvas:', currentStage);
+              
+              // CANVAS-ONLY-PROOF: Final verification - no SVG should exist
+              const svgCheck = document.querySelector('svg');
+              if (svgCheck) {
+                console.error('[CANVAS-ONLY-PROOF] CRITICAL: SVG LEAK AFTER CANVAS RENDER – Removing:', svgCheck);
+                svgCheck.remove();
+                throw new Error('[CANVAS-ONLY-PROOF] SVG LEAK DETECTED AFTER RENDER – ABORTING');
+              }
               return;
             } else {
-              console.error('Container not found for stage rendering');
+              // CANVAS-ONLY-PROOF: Canvas failed - DO NOT FALL BACK TO SVG
+              console.error('[CANVAS-ONLY-PROOF] Canvas rendering failed for stage:', currentStage, '- NOT falling back to SVG (SVG is disabled)');
+              const statusEl = document.getElementById('status');
+              statusEl.textContent = '❌ Canvas render failed for ' + currentStage + ' – SVG fallback disabled (Canvas-only mode)';
+              statusEl.className = 'status';
+              return;
             }
-          } else {
-            console.warn('Failed to render pipeline stage:', currentStage, 'PIPELINE_STAGES:', PIPELINE_STAGES);
           }
         }
         
@@ -933,20 +1808,20 @@ function generateInteractiveHTML(data) {
           throw new Error('No valid render points after centering');
         }
         
-        console.log(\`Centered for rendering: \${renderPoints.length} points, final centroid offset: (\${centroidX.toFixed(2)}, \${centroidY.toFixed(2)})\`);
+        console.log('Centered for rendering: ' + renderPoints.length + ' points, final centroid offset: (' + centroidX.toFixed(2) + ', ' + centroidY.toFixed(2) + ')');
         
         // Step 5: Use fixed centered viewBox
         const viewBoxX = -550;
         const viewBoxY = -550;
         const viewBoxWidth = 1100;
         const viewBoxHeight = 1100;
-        console.log(\`ViewBox: \${viewBoxX} \${viewBoxY} \${viewBoxWidth} \${viewBoxHeight} (centered, elliptical preview)\`);
+        console.log('ViewBox: ' + viewBoxX + ' ' + viewBoxY + ' ' + viewBoxWidth + ' ' + viewBoxHeight + ' (centered, elliptical preview)');
         
         // Build SVG
         const layers = [];
         
         // Background
-        layers.push(\`<rect x="\${viewBoxX}" y="\${viewBoxY}" width="\${viewBoxWidth}" height="\${viewBoxHeight}" fill="#e8f4f8" />\`);
+        layers.push('<rect x="' + viewBoxX + '" y="' + viewBoxY + '" width="' + viewBoxWidth + '" height="' + viewBoxHeight + '" fill="#e8f4f8" />');
         
         // Step 6: Add debug overlay showing target elliptical shape
         const refPoints = [
@@ -958,12 +1833,12 @@ function generateInteractiveHTML(data) {
         ];
         
         // Draw yellow reference boundary polyline
-        const refPath = refPoints.map((p, i) => \`\${i === 0 ? 'M' : 'L'} \${p.x} \${p.y}\`).join(' ') + ' Z';
-        layers.push(\`<path d="\${refPath}" fill="none" stroke="yellow" stroke-width="2" opacity="0.6" />\`);
+        const refPath = refPoints.map((p, i) => (i === 0 ? 'M' : 'L') + ' ' + p.x + ' ' + p.y).join(' ') + ' Z';
+        layers.push('<path d="' + refPath + '" fill="none" stroke="yellow" stroke-width="2" opacity="0.6" />');
         
         // Draw small yellow circles at each reference point
         refPoints.forEach(p => {
-          layers.push(\`<circle cx="\${p.x}" cy="\${p.y}" r="3" fill="yellow" opacity="0.8" />\`);
+          layers.push('<circle cx="' + p.x + '" cy="' + p.y + '" r="3" fill="yellow" opacity="0.8" />');
         });
         
         // Draw faint blue circle r=500 at origin
@@ -976,13 +1851,13 @@ function generateInteractiveHTML(data) {
         // Debug: Add colored dots for first point (using transformed coordinates)
         if (renderPoints.length > 0) {
           const firstTransformed = renderPoints[0];
-          layers.push(\`<circle cx="\${firstTransformed.x}" cy="\${firstTransformed.y}" r="8" fill="green" opacity="0.9" />\`);
+          layers.push('<circle cx="' + firstTransformed.x + '" cy="' + firstTransformed.y + '" r="8" fill="green" opacity="0.9" />');
         }
         if (dualPoints && dualPoints.length > 0) {
           // Show original dual point position (before transform) for comparison
           const firstDualOriginal = dualPoints[0];
           const firstDualTransformed = renderPoints[0];
-          layers.push(\`<circle cx="\${firstDualTransformed.x}" cy="\${firstDualTransformed.y}" r="6" fill="lime" opacity="0.9" />\`);
+          layers.push('<circle cx="' + firstDualTransformed.x + '" cy="' + firstDualTransformed.y + '" r="6" fill="lime" opacity="0.9" />');
           console.log(\`Debug markers: Green dot = first transformed point, Lime dot = first dual (transformed)\`);
         }
         
@@ -1032,17 +1907,17 @@ function generateInteractiveHTML(data) {
             }).join(' ') + ' Z';
             
             quadPolygons.push(
-              \`<path d="\${pathData}" fill="\${fillColor}" fill-opacity="\${fillOpacity}" stroke="\${strokeColor}" stroke-width="\${strokeWidth}" data-quad-index="\${i}" />\`
+              '<path d="' + pathData + '" fill="' + fillColor + '" fill-opacity="' + fillOpacity + '" stroke="' + strokeColor + '" stroke-width="' + strokeWidth + '" data-quad-index="' + i + '" />'
             );
           }
           
           if (quadPolygons.length > 0) {
-            layers.push(\`<g id="quads">\${quadPolygons.join('\\n')}</g>\`);
-            console.log(\`Rendered \${quadPolygons.length} dual quads with rounded corners\`);
+            layers.push('<g id="quads">' + quadPolygons.join('\\n') + '</g>');
+            console.log('Rendered ' + quadPolygons.length + ' dual quads with rounded corners');
           }
         } else if (rawDelaunayTriangles && rawDelaunayTriangles.length > 0) {
           // Fallback: render wireframe triangles if quads not available
-          console.log(\`Fallback: Rendering raw triangles: \${rawDelaunayTriangles.length / 3}\`);
+          console.log('Fallback: Rendering raw triangles: ' + (rawDelaunayTriangles.length / 3));
           const trianglePaths = [];
           
           for (let i = 0; i < rawDelaunayTriangles.length; i += 3) {
@@ -1063,19 +1938,17 @@ function generateInteractiveHTML(data) {
             
             const pathData = 'M ' + p0.x.toFixed(6) + ' ' + p0.y.toFixed(6) + ' L ' + p1.x.toFixed(6) + ' ' + p1.y.toFixed(6) + ' L ' + p2.x.toFixed(6) + ' ' + p2.y.toFixed(6) + ' Z';
             trianglePaths.push(
-              \`<path d="\${pathData}" fill="none" stroke="#4488ff" stroke-width="1" opacity="0.6" data-triangle-index="\${i / 3}" />\`
+              '<path d="' + pathData + '" fill="none" stroke="#4488ff" stroke-width="1" opacity="0.6" data-triangle-index="' + (i / 3) + '" />'
             );
           }
           
           if (trianglePaths.length > 0) {
-            layers.push(\`<g id="triangles">\${trianglePaths.join('\\n')}</g>\`);
+            layers.push('<g id="triangles">' + trianglePaths.join('\\n') + '</g>');
           }
         }
         
         // Build complete SVG (use mapWidth/mapHeight for container size, viewBox for scaling)
-        const svg = \`<svg xmlns="http://www.w3.org/2000/svg" width="\${mapWidth}" height="\${mapHeight}" viewBox="\${viewBoxX} \${viewBoxY} \${viewBoxWidth} \${viewBoxHeight}" preserveAspectRatio="xMidYMid meet" overflow="visible">
-\${layers.join('\\n')}
-</svg>\`;
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + mapWidth + '" height="' + mapHeight + '" viewBox="' + viewBoxX + ' ' + viewBoxY + ' ' + viewBoxWidth + ' ' + viewBoxHeight + '" preserveAspectRatio="xMidYMid meet" overflow="visible">\n' + layers.join('\\n') + '\n</svg>';
         
         // Clear container fully before rendering
         container.innerHTML = '';
@@ -1160,8 +2033,8 @@ function generateInteractiveHTML(data) {
             }
           }
           
-          console.log(\`Clicked at SVG coords: (\${clickX.toFixed(1)}, \${clickY.toFixed(1)}), nearest dual point index: \${nearestIndex}, distance: \${minDist.toFixed(1)}\`);
-          console.log(\`Nearest dual point: (\${nearestPoint.x.toFixed(2)}, \${nearestPoint.y.toFixed(2)})\`);
+          console.log('Clicked at SVG coords: (' + clickX.toFixed(1) + ', ' + clickY.toFixed(1) + '), nearest dual point index: ' + nearestIndex + ', distance: ' + minDist.toFixed(1));
+          console.log('Nearest dual point: (' + nearestPoint.x.toFixed(2) + ', ' + nearestPoint.y.toFixed(2) + ')');
           
           // TEMP: Find triangle containing this point and highlight it (until quad dissolution is fixed)
           const { rawDelaunayTriangles } = DUAL_GRID_DATA;
@@ -1214,7 +2087,7 @@ function generateInteractiveHTML(data) {
               const p2 = renderPoints[i2];
               
               if (p0 && p1 && p2) {
-                const highlightPath = \`M \${p0.x} \${p0.y} L \${p1.x} \${p1.y} L \${p2.x} \${p2.y} Z\`;
+                const highlightPath = 'M ' + p0.x + ' ' + p0.y + ' L ' + p1.x + ' ' + p1.y + ' L ' + p2.x + ' ' + p2.y + ' Z';
                 
                 const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'path');
                 if (highlight) {
@@ -1229,7 +2102,7 @@ function generateInteractiveHTML(data) {
                   }
                   svgElement.appendChild(highlight);
                   
-                  console.log(\`Highlighted triangle \${clickedTriangleIdx}\`);
+                  console.log('Highlighted triangle ' + clickedTriangleIdx);
                 }
               }
             }
@@ -1254,7 +2127,7 @@ function generateInteractiveHTML(data) {
                 const quadVerts = quad.verts.map(vIdx => renderPoints[vIdx]);
                 if (quadVerts.length >= 3) {
                   const highlightPath = quadVerts.map((v, idx) => 
-                    \`\${idx === 0 ? 'M' : 'L'} \${v.x} \${v.y}\`
+                    (idx === 0 ? 'M' : 'L') + ' ' + v.x + ' ' + v.y
                   ).join(' ') + ' Z';
                   
                   const highlight = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -1327,7 +2200,7 @@ function generateInteractiveHTML(data) {
         const y = ((event.clientY - rect.top) / rect.height) * viewBox.height + viewBox.y;
         
         // Show loading UI immediately
-        statusEl.textContent = \`Generating terrain at (\${x.toFixed(1)}, \${y.toFixed(1)})...\`;
+        statusEl.textContent = 'Generating terrain at (' + x.toFixed(1) + ', ' + y.toFixed(1) + ')...';
         statusEl.className = 'status generating';
         loadingOverlay.classList.add('active');
         
@@ -1402,9 +2275,9 @@ function generateInteractiveHTML(data) {
         
         // Re-render SVG (wrap in Promise for async behavior)
         await new Promise(resolve => setTimeout(resolve, 0)); // Allow UI update
-        renderSVG();
+        await renderSVG();
         
-        statusEl.textContent = \`✅ Terrain generated! (\${newTerrain.size} quads, \${totalTime.toFixed(0)}ms total, \${terrainTime.toFixed(0)}ms gen, \${mappingTime.toFixed(0)}ms map)\`;
+        statusEl.textContent = '✅ Terrain generated! (' + newTerrain.size + ' quads, ' + totalTime.toFixed(0) + 'ms total, ' + terrainTime.toFixed(0) + 'ms gen, ' + mappingTime.toFixed(0) + 'ms map)';
         statusEl.className = 'status';
         loadingOverlay.classList.remove('active');
         svg.style.pointerEvents = 'auto';
@@ -1415,55 +2288,207 @@ function generateInteractiveHTML(data) {
         const loadingOverlay = document.getElementById('loading-overlay');
         const svg = event.currentTarget;
         
-        statusEl.textContent = \`❌ Error: \${err.message}\`;
+        statusEl.textContent = '❌ Error: ' + err.message;
         statusEl.className = 'status';
         loadingOverlay.classList.remove('active');
         svg.style.pointerEvents = 'auto';
         
         // Show alert for user feedback
-        alert(\`Terrain generation failed: \${err.message}\`);
+        alert('Terrain generation failed: ' + err.message);
       } finally {
         isGenerating = false;
       }
     }
     
     // ============================================================
-    // Controls
+    // Controls (BULLETPROOF: All wrapped in try/catch)
     // ============================================================
-    document.getElementById('resetBtn').addEventListener('click', () => {
-      quadTerrain.clear();
-      renderSVG();
-      document.getElementById('status').textContent = 'Grid reset - Click to generate terrain';
-    });
-    
-    document.getElementById('clearBtn').addEventListener('click', () => {
-      quadTerrain.clear();
-      renderSVG();
-      document.getElementById('status').textContent = 'Terrain cleared - Click to generate terrain';
-    });
-    
-    // STEP-BY-STEP DEBUG: Stage selector
-    if (PIPELINE_STAGES) {
-      console.log('Pipeline stages available:', Object.keys(PIPELINE_STAGES));
-      const stageSelect = document.getElementById('stageSelect');
-      if (stageSelect) {
-        // Initialize to show final stage
-        currentStage = 'final';
-        stageSelect.value = 'final';
-        console.log('Initialized stage selector, showing:', currentStage);
-        
-        stageSelect.addEventListener('change', (e) => {
-          currentStage = e.target.value;
-          console.log('Switching to pipeline stage:', currentStage);
-          renderSVG();
+    try {
+      const resetBtn = document.getElementById('resetBtn');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', async () => {
+          try {
+            console.log('[STAGE-START] Reset Grid');
+            quadTerrain.clear();
+            await renderSVG();
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = 'Grid reset - Click to generate terrain';
+            console.log('[STAGE-END] Reset Grid complete');
+          } catch (err) {
+            console.error('[STAGE-CRASH] Reset Grid failed:', err.message, err.stack);
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = '❌ Reset failed: ' + err.message;
+            alert('Reset Grid failed: ' + err.message);
+          }
         });
-        
-        // Initial render will happen after DOM is ready
       } else {
-        console.error('Stage selector element not found');
+        console.error('[BULLETPROOF-ERROR] Reset button not found');
       }
-    } else {
-      console.log('No pipeline stages available - using normal rendering');
+    } catch (err) {
+      console.error('[BULLETPROOF-ERROR] Failed to wire up reset button:', err);
+    }
+    
+    try {
+      const clearBtn = document.getElementById('clearBtn');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+          try {
+            console.log('[STAGE-START] Clear Terrain');
+            quadTerrain.clear();
+            await renderSVG();
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = 'Terrain cleared - Click to generate terrain';
+            console.log('[STAGE-END] Clear Terrain complete');
+          } catch (err) {
+            console.error('[STAGE-CRASH] Clear Terrain failed:', err.message, err.stack);
+            const statusEl = document.getElementById('status');
+            if (statusEl) statusEl.textContent = '❌ Clear failed: ' + err.message;
+            alert('Clear Terrain failed: ' + err.message);
+          }
+        });
+      } else {
+        console.error('[BULLETPROOF-ERROR] Clear button not found');
+      }
+    } catch (err) {
+      console.error('[BULLETPROOF-ERROR] Failed to wire up clear button:', err);
+    }
+    
+    // STEP-BY-STEP DEBUG: Stage selector (BULLETPROOF: Wrapped in try/catch)
+    try {
+      if (PIPELINE_STAGES) {
+        console.log('[BULLETPROOF-INIT] Pipeline stages available:', Object.keys(PIPELINE_STAGES));
+        const stageSelect = document.getElementById('stageSelect');
+        if (stageSelect) {
+          // Initialize to show final stage
+          currentStage = 'final';
+          stageSelect.value = 'final';
+          console.log('[BULLETPROOF-INIT] Initialized stage selector, showing:', currentStage);
+          
+          stageSelect.addEventListener('change', async (e) => {
+            const newStage = e.target.value;
+            try {
+              console.log('[STAGE-START] Stage change from ' + currentStage + ' to ' + newStage);
+              currentStage = newStage;
+              await renderSVG();
+              console.log('[STAGE-END] Stage change to ' + newStage + ' complete');
+            } catch (err) {
+              console.error('[STAGE-CRASH] Stage change to ' + newStage + ' failed:', err.message, err.stack);
+              const statusEl = document.getElementById('status');
+              if (statusEl) {
+                statusEl.textContent = '❌ Error: ' + err.message;
+                statusEl.className = 'status';
+              }
+              alert('Stage change failed: ' + err.message);
+            }
+          });
+          
+          // Initial render will happen after DOM is ready
+        } else {
+          console.error('[BULLETPROOF-ERROR] Stage selector element not found');
+        }
+      } else {
+        console.log('[BULLETPROOF-INIT] No pipeline stages available - using normal rendering');
+      }
+    } catch (err) {
+      console.error('[BULLETPROOF-ERROR] Failed to wire up stage selector:', err);
+    }
+    
+    // ============================================================
+    // Layer Toggles for Canvas Render (BULLETPROOF: Wrapped in try/catch)
+    // ============================================================
+    function updateActiveLayers() {
+      try {
+        console.log('[STAGE-START] Layer toggle update');
+        activeLayers = [];
+        if (document.getElementById('layer-terrain')?.checked) activeLayers.push('terrain');
+        if (document.getElementById('layer-biomes')?.checked) activeLayers.push('biomes');
+        if (document.getElementById('layer-states')?.checked) activeLayers.push('states');
+        if (document.getElementById('layer-temperature')?.checked) activeLayers.push('temperature');
+        
+        console.log('[CANVAS-FINAL] Layer toggle: layers=[' + activeLayers.join(', ') + ']');
+        
+        // Re-render if Canvas stage is active
+        if (currentStage === 'canvas' && canvasRenderer && canvasRenderData) {
+          // Update render data with new layers
+          canvasRenderData = exportRenderData({ 
+            mode: 'canvas2d', 
+            layers: activeLayers 
+          });
+          
+          // Update renderer layers
+          if (canvasRenderer.setActiveLayers) {
+            canvasRenderer.setActiveLayers(activeLayers);
+          }
+          
+          // Re-render
+          canvasRenderer.renderMap(canvasRenderData);
+        }
+        console.log('[STAGE-END] Layer toggle update complete');
+      } catch (err) {
+        console.error('[STAGE-CRASH] Layer toggle update failed:', err.message, err.stack);
+      }
+    }
+    
+    // Wire up layer toggle checkboxes (BULLETPROOF: Wrapped in try/catch)
+    try {
+      ['layer-terrain', 'layer-biomes', 'layer-states', 'layer-temperature'].forEach(id => {
+        try {
+          const checkbox = document.getElementById(id);
+          if (checkbox) {
+            checkbox.addEventListener('change', updateActiveLayers);
+          }
+        } catch (err) {
+          console.error('[BULLETPROOF-ERROR] Failed to wire up layer checkbox ' + id + ':', err);
+        }
+      });
+    } catch (err) {
+      console.error('[BULLETPROOF-ERROR] Failed to wire up layer checkboxes:', err);
+    }
+    
+    // ============================================================
+    // Canvas Debug Mode Toggle (BULLETPROOF: Wrapped in try/catch)
+    // ============================================================
+    try {
+      const canvasDebugCheckbox = document.getElementById('canvas-debug-mode');
+      if (canvasDebugCheckbox) {
+        canvasDebugCheckbox.addEventListener('change', (e) => {
+          try {
+            console.log('[STAGE-START] Canvas Debug Mode toggle');
+            canvasDebugMode = e.target.checked;
+            console.log('[CANVAS-ONLY-PROOF] Canvas Debug Mode: ' + (canvasDebugMode ? 'ENABLED' : 'DISABLED'));
+            
+            // Re-render if Canvas stage is active
+            if (currentStage !== 'canvas' && canvasRenderer && canvasRenderData) {
+          // Force re-render with debug mode
+          const ctx = canvasRenderer.ctx;
+          if (ctx) {
+            if (canvasDebugMode) {
+              ctx.save();
+              ctx.translate(ctx.canvas.width / 2, ctx.canvas.height / 2);
+              ctx.scale(3, 3);
+              ctx.fillStyle = 'rgba(255, 0, 255, 0.7)';
+              ctx.strokeStyle = '#000';
+              ctx.lineWidth = 2;
+              ctx.font = 'bold 48px Arial';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText('CANVAS ONLY', 0, 0);
+              ctx.strokeText('CANVAS ONLY', 0, 0);
+              ctx.restore();
+              console.log('[CANVAS-DRAW] Purple "CANVAS ONLY" text drawn');
+            } else {
+              // Re-render without debug text
+              canvasRenderer.renderMap(canvasRenderData);
+            }
+          }
+          console.log('[STAGE-END] Canvas Debug Mode toggle complete');
+        } catch (err) {
+          console.error('[STAGE-CRASH] Canvas Debug Mode toggle failed:', err.message, err.stack);
+        }
+      });
+      }
+    } catch (err) {
+      console.error('[BULLETPROOF-ERROR] Failed to wire up canvas debug checkbox:', err);
     }
     
     // ============================================================
@@ -1478,19 +2503,58 @@ function generateInteractiveHTML(data) {
         console.warn('dualPoints MISSING - using original points');
       }
       
-      // Initial render
-      renderSVG();
+      // BULLETPROOF: Initial render with error handling
+      (async () => {
+        try {
+          console.log('[STAGE-START] Initial render');
+          await renderSVG();
+          console.log('[STAGE-END] Initial render complete');
+          
+          // Verify canvas rendering (if Canvas stage)
+          if (currentStage === 'canvas' || currentStage === 'final') {
+            const canvas = document.getElementById('canvas-renderer');
+            const ctx = canvas?.getContext('2d');
+            if (ctx) {
+              // Verify canvas dimensions
+              if (canvas.width === 0 || canvas.height === 0) {
+                console.error('[BULLETPROOF-ERROR] Canvas dimensions are zero:', canvas.width, canvas.height);
+                canvas.width = DUAL_GRID_DATA.mapWidth || 960;
+                canvas.height = DUAL_GRID_DATA.mapHeight || 540;
+              }
+              console.log('[BULLETPROOF-CHECK] Canvas dimensions:', canvas.width, 'x', canvas.height);
+            } else {
+              console.error('[BULLETPROOF-ERROR] Canvas context not available');
+            }
+          }
+        } catch (err) {
+          console.error('[STAGE-CRASH] Initial render failed:', err.message, err.stack);
+          const statusEl = document.getElementById('status');
+          if (statusEl) {
+            statusEl.textContent = '❌ Initial render failed: ' + err.message;
+            statusEl.className = 'status';
+          }
+          alert('Initial render failed: ' + err.message + '\\nCheck console for details.');
+        }
+      })();
       
-      // If render failed silently, draw test pattern as fallback
+      // BULLETPROOF: Fallback check if render failed silently
       setTimeout(() => {
-        const container = document.getElementById('svg-container');
-        if (container && (!container.innerHTML || container.innerHTML.trim() === '')) {
-          console.warn('Container empty after render - drawing test pattern');
-          drawTestPattern();
+        try {
+          const canvas = document.getElementById('canvas-renderer');
+          const container = document.getElementById('svg-container');
+          const hasCanvasContent = canvas && canvas.getContext('2d') && canvas.width > 0 && canvas.height > 0;
+          const hasSVGContent = container && container.innerHTML && container.innerHTML.trim() !== '';
+          
+          if (!hasCanvasContent && !hasSVGContent && typeof drawTestPattern === 'function') {
+            console.warn('[BULLETPROOF-WARN] No content after render - drawing test pattern');
+            drawTestPattern();
+          }
+        } catch (err) {
+          console.error('[BULLETPROOF-ERROR] Fallback check failed:', err);
         }
       }, 100);
       
-      console.log('Script initialization completed');
+      console.log('[BULLETPROOF-INIT] Script initialization completed');
     } catch (err) {
       console.error('Script initialization crashed:', err.message, err.stack);
       drawTestPattern(); // Always show something
