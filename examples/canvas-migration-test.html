@@ -193,7 +193,7 @@
         updateStatus('Generating map...', '');
         generateBtn.disabled = true;
         const genStart = performance.now();
-
+        
         // Initialize generator
         initGenerator({ canvas: null });
         
@@ -211,9 +211,9 @@
         // Generate map
         mapData = generateMap(Delaunator);
         
-        const genTime = console.timeEnd('[Phase 2] Map Generation');
+        const genTime = performance.now() - genStart;
         updateStatus('✅ Map generated', 'success');
-        updatePerformanceMetrics('Generation', performance.now() - genTime);
+        updatePerformanceMetrics('Generation', genTime);
         exportBtn.disabled = false;
         renderBtn.disabled = false;
       } catch (error) {

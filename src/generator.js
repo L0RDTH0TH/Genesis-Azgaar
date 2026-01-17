@@ -278,12 +278,12 @@ function getPhaseFunction(phase) {
       };
       
     case PHASES.PACK_CREATION:
-      return ({ stateData, DelaunatorClass }) => {
+      return async ({ stateData, DelaunatorClass }) => {
         const useFullPack = stateData.options.fullRendering === true || state.canvas !== null;
   let pack;
   
   if (useFullPack) {
-          pack = createPackFromGrid({ grid: stateData.grid, options: stateData.options, DelaunatorClass });
+          pack = await createPackFromGrid({ grid: stateData.grid, options: stateData.options, DelaunatorClass });
   } else {
           pack = createSimplifiedPack(stateData.grid, stateData.options);
           pack.cells.h = stateData.grid.cells.h;

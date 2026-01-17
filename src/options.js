@@ -62,7 +62,7 @@ const DEFAULT_OPTIONS = {
   
   // Rendering options (Phase 5)
   fullRendering: false, // Use full Voronoi pack for polygon rendering (slower but better quality)
-  
+
   // Canvas-only migration options (Phase 0 - Option 1 & 3 prep)
   rendering: {
     mode: 'canvas2d', // 'canvas2d' | 'webgl' - Renderer mode

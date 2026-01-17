@@ -6,7 +6,7 @@
  * =============================================================================
  */
 
-import { initGenerator, loadOptions, generateMap, generatePartial, getMapData } from '../src/generator.js';
+import { initGenerator, loadOptions, generateMap, generatePartial, getMapData, resetGeneratorState } from '../src/generator.js';
 import { PHASES } from '../src/utils/constants.js';
 import Delaunator from 'delaunator';
 
@@ -98,7 +98,7 @@ async function runTests() {
     
     // Test 2: Partial generation (skip heightmap and biomes, use fallbacks)
     console.log('Test 2: Partial generation (skip heightmap, biomes)');
-    initGenerator({ canvas: null, container: null });
+    resetGeneratorState(); // Reset instead of re-initializing
     loadOptions({ ...testOptions, skipPhases: [PHASES.HEIGHTMAP, PHASES.BIOMES] });
     
     const partialResult = timeFunction(() => {
@@ -113,7 +113,7 @@ async function runTests() {
     
     // Test 3: generatePartial API (only run states and provinces)
     console.log('Test 3: generatePartial API (only states, provinces)');
-    initGenerator({ canvas: null, container: null });
+    resetGeneratorState();
     loadOptions(testOptions);
     
     // First generate base phases needed for states
@@ -157,7 +157,7 @@ async function runTests() {
     
     // Test 6: Cache verification
     console.log('Test 6: Cache verification');
-    initGenerator({ canvas: null, container: null });
+    resetGeneratorState();
     loadOptions(testOptions);
     
     // Generate first time
@@ -165,8 +165,8 @@ async function runTests() {
       return generateMap(Delaunator);
     }, 'First generation (cache miss)');
     
-    // Reset and regenerate (should use cache)
-    initGenerator({ canvas: null, container: null });
+    // Reset data but keep cache, then regenerate (should use cache)
+    resetGeneratorState(); // This clears data but keeps cache
     loadOptions(testOptions);
     
     const cacheTest2 = timeFunction(() => {

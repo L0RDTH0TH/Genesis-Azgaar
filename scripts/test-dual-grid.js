@@ -13,6 +13,8 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { initGenerator, loadOptions, generateMap, getMapData, renderPreviewSVG } from '../src/index.js';
+import { generateRegionalTerrain, mapTerrainToQuads } from '../src/core/regionalTerrain.js';
+import { RNG } from '../src/utils/rng.js';
 
 const execAsync = promisify(exec);
 
@@ -35,11 +37,17 @@ async function testDualGridRelaxation() {
       statesNumber: 18,
       fullRendering: true, // Required for SVG rendering
       useDualGridPolitics: true,
+      logRelaxation: true, // Enable before/after relaxation logging
       politicsMode: {
-        hexLayers: 14, // Reduced for ~100-150 Level 0 quads (more organic, Townscaper-like)
-        relaxationIterations: 150,
-        dampingFactor: 0.25,
-        dissolveProbability: 0.5,
+        baseHexRings: process.argv.includes('--interactive') ? 10 : 25, // Smaller for interactive (10 rings = fast), larger for full test (25 rings)
+        numStates: 15, // Number of state groups to create (increased for larger grid)
+        relaxationIterations: 400, // High-quality relaxation for smooth, organic quads
+        dampingFactor: 0.3, // Initial damping (progressive damping: 0.5 → 0.2)
+        earlyTerminationThreshold: 0.0001, // Early termination threshold (stop if < 0.0001 for 10 iters)
+        lockBoundaries: true, // Lock boundary points to prevent drift
+        progressiveDamping: true, // Use progressive damping (0.5 → 0.2) for better convergence
+        dissolveProbability: 0.70, // Increased to 0.70 for more irregularity (spec target)
+        dualOffsetFactor: 0.5, // Townscaper-style fixed offset (0.5 = half average edge length)
       },
     };
     
@@ -78,20 +86,30 @@ async function testDualGridRelaxation() {
     console.log('(Higher dissolve probability should result in more organic shapes)');
     console.log('');
     
-    // Check quad counts (per design v2: ~100-150 level0, ~400-600 level1)
+    // Check quad counts (per spec: ~8k-12k total quads for rings=25)
     const level0Count = level0Quads.length;
     const level1Count = level1Quads.length;
-    const level0InRange = level0Count >= 100 && level0Count <= 150;
-    const level1InRange = level1Count >= 400 && level1Count <= 600;
+    const totalQuads = level0Count + level1Count;
+    const level0InRange = level0Count >= 1500 && level0Count <= 2500; // Expected ~1,900 for rings=25
+    const level1InRange = level1Count >= 6000 && level1Count <= 10000; // Expected ~7,600 for rings=25
+    const totalInRange = totalQuads >= 8000 && totalQuads <= 12000; // Expected ~9,510 for rings=25
     
     console.log('=== Quad Count Verification ===');
-    console.log(`Level 0: ${level0Count} quads ${level0InRange ? '✅' : '⚠️  (expected 100-150)'}`);
-    console.log(`Level 1: ${level1Count} quads ${level1InRange ? '✅' : '⚠️  (expected 400-600)'}`);
+    console.log(`Level 0: ${level0Count} quads ${level0InRange ? '✅' : '⚠️  (target: ~1,900 for rings=25)'}`);
+    console.log(`Level 1: ${level1Count} quads ${level1InRange ? '✅' : '⚠️  (target: ~7,600 for rings=25)'}`);
+    console.log(`Total: ${totalQuads} quads ${totalInRange ? '✅' : '⚠️  (target: ~9,510 for rings=25)'}`);
+    console.log(`Base hex rings used: ${testOptions.politicsMode.baseHexRings ?? 'N/A'}`);
     console.log('');
     
-    // Sample first 5 points (before/after relaxation positions)
-    // Note: We can't see "before" positions since relaxation happens in-place,
-    // but we can verify points are reasonable
+    // Performance metrics
+    console.log('=== Performance Metrics ===');
+    console.log(`Generation time: ${generateTime.toFixed(2)}ms`);
+    console.log(`Points: ${points.length}`);
+    console.log(`Memory estimate: ~${(points.length * 16 / 1024 / 1024).toFixed(2)}MB (points only, rough)`);
+    console.log('');
+    
+    // Sample first 5 points (after relaxation positions)
+    // Note: Before/after logging happens in buildStalbergQuadGrid if logRelaxation: true
     console.log('=== Sample Points (after relaxation) ===');
     const sampleCount = Math.min(5, points.length);
     for (let i = 0; i < sampleCount; i++) {
@@ -467,7 +485,7 @@ async function openInBrowser(filePath) {
  * @param {Object} options - Rendering options
  * @returns {string} SVG string
  */
-function renderDualGridSVG(data, options = {}) {
+async function renderDualGridSVG(data, options = {}) {
   const { pack } = data;
   if (!pack || !pack.dualGrid) {
     console.warn('No dualGrid data found, using fallback SVG');
@@ -475,7 +493,10 @@ function renderDualGridSVG(data, options = {}) {
   }
   
   const { dualGrid, states, burgs } = pack;
-  const { points, level0Quads } = dualGrid;
+  const { points, dualPoints, level0Quads } = dualGrid;
+  
+  // Use dual points for rounded borders if available, otherwise use regular points
+  const renderPoints = dualPoints || points;
   
   // Debug logs
   console.log('=== Dual-Grid SVG Debug ===');
@@ -488,11 +509,15 @@ function renderDualGridSVG(data, options = {}) {
     return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540"><text x="50" y="50" fill="red">Missing dual-grid data</text></svg>`;
   }
   
-  // Calculate viewBox from point coordinates
+  // Calculate viewBox from map dimensions (should match scaled bounds)
+  const mapWidth = options.width || data.options?.mapWidth || 960;
+  const mapHeight = options.height || data.options?.mapHeight || 540;
+  
+  // Calculate bounds from render points (for verification)
   let minX = Infinity, minY = Infinity;
   let maxX = -Infinity, maxY = -Infinity;
   
-  for (const point of points) {
+  for (const point of renderPoints) {
     if (point && typeof point.x === 'number' && typeof point.y === 'number') {
       minX = Math.min(minX, point.x);
       minY = Math.min(minY, point.y);
@@ -501,23 +526,69 @@ function renderDualGridSVG(data, options = {}) {
     }
   }
   
-  const padding = 50;
-  const viewBoxX = minX - padding;
-  const viewBoxY = minY - padding;
-  const viewBoxWidth = (maxX - minX) + (padding * 2);
-  const viewBoxHeight = (maxY - minY) + (padding * 2);
+  // Use map dimensions for viewBox (with small padding)
+  const padding = 10;
+  const viewBoxX = -padding;
+  const viewBoxY = -padding;
+  const viewBoxWidth = mapWidth + (padding * 2);
+  const viewBoxHeight = mapHeight + (padding * 2);
   
   console.log(`ViewBox: ${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`);
   console.log(`Point range: x[${minX.toFixed(1)}, ${maxX.toFixed(1)}], y[${minY.toFixed(1)}, ${maxY.toFixed(1)}]`);
+  console.log(`Map dimensions: ${mapWidth}×${mapHeight}`);
   
-  // Helper: Get state color (better color distribution)
-  function getStateColor(stateId) {
-    if (!states || !stateId || stateId < 0) return '#888888';
+  // Create RNG for consistent color generation (use seed from data if available)
+  let colorRng = null;
+  if (data.seed) {
+    try {
+      const { RNG } = await import('../src/utils/rng.js');
+      colorRng = new RNG(data.seed + 'colors');
+    } catch (e) {
+      // Fallback: use simple hash-based color if RNG not available
+      colorRng = { random: () => {
+        const hash = data.seed.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+        return (hash * 9301 + 49297) % 233280 / 233280;
+      }};
+    }
+  }
+  
+  // Helper: Get state color with random hue for better visual distinction
+  function getStateColor(stateId, rng) {
+    if (!states || !stateId || stateId < 0) {
+      // Gray for unassigned quads (semi-transparent)
+      return 'hsla(0, 0%, 60%, 0.3)';
+    }
     const state = states[stateId];
-    if (state && state.color) return state.color;
-    // Generate HSL color from stateId (hue = stateId * 30 % 360 for better distribution)
-    const hue = (stateId * 30) % 360;
-    return `hsl(${hue}, 70%, 50%)`;
+    if (state && state.color) {
+      // Convert hex to hsla with transparency
+      return hexToHsla(state.color, 0.3);
+    }
+    // Generate HSL color from stateId with semi-transparency
+    const hue = rng ? (Math.floor(rng.random() * 360)) : ((stateId * 137.5) % 360); // Golden angle for better distribution
+    return `hsla(${hue}, 70%, 70%, 0.3)`;
+  }
+  
+  // Helper: Convert hex color to HSLA with custom alpha
+  function hexToHsla(hex, alpha) {
+    if (!hex || !hex.startsWith('#')) return `hsla(0, 0%, 60%, ${alpha})`;
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+    if (max === min) {
+      h = s = 0;
+    } else {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+        case g: h = ((b - r) / d + 2) / 6; break;
+        case b: h = ((r - g) / d + 4) / 6; break;
+      }
+    }
+    return `hsla(${Math.round(h * 360)}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%, ${alpha})`;
   }
   
   // Helper: Get state name
@@ -580,8 +651,25 @@ function renderDualGridSVG(data, options = {}) {
   // Build SVG layers
   const layers = [];
   
-  // 1. Background
-  layers.push(`<rect x="${viewBoxX}" y="${viewBoxY}" width="${viewBoxWidth}" height="${viewBoxHeight}" fill="#eef6fb" />`);
+  // 1. Terrain overlay background (fake Azgaar-style terrain)
+  // Simple gradient: blue for "ocean" edges, green/brown for "land" center
+  const gradientId = 'terrainGradient';
+  const terrainGradient = `
+    <defs>
+      <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" style="stop-color:#4a90e2;stop-opacity:0.3" />
+        <stop offset="20%" style="stop-color:#6bb3e8;stop-opacity:0.2" />
+        <stop offset="50%" style="stop-color:#8bc34a;stop-opacity:0.4" />
+        <stop offset="80%" style="stop-color:#795548;stop-opacity:0.3" />
+        <stop offset="100%" style="stop-color:#4a90e2;stop-opacity:0.3" />
+      </linearGradient>
+    </defs>
+  `;
+  layers.push(terrainGradient);
+  layers.push(`<rect x="0" y="0" width="${mapWidth}" height="${mapHeight}" fill="url(#${gradientId})" />`);
+  
+  // Add simple "ocean" border
+  layers.push(`<rect x="0" y="0" width="${mapWidth}" height="${mapHeight}" fill="#b3d9f2" opacity="0.2" />`);
   
   // Build quad adjacency map for border detection
   const quadAdjacencyMap = buildQuadAdjacencyMap(level0Quads);
@@ -603,7 +691,7 @@ function renderDualGridSVG(data, options = {}) {
     let valid = true;
     
     for (const vertIdx of quad.verts) {
-      const point = points[vertIdx];
+      const point = renderPoints[vertIdx]; // Use dual points for rounded borders
       if (!point || typeof point.x !== 'number' || typeof point.y !== 'number') {
         valid = false;
         break;
@@ -614,36 +702,26 @@ function renderDualGridSVG(data, options = {}) {
     
     if (!valid || vertCoords.length < 3) continue;
     
-    // Get state color and info
+    // Get state color and info (use state-assigned colors if available)
     const stateId = quad.stateId !== undefined && quad.stateId >= 0 ? quad.stateId : -1;
-    const fillColor = getStateColor(stateId);
+    // Use quad.stateColor if assigned by state grouping, otherwise generate color
+    const fillColor = quad.stateColor || (stateId >= 0 ? getStateColor(stateId, colorRng) : 'hsla(0, 0%, 60%, 0.3)');
     
     // Calculate quad center for labels
     const center = calculateQuadCenter(quad.verts, points);
     
-    // Create polygon with reduced opacity for organic look
+    // Create polygon with semi-transparent fill and thicker border for Level 0
+    // Use dual points for rounded borders (already in vertCoords)
     const pointsStr = vertCoords.join(' ');
+    const strokeWidth = 2.5; // Thicker borders for Level 0 quads (map-like)
+    const strokeColor = stateId >= 0 ? '#222' : '#999'; // Darker for assigned states
+    const opacity = quad.stateColor ? 0.4 : 0.2; // Semi-transparent overlay on terrain
     quadPolygons.push(
-      `<polygon points="${pointsStr}" fill="${fillColor}" stroke="#000" stroke-width="1" opacity="0.75" />`
+      `<polygon points="${pointsStr}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}" opacity="${opacity}" />`
     );
     quadsDrawn++;
     
-    // Add state name label (center, large text)
-    if (stateId >= 0) {
-      const stateName = getStateName(stateId);
-      if (stateName) {
-        stateLabels.push(
-          `<text x="${center.x}" y="${center.y}" font-size="14" fill="#000" text-anchor="middle" font-weight="bold" opacity="0.9">${stateName}</text>`
-        );
-      }
-    }
-    
-    // Add variant label (small text, offset from center)
-    if (quad.variantId !== undefined && quad.variantId !== null) {
-      variantLabels.push(
-        `<text x="${center.x}" y="${center.y + 12}" font-size="8" fill="#666" text-anchor="middle" opacity="0.7">${quad.variantId}</text>`
-      );
-    }
+    // Labels removed for cleaner look (too cluttered)
     
     // Detect borders: check adjacent quads with different stateId
     const adjacentQuads = quadAdjacencyMap.get(quadIdx);
@@ -659,16 +737,17 @@ function renderDualGridSVG(data, options = {}) {
           // Find shared edge (vertices between the two quads)
           const sharedVerts = quad.verts.filter(v => adjQuad.verts.includes(v));
           if (sharedVerts.length >= 2) {
-            // Get coordinates of shared edge
+            // Get coordinates of shared edge (use dual points for rounded borders)
             const edgePoints = sharedVerts
-              .map(vIdx => points[vIdx])
+              .map(vIdx => renderPoints[vIdx])
               .filter(p => p && typeof p.x === 'number' && typeof p.y === 'number')
               .map(p => `${p.x},${p.y}`);
             
             if (edgePoints.length >= 2) {
               const borderPath = `M${edgePoints[0]} L${edgePoints.slice(1).join(' ')}`;
+              // Thicker borders between different states
               borderPaths.push(
-                `<path d="${borderPath}" stroke="#000" stroke-width="3" fill="none" opacity="0.9" />`
+                `<path d="${borderPath}" stroke="#222" stroke-width="3" fill="none" opacity="0.8" />`
               );
             }
           }
@@ -677,8 +756,7 @@ function renderDualGridSVG(data, options = {}) {
     }
   }
   
-  console.log(`Quads drawn: ${quadsDrawn}/${level0Quads.length}`);
-  console.log(`State labels: ${stateLabels.length}, Variant labels: ${variantLabels.length}, Borders: ${borderPaths.length}`);
+  console.log(`Quads drawn: ${quadsDrawn}/${level0Quads.length}, Borders: ${borderPaths.length}`);
   
   if (quadPolygons.length > 0) {
     layers.push(`<g id="level0-quads">${quadPolygons.join('\n')}</g>`);
@@ -689,17 +767,47 @@ function renderDualGridSVG(data, options = {}) {
     layers.push(`<g id="state-borders">${borderPaths.join('\n')}</g>`);
   }
   
-  // Add labels layer (on top of borders)
-  if (stateLabels.length > 0) {
-    layers.push(`<g id="state-labels">${stateLabels.join('\n')}</g>`);
-  }
-  if (variantLabels.length > 0) {
-    layers.push(`<g id="variant-labels">${variantLabels.join('\n')}</g>`);
-  }
-  
-  // 3. Draw burgs as red dots (larger, with labels)
+  // 3. Add burg dots at state centroids (3-5 per state, positioned at state center)
   const burgElements = [];
   let burgsProcessed = 0;
+  
+  // Calculate state centroids (avg quad centers per state)
+  const stateCentroids = new Map();
+  const stateQuadCounts = new Map();
+  
+  for (const quad of level0Quads) {
+    if (!quad || !quad.center || quad.stateId === undefined || quad.stateId < 0) continue;
+    const stateId = quad.stateId;
+    if (!stateCentroids.has(stateId)) {
+      stateCentroids.set(stateId, { x: 0, y: 0, count: 0 });
+      stateQuadCounts.set(stateId, 0);
+    }
+    const centroid = stateCentroids.get(stateId);
+    centroid.x += quad.center.x;
+    centroid.y += quad.center.y;
+    centroid.count++;
+    stateQuadCounts.set(stateId, stateQuadCounts.get(stateId) + 1);
+  }
+  
+  // Normalize centroids and add burg dots (3-5 per state, limit total to 5)
+  const totalStates = stateCentroids.size;
+  const burgsPerState = Math.max(1, Math.min(3, Math.floor(5 / totalStates))); // Max 5 total, distributed
+  
+  for (const [stateId, centroid] of stateCentroids) {
+    if (centroid.count === 0) continue;
+    const centerX = centroid.x / centroid.count;
+    const centerY = centroid.y / centroid.count;
+    
+    // Add 1 burg dot at state centroid
+    if (burgsProcessed < 5 && isFinite(centerX) && isFinite(centerY)) {
+      burgElements.push(
+        `<circle cx="${centerX}" cy="${centerY}" r="5" fill="#cc0000" stroke="#fff" stroke-width="1.5" opacity="0.9" />`
+      );
+      burgsProcessed++;
+    }
+  }
+  
+  // 4. Draw actual burgs from pack (if any)
   if (burgs && Array.isArray(burgs)) {
     for (const burg of burgs) {
       if (!burg || burg.removed) continue;
@@ -797,9 +905,9 @@ async function exportDualGridToSVG(data, filename, options = {}) {
   }
   
   // Generate SVG using custom dual-grid renderer
-  const svgString = renderDualGridSVG(data, {
-    width: options.width || data.options.mapWidth || 960,
-    height: options.height || data.options.mapHeight || 540,
+  const svgString = await renderDualGridSVG(data, {
+    width: options.width || data.options?.mapWidth || 960,
+    height: options.height || data.options?.mapHeight || 540,
   });
   
   // Save to file

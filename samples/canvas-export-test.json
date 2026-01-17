@@ -1,0 +1,16 @@
+{
+  "mode": "canvas2d",
+  "cells": [],
+  "patterns": {},
+  "gradients": {},
+  "metadata": {
+    "cellCount": 0,
+    "layers": [
+      "terrain",
+      "biomes",
+      "states"
+    ],
+    "mapWidth": 960,
+    "mapHeight": 540
+  }
+}

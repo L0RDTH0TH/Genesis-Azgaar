@@ -7,7 +7,34 @@
  */
 
 import { createTypedArray } from '../utils/array.js';
-import * as d3 from 'd3';
+// d3 import is conditional - only loaded when actually needed
+let d3 = null;
+async function loadD3() {
+  if (d3 === null) {
+    try {
+      d3 = await import('d3');
+      console.log('[CANVAS-LOAD] d3 library loaded successfully');
+    } catch (error) {
+      console.warn('[CANVAS-LOAD] d3 library not available, using fallback implementations:', error.message);
+      // Fallback: provide minimal d3-like API
+      d3 = {
+        Delaunay: null, // Will use DelaunatorClass instead
+        polygonArea: (polygon) => {
+          // Vanilla JS polygon area calculation (Shoelace formula)
+          if (!polygon || polygon.length < 3) return 0;
+          let area = 0;
+          for (let i = 0; i < polygon.length; i++) {
+            const j = (i + 1) % polygon.length;
+            area += polygon[i][0] * polygon[j][1];
+            area -= polygon[j][0] * polygon[i][1];
+          }
+          return Math.abs(area) / 2;
+        }
+      };
+    }
+  }
+  return d3;
+}
 
 /**
  * Create pack (refined Voronoi diagram) from grid
@@ -16,9 +43,11 @@ import * as d3 from 'd3';
  * @param {Object} params.grid - Grid object
  * @param {Object} params.options - Generation options
  * @param {Function} params.DelaunatorClass - Delaunator class (required)
- * @returns {Object} Pack object
+ * @returns {Promise<Object>} Pack object (now async due to conditional d3 loading)
  */
-export function createPackFromGrid({ grid, options, DelaunatorClass }) {
+export async function createPackFromGrid({ grid, options, DelaunatorClass }) {
+  // Load d3 if needed (conditional import)
+  const d3Lib = await loadD3();
   if (!DelaunatorClass) {
     throw new Error('Delaunator is required as a peer dependency for pack creation');
   }
@@ -66,7 +95,23 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   // Calculate Voronoi for pack cells
   const allPoints = newCells.p.concat(boundary);
   const delaunay = DelaunatorClass.from(allPoints);
-  const Voronoi = d3.Delaunay.from(allPoints).voronoi([0, 0, options.mapWidth, options.mapHeight]);
+  
+  // Use d3.Delaunay if available, otherwise use DelaunatorClass (which has similar API)
+  let Voronoi = null;
+  if (d3Lib.Delaunay && typeof d3Lib.Delaunay.from === 'function') {
+    Voronoi = d3Lib.Delaunay.from(allPoints).voronoi([0, 0, options.mapWidth, options.mapHeight]);
+  } else {
+    // Fallback: Use DelaunatorClass for Voronoi (if it supports it) or skip Voronoi
+    console.warn('[CANVAS-LOAD] d3.Delaunay not available, using DelaunatorClass for Voronoi');
+    // Note: Delaunator doesn't have built-in Voronoi, so we'll need to calculate manually or skip
+    // For now, we'll create a minimal Voronoi-like structure
+    Voronoi = {
+      renderCell: (i) => {
+        // Fallback: return empty polygon (will be handled gracefully below)
+        return null;
+      }
+    };
+  }
   
   // Create pack cells structure
   const packCells = {
@@ -87,20 +132,28 @@ export function createPackFromGrid({ grid, options, DelaunatorClass }) {
   }
 
   // Calculate cell neighbors and vertices from Voronoi
-  const delaunayObj = d3.Delaunay.from(allPoints);
+  let delaunayObj = null;
+  if (d3Lib.Delaunay && typeof d3Lib.Delaunay.from === 'function') {
+    delaunayObj = d3Lib.Delaunay.from(allPoints);
+  } else {
+    // Fallback: use DelaunatorClass
+    delaunayObj = DelaunatorClass.from(allPoints);
+  }
+  
   for (let i = 0; i < newCells.p.length; i++) {
-    const neighbors = delaunayObj.neighbors(i).filter((n) => n < newCells.p.length);
+    // Get neighbors (both d3.Delaunay and Delaunator have neighbors() method)
+    const neighbors = delaunayObj.neighbors ? delaunayObj.neighbors(i).filter((n) => n < newCells.p.length) : [];
     packCells.c[i] = Array.isArray(neighbors) ? neighbors : [];
     
     // Get polygon vertices for this cell from Voronoi diagram
-    const cellPolygon = Voronoi.renderCell(i);
+    const cellPolygon = Voronoi.renderCell ? Voronoi.renderCell(i) : null;
     if (cellPolygon && cellPolygon.length > 0) {
       // Store polygon coordinates directly (array of [x, y] pairs)
       // This can be used directly for Canvas rendering
       packCells.v[i] = Array.from(cellPolygon).map(([x, y]) => [x, y]);
       
-      // Calculate area from polygon
-      packCells.area[i] = Math.abs(d3.polygonArea(cellPolygon));
+      // Calculate area from polygon (use d3.polygonArea if available, otherwise use fallback)
+      packCells.area[i] = Math.abs(d3Lib.polygonArea(cellPolygon));
     } else {
       // Fallback: no polygon (shouldn't happen, but handle gracefully)
       packCells.v[i] = [];

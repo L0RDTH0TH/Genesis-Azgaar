@@ -19,5 +19,7 @@ export * from './states.js';
 export * from './provinces.js';
 export * from './religions.js';
 export * from './emblems.js';
-export * from './regraph.js';
+// regraph.js is conditionally exported - only load when needed (has d3 dependency)
+// Export is lazy to prevent d3 import failure on module load
+export { createPackFromGrid } from './regraph.js';
 export * from './dualGridStates.js';

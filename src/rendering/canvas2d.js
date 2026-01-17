@@ -29,6 +29,9 @@ export class Canvas2DRenderer extends Renderer {
       throw new Error('Could not get 2D rendering context from canvas');
     }
 
+    // CANVAS-LOAD: Log successful initialization
+    console.log('[CANVAS-LOAD] Canvas2DRenderer loaded successfully');
+
     this.ctx = ctx;
     this.viewport = {
       offsetX: options.viewport?.offsetX || 0,
@@ -142,15 +145,18 @@ export class Canvas2DRenderer extends Renderer {
    * @param {Array} renderData.cells - Array of cell data with path, fill, stroke, labels
    */
   renderMap(renderData) {
+    console.log('[AUDIT-STEP8] renderMap called with ' + (renderData?.cells?.length || 0) + ' cells');
+    
     // Error boundary: Handle invalid/empty render data gracefully
     if (!renderData || !renderData.cells || !Array.isArray(renderData.cells)) {
-      console.warn('[Canvas2DRenderer.renderMap] Invalid renderData');
+      console.warn('[AUDIT-FAIL8] Invalid renderData:', renderData);
       this.clear();
       return;
     }
 
     // Handle empty map gracefully
     if (renderData.cells.length === 0) {
+      console.warn('[AUDIT-WARN8] Empty map - cleared canvas');
       this.clear();
       if (typeof console !== 'undefined' && console.log) {
         console.log('[Canvas2DRenderer.renderMap] Empty map - cleared canvas');
@@ -172,19 +178,40 @@ export class Canvas2DRenderer extends Renderer {
       this.activeLayers = renderData.activeLayers;
     }
 
-    // Calculate viewport bounds from cell bounds (for clamping)
+    // Calculate viewport bounds from cell paths (for centering and clamping)
     if (!this.viewportBounds && renderData.cells.length > 0) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      // Calculate bounds from actual cell paths (more accurate than cell.bounds)
       for (const cell of renderData.cells) {
-        if (cell.bounds) {
+        if (cell.path && Array.isArray(cell.path)) {
+          for (const point of cell.path) {
+            if (Array.isArray(point) && point.length >= 2) {
+              const [x, y] = point;
+              if (isFinite(x) && isFinite(y)) {
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+              }
+            }
+          }
+        } else if (cell.bounds) {
+          // Fallback to cell.bounds if path not available
           minX = Math.min(minX, cell.bounds.x || 0);
           minY = Math.min(minY, cell.bounds.y || 0);
           maxX = Math.max(maxX, (cell.bounds.x || 0) + (cell.bounds.width || 0));
           maxY = Math.max(maxY, (cell.bounds.y || 0) + (cell.bounds.height || 0));
         }
       }
+      
       if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
         this.viewportBounds = { minX, minY, maxX, maxY };
+        
+        // Center viewport on first render (if not already set)
+        if (this.viewport.offsetX === 0 && this.viewport.offsetY === 0 && this.viewport.scale === 1.0) {
+          this.centerViewport();
+        }
       }
     }
 
@@ -216,9 +243,15 @@ export class Canvas2DRenderer extends Renderer {
     this._labelBatch = [];
 
     // Render all cells (filtered by layer and viewport culling)
+    let renderedCount = 0;
     for (const cell of renderData.cells) {
       try {
         if (!cell || !cell.path || cell.path.length < 3) continue;
+        
+        // AUDIT-STEP9: Log first few cells
+        if (renderedCount < 3) {
+          console.log('[AUDIT-STEP9] Drawing cell ID=' + cell.i + ', type=' + (cell.type || 'unknown') + ', verts=' + (cell.path?.length || 0));
+        }
         
         // Layer filtering: skip if cell layer is not in activeLayers
         if (cell.layer && !this.activeLayers.includes(cell.layer)) {
@@ -249,6 +282,9 @@ export class Canvas2DRenderer extends Renderer {
         if (cell.stroke && cell.stroke.color) {
           this.ctx.strokeStyle = cell.stroke.color;
           this.ctx.lineWidth = cell.stroke.width || 1;
+          if (cell.stroke.lineJoin) {
+            this.ctx.lineJoin = cell.stroke.lineJoin; // 'round', 'miter', or 'bevel'
+          }
           if (cell.stroke.dashArray && Array.isArray(cell.stroke.dashArray)) {
             this.ctx.setLineDash(cell.stroke.dashArray);
           }
@@ -256,20 +292,25 @@ export class Canvas2DRenderer extends Renderer {
           if (cell.stroke.dashArray) {
             this.ctx.setLineDash([]); // Reset
           }
+          // Reset lineJoin to default if it was set
+          if (cell.stroke.lineJoin) {
+            this.ctx.lineJoin = 'miter'; // Reset to default
+          }
         }
 
         // Collect labels for batching (drawn after all cells)
         if (cell.labels && Array.isArray(cell.labels) && cell.labels.length > 0) {
           this._labelBatch.push(...cell.labels.map(label => ({ ...label, cellId: cell.i })));
         }
+        renderedCount++;
       } catch (error) {
         // Error boundary: log rendering errors without crashing
-        if (typeof console !== 'undefined' && console.error) {
-          console.error(`[Canvas2DRenderer.renderMap] Error rendering cell ${cell?.i}:`, error);
-        }
+        console.error('[AUDIT-FAIL9] Error rendering cell ' + (cell?.i || 'unknown') + ': ' + error.message, error);
         continue; // Skip problematic cell
       }
     }
+    
+    console.log('[AUDIT-STEP8-END] Render complete: ' + renderedCount + ' cells rendered');
 
     // Draw all labels in batch (sorted by importance: capitals first, then by size)
     if (this._labelBatch.length > 0) {
@@ -408,6 +449,39 @@ export class Canvas2DRenderer extends Renderer {
       this.clampViewport();
       this.redraw();
     }
+  }
+
+  /**
+   * Center and fit viewport to map bounds
+   * Calculates optimal scale and offset to center the map in the canvas
+   */
+  centerViewport() {
+    if (!this.viewportBounds) {
+      console.warn('[CENTER] No viewport bounds available for centering');
+      return;
+    }
+
+    const { minX, minY, maxX, maxY } = this.viewportBounds;
+    const canvasWidth = this.canvas.width;
+    const canvasHeight = this.canvas.height;
+    
+    const mapWidth = maxX - minX;
+    const mapHeight = maxY - minY;
+    const mapCenterX = (minX + maxX) / 2;
+    const mapCenterY = (minY + maxY) / 2;
+    
+    // Calculate scale to fit map with padding (10% margin)
+    const padding = 0.1;
+    const scaleX = (canvasWidth * (1 - padding * 2)) / mapWidth;
+    const scaleY = (canvasHeight * (1 - padding * 2)) / mapHeight;
+    const fitScale = Math.min(scaleX, scaleY, 1.0); // Don't zoom in beyond 1:1
+    
+    // Center the map
+    this.viewport.scale = fitScale;
+    this.viewport.offsetX = canvasWidth / 2 - mapCenterX * fitScale;
+    this.viewport.offsetY = canvasHeight / 2 - mapCenterY * fitScale;
+    
+    console.log(`[CENTER] Viewport centered on bounds minX=${minX.toFixed(2)}, maxX=${maxX.toFixed(2)}, minY=${minY.toFixed(2)}, maxY=${maxY.toFixed(2)}, scale=${fitScale.toFixed(3)}`);
   }
 
   /**

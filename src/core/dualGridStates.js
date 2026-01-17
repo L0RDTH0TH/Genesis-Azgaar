@@ -27,9 +27,117 @@ import { createTypedArray } from '../utils/array.js';
  *   - DelaunatorClass: Delaunator class for triangulation (optional, will use simple method if not provided)
  * @returns {Object} Dual grid structure with points, level0Quads, level1Quads, dualPoints
  */
+/**
+ * =============================================================================
+ * ID SPECIFICATION v1.0 - Phase 1 & 2: Core Assignment, Validation & UUID Fallback
+ * 
+ * Implements immutable ID tracking for shapes (triangles/quads) across pipeline:
+ * - Original triangles: "tri-0001", "tri-0002", etc. (or UUID for large grids)
+ * - Merged quads: "quad-0001", "quad-0002", etc. (or UUID for large grids)
+ * - Subdivided quads: "sub-0001", "sub-0002", etc. (flat sequential or UUID)
+ * 
+ * Each shape gets:
+ * - id (string): Unique immutable identifier
+ * - lineage (array<string>): Parent IDs for derived shapes
+ * - centroid (object|null): Optional {x, y} for Azgaar mapping
+ * 
+ * Controlled by options.useIDs (default: true). If false, fallback to array indices.
+ * UUID mode activated when estimated grid size > preferUUIDThreshold (default: 10000).
+ * =============================================================================
+ */
+
+// ID SPECIFICATION v1.0 Phase 2: UUID Generator (RFC 4122 v4-style)
+function generateUUID() {
+  // Use crypto.randomUUID if available (Node.js 19+, modern browsers)
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback: Simple v4-style UUID generator
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
+  // ID SPECIFICATION v1.0: Config flag for ID assignment (default: true)
+  const useIDs = options.useIDs !== false; // Default to true, allow explicit false
+  
+  // ID SPECIFICATION v1.0 Phase 2: UUID threshold (default: 10000 shapes)
+  const preferUUIDThreshold = options.preferUUIDThreshold ?? 10000;
+  
   // Global points array (will be populated)
   const points = [];
+  
+  // ID SPECIFICATION v1.0: Function-scoped counters for per-generation uniqueness
+  let triCounter = 0;
+  let quadCounter = 0;
+  let subQuadCounter = 0;
+  
+  // ID SPECIFICATION v1.0 Phase 2: Determine if UUID mode should be used
+  // Estimate grid size based on points (will be refined after triangulation)
+  let internalUseUUID = false;
+  
+  // ID SPECIFICATION v1.0 Phase 2: Centralized ID generation helper
+  function generateID(type) {
+    if (!useIDs) return null;
+    
+    if (internalUseUUID) {
+      const uuid = generateUUID();
+      return `${type}-uuid${uuid}`;
+    }
+    
+    // Sequential mode
+    if (type === 'tri') {
+      return `tri-${String(triCounter++).padStart(4, '0')}`;
+    }
+    if (type === 'quad') {
+      return `quad-${String(quadCounter++).padStart(4, '0')}`;
+    }
+    if (type === 'sub') {
+      return `sub-${String(subQuadCounter++).padStart(4, '0')}`;
+    }
+    throw new Error(`Unknown ID type: ${type}`);
+  }
+  
+  // ID SPECIFICATION v1.0: Runtime validation helper
+  // ID SPECIFICATION v1.0 Phase 2: Enhanced for UUID mode
+  function validateIDs(shapes, stageName, verbose = false, isUUIDMode = false) {
+    if (!useIDs) return;
+    
+    const idSet = new Set();
+    let missing = 0;
+    let duplicates = 0;
+    const duplicateIds = [];
+
+    shapes.forEach((shape, index) => {
+      if (!shape.id) {
+        if (verbose) {
+          console.warn(`[ID VALIDATION] Missing ID in ${stageName} at index ${index}, type=${shape.type}, verts=[${shape.verts?.join(',') || '—'}]`);
+        }
+        missing++;
+      } else if (idSet.has(shape.id)) {
+        duplicateIds.push(shape.id);
+        if (verbose) {
+          console.warn(`[ID VALIDATION] Duplicate ID ${shape.id} in ${stageName} at index ${index}`);
+        }
+        duplicates++;
+      } else {
+        idSet.add(shape.id);
+      }
+    });
+
+    // ID SPECIFICATION v1.0 Phase 2: In UUID mode, duplicates are extremely unlikely (warn-only)
+    if (isUUIDMode && duplicates > 0) {
+      console.warn(`[ID VALIDATION] WARNING: ${duplicates} duplicate UUIDs detected in ${stageName} (collision extremely unlikely - investigate!)`);
+    }
+
+    if (verbose || missing > 0 || (!isUUIDMode && duplicates > 0)) {
+      const modeStr = isUUIDMode ? ' (UUID mode)' : ' (sequential mode)';
+      console.log(`[ID VALIDATION] ${stageName}${modeStr}: ${idSet.size} unique IDs, ${missing} missing, ${duplicates} duplicates${duplicateIds.length > 0 && duplicateIds.length <= 5 ? ` (${duplicateIds.join(', ')})` : duplicateIds.length > 5 ? ` (${duplicateIds.slice(0, 5).join(', ')}...)` : ''}`);
+    }
+  }
   
   // Helper: Add point and return index
   // Preserve all properties (including isBoundary for boundary locking)
@@ -417,14 +525,50 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   let triangles;
   
   if (DelaunatorClass) {
-    const result = triangulateFromPointsWithDelaunator(primalPoints, hexPointIndices, DelaunatorClass);
+    const result = triangulateFromPointsWithDelaunator(primalPoints, hexPointIndices, DelaunatorClass, useIDs, internalUseUUID, generateID);
     triangles = result.triangles;
     rawDelaunayTriangles = result.rawTriangles; // Store raw Delaunator triangle indices
+    triCounter = result.triCounter || triCounter; // Update counter from function
   } else {
-    triangles = triangulateFromPointsSimple(primalPoints, hexPointIndices);
+    triangles = triangulateFromPointsSimple(primalPoints, hexPointIndices, useIDs, internalUseUUID, generateID);
+    // Update counter if function returns it
+    if (triangles.triCounter !== undefined) {
+      triCounter = triangles.triCounter;
+      delete triangles.triCounter;
+    }
+  }
+  
+  // ID SPECIFICATION v1.0: Validate IDs after triangulation
+  if (useIDs) {
+    validateIDs(triangles, 'After Triangulation', stepByStepRender);
   }
   
   console.log(`[buildStalbergQuadGrid] Triangulated ${triangles.length} triangles from ${primalPoints.length} points`);
+  
+  // TRIANGLE LIFECYCLE AUDIT: Log all triangles after creation
+  // Enable lifecycle logging when stepByStepRender is true OR lifecycleDebugMode is enabled
+  // Default lifecycleDebugMode to true for comprehensive audit logging
+  const lifecycleDebugMode = stepByStepRender || (options.politicsMode?.lifecycleDebugMode !== false); // Default to true (only false if explicitly disabled)
+  if (lifecycleDebugMode) {
+    console.group("Stage 2 - All Triangles Created");
+    console.log(`Created ${triangles.length} triangles`);
+    // Helper to compute area (shoelace formula)
+    function computeTriangleArea(verts) {
+      if (!verts || verts.length !== 3) return 0;
+      const v0 = points[verts[0]];
+      const v1 = points[verts[1]];
+      const v2 = points[verts[2]];
+      if (!v0 || !v1 || !v2) return 0;
+      return 0.5 * Math.abs(v0.x*(v1.y - v2.y) + v1.x*(v2.y - v0.y) + v2.x*(v0.y - v1.y));
+    }
+    triangles.forEach((t, idx) => {
+      const area = computeTriangleArea(t.verts);
+      const idStr = t.id || 'no-id';
+      // Log all triangles (may be verbose, but needed for full lifecycle trace)
+      console.log(`[TRI CREATED] ID=${idStr}, verts=[${t.verts.join(',')}], area=${area.toFixed(4)}`);
+    });
+    console.groupEnd();
+  }
   
   // STEP-BY-STEP DEBUG: Capture Stage 2 (after triangulation) with detailed analysis
   if (stepByStepRender && pipelineStages) {
@@ -475,9 +619,10 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     console.log(`[buildStalbergQuadGrid] STAGE 2 ANALYSIS: Point density: ${stage2PointDensity.toFixed(6)} points/unit², grid area: ${stage2Area.toFixed(1)}`);
     console.log(`[buildStalbergQuadGrid] STAGE 2 SAMPLE TRIANGLES (first 10):`, JSON.stringify(sampleTriangles, null, 2));
     
+    // ID PROPAGATION FIX: Use object spread to preserve all fields (id, lineage, centroid, type)
     pipelineStages.stage2_triangles = triangles.map(t => ({
-      type: t.type,
-      verts: [...t.verts],
+      ...t,  // Spread all original fields (id, lineage, centroid, type, etc.)
+      verts: [...(t.verts || [])],  // Ensure fresh copy of verts array
     }));
     pipelineStages.stage2_points = points.map(p => ({ x: p.x, y: p.y }));
     pipelineStages.stage2_stats = {
@@ -501,10 +646,24 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   } else {
     // ITERATION 35 FIX: Set dissolveProbability to 1.0 to eliminate probability skips
     const dissolveProbability = options.politicsMode?.dissolveProbability ?? 1.0; // ITERATION 35: Default to 1.0 for maximum conversion
+    // TRIANGLE LIFECYCLE AUDIT: Enable lifecycle logging when stepByStepRender is true OR when lifecycleDebugMode is enabled
     const stepByStepRender = options.politicsMode?.stepByStepRender ?? false;
-    // Pass true boundary edges to dissolution function
-    quads = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, stepByStepRender, trueBoundaryEdges);
+    // Default lifecycleDebugMode to true for comprehensive audit logging (only false if explicitly disabled)
+    const lifecycleDebugMode = stepByStepRender || (options.politicsMode?.lifecycleDebugMode !== false);
+    // Pass lifecycleDebugMode as debugMode to dissolution function for lifecycle logging
+    // ID SPECIFICATION v1.0 Phase 2: Pass generateID function instead of counter
+    const dissolveResult = dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability, lifecycleDebugMode, trueBoundaryEdges, hullIndices, useIDs, internalUseUUID, generateID);
+    quads = dissolveResult.quads;
+    quadCounter = dissolveResult.quadCounter || quadCounter; // Update counter
     console.log(`[buildStalbergQuadGrid] After dissolution: ${quads.length} shapes`);
+    
+    // ID SPECIFICATION v1.0: Validate IDs after dissolution
+    if (useIDs) {
+      const remainingTriangles = quads.filter(q => q.type === 'triangle');
+      const mergedQuads = quads.filter(q => q.type === 'quad' && !q.id?.startsWith('sub-'));
+      validateIDs(mergedQuads, 'After Dissolution - Merged Quads', stepByStepRender, internalUseUUID);
+      validateIDs(remainingTriangles, 'After Dissolution - Survivors', stepByStepRender, internalUseUUID);
+    }
   }
   
   // STEP-BY-STEP DEBUG: Capture Stage 3 (after dissolution/cull to quads) with detailed analysis
@@ -546,9 +705,10 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     console.log(`[buildStalbergQuadGrid] STAGE 3 ANALYSIS: ${quads.length} total shapes (${quadCount} quads, ${triangleCount} triangles)`);
     console.log(`[buildStalbergQuadGrid] STAGE 3: Avg quad area: ${avgQuadArea.toFixed(2)}, sample quads:`, JSON.stringify(sampleQuads, null, 2));
     
+    // ID PROPAGATION FIX: Use object spread to preserve all fields (id, lineage, centroid, type)
     pipelineStages.stage3_quads = quads.map(q => ({
-      type: q.type,
-      verts: [...q.verts],
+      ...q,  // Spread all original fields (id, lineage, centroid, type, etc.)
+      verts: [...(q.verts || [])],  // Ensure fresh copy of verts array
     }));
     pipelineStages.stage3_points = points.map(p => ({ x: p.x, y: p.y }));
     pipelineStages.stage3_stats = {
@@ -703,7 +863,8 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
         console.log(`[buildStalbergQuadGrid] STAGE 4: Subdividing triangle ${trianglesSubdivided + 1}/${remainingTrianglesBefore.length} with verts: [${shape.verts.join(',')}], border=${isBorder}`);
       }
       
-      const subQuads = subdivideTriangleIntoThreeQuads(shape, points, addPoint, midpoint, stepByStepRender, isBorder);
+      // ID SPECIFICATION v1.0 Phase 2: Pass generateID function to subdivision
+      const subQuads = subdivideTriangleIntoThreeQuads(shape, points, addPoint, midpoint, useIDs, internalUseUUID, generateID, stepByStepRender, isBorder);
       
       // SUBDIVISION BORDER AUDIT: Validate sub-quads
       let validSubQuads = [];
@@ -713,7 +874,7 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
         const validation = validateSubQuad(subQuad, points);
         if (validation.valid) {
           validSubQuads.push(subQuad);
-        } else {
+    } else {
           invalidSubQuads.push({ quad: subQuad, reason: validation.reason });
           if (stepByStepRender && isBorder) {
             console.warn(`[STAGE 4 FAIL] Border triangle sub-quad invalid: ${validation.reason} - quad verts: [${subQuad.verts.join(',')}]`);
@@ -735,7 +896,7 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
         // Fallback: Keep original triangle if all sub-quads are invalid
         if (validSubQuads.length === 0) {
           console.warn(`[STAGE 4 FAIL] Border triangle: All sub-quads invalid, keeping original triangle [${shape.verts.join(',')}]`);
-          allQuads.push(shape);
+      allQuads.push(shape);
           trianglesSkipped++;
           continue;
         }
@@ -836,25 +997,37 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   
   // STEP-BY-STEP DEBUG: Capture Stage 4 (after subdivide triangles to quads)
   if (stepByStepRender && pipelineStages) {
+    // ID PROPAGATION FIX: Use object spread to preserve all fields (id, lineage, centroid, type)
     pipelineStages.stage4_subdividedTriangles = allQuads.map(q => ({
-      type: q.type,
-      verts: [...q.verts],
+      ...q,  // Spread all original fields (id, lineage, centroid, type, etc.)
+      verts: [...(q.verts || [])],  // Ensure fresh copy of verts array
     }));
     pipelineStages.stage4_points = points.map(p => ({ x: p.x, y: p.y }));
     console.log('[buildStalbergQuadGrid] Rendered pipeline stage 4: After subdivide triangles to quads');
   }
   
   // Step 5: Create Level 0 quads (current quads)
-  const level0Quads = allQuads.map((q, i) => ({
+  // ID PROPAGATION FIX: Use object spread to preserve all fields (id, lineage, centroid, type) + add required fields
+  const level0Quads = allQuads.map((q, i) => {
+    const baseQuad = {
+      ...q,  // Spread all original fields (id, lineage, centroid, type, verts, etc.)
     i: i,
     level: 0,
-    verts: q.verts,
+      verts: [...(q.verts || [])],  // Ensure fresh copy of verts array
     center: calculateQuadCenter(q.verts, points),
     parentQuadId: null,
     childQuadIds: [],
     stateId: -1,
     provinceId: -1,
-  }));
+    };
+    // Ensure ID fields are present even if source was missing them (backward compatibility)
+    if (useIDs && !baseQuad.id) {
+      baseQuad.id = `fallback-${i}`;
+      baseQuad.lineage = baseQuad.lineage || [];
+      baseQuad.centroid = baseQuad.centroid || null;
+    }
+    return baseQuad;
+  });
   
   // Step 6: Subdivide Level 0 quads into Level 1 quads (optional, skip for preview)
   const skipLevel1Subdivision = options.politicsMode?.skipLevel1Subdivision ?? true; // Default to true for preview
@@ -973,9 +1146,11 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
     pipelineStages.stage6_final = {
       points: points.map(p => ({ x: p.x, y: p.y })),
       dualPoints: dualPoints.map(p => ({ x: p.x, y: p.y })),
+      // ID PROPAGATION FIX: Use object spread to preserve all fields (id, lineage, centroid, type)
       level0Quads: level0Quads.map(q => ({
-        verts: [...q.verts],
-        center: { x: q.center.x, y: q.center.y },
+        ...q,  // Spread all original fields (id, lineage, centroid, type, i, level, etc.)
+        verts: [...(q.verts || [])],  // Ensure fresh copy of verts array
+        center: { x: q.center.x, y: q.center.y },  // Ensure center is plain object
       })),
     };
     console.log('[buildStalbergQuadGrid] Rendered pipeline stage 6: After relaxation + dual offset (final)');
@@ -1033,6 +1208,54 @@ export function buildStalbergQuadGrid(hexLayers, rng, options = {}) {
   if (stepByStepRender && pipelineStages) {
     result.pipelineStages = pipelineStages;
     console.log('[buildStalbergQuadGrid] Step-by-step debug: Captured 6 pipeline stages');
+  }
+  
+  // ID PROPAGATION FIX: Post-generation validation - count shapes with/without IDs
+  if (useIDs) {
+    let shapesWithId = 0;
+    let shapesWithoutId = 0;
+    const missingIdShapes = [];
+    
+    // Check level0Quads
+    for (let i = 0; i < level0Quads.length; i++) {
+      const quad = level0Quads[i];
+      if (quad.id) {
+        shapesWithId++;
+      } else {
+        shapesWithoutId++;
+        if (missingIdShapes.length < 5) {
+          missingIdShapes.push({ index: i, type: quad.type || 'unknown', verts: quad.verts?.length || 0 });
+        }
+      }
+    }
+    
+    // Check pipeline stages if available
+    if (pipelineStages) {
+      const stageChecks = [
+        { name: 'stage2_triangles', data: pipelineStages.stage2_triangles },
+        { name: 'stage3_quads', data: pipelineStages.stage3_quads },
+        { name: 'stage4_subdividedTriangles', data: pipelineStages.stage4_subdividedTriangles },
+      ];
+      
+      for (const stage of stageChecks) {
+        if (Array.isArray(stage.data)) {
+          for (const shape of stage.data) {
+            if (shape.id) {
+              shapesWithId++;
+            } else {
+              shapesWithoutId++;
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`[ID PROPAGATION] Post-generation validation: ${shapesWithId} shapes with IDs, ${shapesWithoutId} shapes without IDs`);
+    if (shapesWithoutId > 0) {
+      console.warn(`[ID PROPAGATION] WARNING: ${shapesWithoutId} shapes missing IDs. First 5 missing:`, missingIdShapes);
+    } else {
+      console.log(`[ID PROPAGATION] SUCCESS: All shapes have IDs preserved through pipeline`);
+    }
   }
   
   return result;
@@ -1310,7 +1533,7 @@ function createTransformedHexPoints(hexRings = 45, hexSize = 12, aspect = 1.22, 
  * @param {Function} DelaunatorClass - Delaunator class
  * @returns {Array} Array of triangles {type: 'triangle', verts: [i1, i2, i3]}
  */
-function triangulateFromPointsWithDelaunator(points, pointIndices, DelaunatorClass) {
+function triangulateFromPointsWithDelaunator(points, pointIndices, DelaunatorClass, useIDs = true, useUUID = false, generateID = null) {
   // Convert points to array of [x, y] pairs for Delaunator
   // Delaunator expects [[x0, y0], [x1, y1], ...] format
   const coords = points.map(p => [p.x, p.y]);
@@ -1328,11 +1551,20 @@ function triangulateFromPointsWithDelaunator(points, pointIndices, DelaunatorCla
   // delaunay.triangles is a flat array: [t0a, t0b, t0c, t1a, t1b, t1c, ...]
   if (!delaunay.triangles || delaunay.triangles.length === 0) {
     console.warn('[triangulateFromPointsWithDelaunator] No triangles returned from Delaunator');
-    return { triangles: [], rawTriangles: null };
+    return { triangles: [], rawTriangles: null, triCounter: 0 };
   }
   
   // Store raw triangle indices for wireframe rendering (before deduplication)
   const rawTriangles = Array.from(delaunay.triangles);
+  
+  // ID SPECIFICATION v1.0 Phase 2: Use centralized generateID if provided, otherwise create local helper
+  let localTriCounter = 0;
+  const getTriId = generateID ? () => generateID('tri') : (() => {
+    if (useUUID) {
+      return `tri-uuid${generateUUID()}`;
+    }
+    return `tri-${String(localTriCounter++).padStart(4, '0')}`;
+  });
   
   for (let i = 0; i < delaunay.triangles.length; i += 3) {
     const i0 = delaunay.triangles[i];
@@ -1349,14 +1581,26 @@ function triangulateFromPointsWithDelaunator(points, pointIndices, DelaunatorCla
     
     if (!edgeSet.has(triKey)) {
       edgeSet.add(triKey);
-      triangles.push({
+      const verts = [v0, v1, v2];
+      const triangle = {
         type: 'triangle',
-        verts: [v0, v1, v2],
-      });
+        verts: verts,
+      };
+      
+      // ID SPECIFICATION v1.0 Phase 2: Assign ID before pushing (fixes missing ID issue)
+      // ID SPECIFICATION v1.0: Assign ID, lineage, and centroid if enabled
+      if (useIDs) {
+        triangle.id = getTriId();
+        triangle.lineage = []; // Empty for original triangles
+        triangle.centroid = null; // Placeholder for optional lazy calculation
+      }
+      
+      triangles.push(triangle);
     }
+    // ID SPECIFICATION v1.0 Phase 2: Note - duplicates are filtered out, so they don't get IDs (intentional)
   }
   
-  return { triangles, rawTriangles };
+  return { triangles, rawTriangles, triCounter: localTriCounter };
 }
 
 /**
@@ -1366,7 +1610,7 @@ function triangulateFromPointsWithDelaunator(points, pointIndices, DelaunatorCla
  * @param {Array} pointIndices - Array of point indices
  * @returns {Array} Array of triangles {type: 'triangle', verts: [i1, i2, i3]}
  */
-function triangulateFromPointsSimple(points, pointIndices) {
+function triangulateFromPointsSimple(points, pointIndices, useIDs = true, useUUID = false, generateID = null) {
   // For small point sets only (warn if too large)
   if (points.length > 1000) {
     console.warn(`[triangulateFromPointsSimple] Large point set (${points.length}), consider using Delaunator for better performance`);
@@ -1375,6 +1619,15 @@ function triangulateFromPointsSimple(points, pointIndices) {
   const triangles = [];
   const edgeSet = new Set();
   const k = 6; // Number of nearest neighbors to consider
+  
+  // ID SPECIFICATION v1.0 Phase 2: Use centralized generateID if provided, otherwise create local helper
+  let localTriCounter = 0;
+  const getTriId = generateID ? () => generateID('tri') : (() => {
+    if (useUUID) {
+      return `tri-uuid${generateUUID()}`;
+    }
+    return `tri-${String(localTriCounter++).padStart(4, '0')}`;
+  });
   
   // Helper: Calculate distance between two points
   function distance(p1, p2) {
@@ -1410,10 +1663,20 @@ function triangulateFromPointsSimple(points, pointIndices) {
       
       if (!edgeSet.has(triKey)) {
         edgeSet.add(triKey);
-        triangles.push({
+        const verts = [pointIndices[i], pointIndices[n1], pointIndices[n2]];
+        const triangle = {
           type: 'triangle',
-          verts: [pointIndices[i], pointIndices[n1], pointIndices[n2]],
-        });
+          verts: verts,
+        };
+        
+        // ID SPECIFICATION v1.0 Phase 2: Assign ID before pushing (fixes missing ID issue)
+        if (useIDs) {
+          triangle.id = getTriId();
+          triangle.lineage = []; // Empty for original triangles
+          triangle.centroid = null; // Placeholder for optional lazy calculation
+        }
+        
+        triangles.push(triangle);
       }
     }
   }
@@ -1487,7 +1750,15 @@ function triangulateFromHex(hexPoints, hexPointIndices) {
  * @param {number} dissolveProbability - Probability of attempting dissolution (0.0-1.0, default 0.5)
  * @returns {Array} Array of quads and remaining triangles
  */
-function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false, trueBoundaryEdges = null, hullIndices = null) {
+function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveProbability = 0.5, debugMode = false, trueBoundaryEdges = null, hullIndices = null, useIDs = true, useUUID = false, generateID = null) {
+  // ID SPECIFICATION v1.0 Phase 2: Use centralized generateID if provided, otherwise create local helper
+  let localQuadCounter = 0;
+  const getQuadId = generateID ? () => generateID('quad') : (() => {
+    if (useUUID) {
+      return `quad-uuid${generateUUID()}`;
+    }
+    return `quad-${String(localQuadCounter++).padStart(4, '0')}`;
+  });
   // STEP-BY-STEP DEBUG: Detailed logging
   if (debugMode) {
     console.log(`[dissolveEdgesToQuads] STARTING: ${triangles.length} input triangles, ${points.length} points, dissolveProbability=${dissolveProbability}`);
@@ -1521,6 +1792,65 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   const EPSILON = 1e-6;
   function vertsEqual(v1, v2) {
     return Math.abs(v1 - v2) < EPSILON;
+  }
+  
+  // TRIANGLE LIFECYCLE AUDIT: Helper functions for triangle analysis
+  function computeArea(verts) {
+    if (!verts || verts.length !== 3) return 0;
+    const [v0, v1, v2] = verts.map(i => points[i]);
+    if (!v0 || !v1 || !v2) return 0;
+    return 0.5 * Math.abs(v0.x*(v1.y - v2.y) + v1.x*(v2.y - v0.y) + v2.x*(v0.y - v1.y));
+  }
+  
+  function sharedVerts(verts1, verts2) {
+    return verts1.filter(v => verts2.includes(v));
+  }
+  
+  function getEdges(verts) {
+    if (!verts || verts.length < 3) return [];
+    return [
+      [verts[0], verts[1]],
+      [verts[1], verts[2]],
+      [verts[2], verts[0]]
+    ];
+  }
+  
+  function hasAnyMergeableNeighbor(triangle, allTriangles) {
+    for (let other of allTriangles) {
+      if (other === triangle || other.removed) continue;
+      const shared = sharedVerts(triangle.verts, other.verts);
+      if (shared.length === 2) return true;
+    }
+    return false;
+  }
+  
+  function countRemainingMergeablePairs(triangles) {
+    let pairs = [];
+    for (let i = 0; i < triangles.length; i++) {
+      for (let j = i + 1; j < triangles.length; j++) {
+        if (triangles[i].removed || triangles[j].removed) continue;
+        const shared = sharedVerts(triangles[i].verts, triangles[j].verts);
+        if (shared.length === 2) {
+          pairs.push({
+            triA: triangles[i],
+            triB: triangles[j],
+            sharedVerts: shared,
+            edgeKey: shared[0] < shared[1] ? `${shared[0]},${shared[1]}` : `${shared[1]},${shared[0]}`
+          });
+        }
+      }
+    }
+    return pairs;
+  }
+  
+  function getNeighborCount(triangle, allTriangles) {
+    let count = 0;
+    for (let other of allTriangles) {
+      if (other === triangle || other.removed) continue;
+      const shared = sharedVerts(triangle.verts, other.verts);
+      if (shared.length === 2) count++;
+    }
+    return count;
   }
   
   // Work with a mutable copy of triangles
@@ -1804,7 +2134,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       // Fallback: use allVerts in order (may cause incorrect shape)
       orderedVerts.push(...allVerts);
       orderingMethod = 'fallback';
-    } else {
+        } else {
       // AUDIT: Use proper quad ordering: [v1, tri1Unique, v2, tri2Unique]
       // This ensures vertices form a proper cycle around the quad
       orderedVerts.push(v1, tri1Unique, v2, tri2Unique);
@@ -1832,10 +2162,36 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       }
     }
     
-    return {
+    const quad = {
       type: 'quad',
       verts: orderedVerts,
     };
+    
+    // ID SPECIFICATION v1.0: Assign ID, lineage, and centroid if enabled
+    if (useIDs) {
+      quad.id = getQuadId();
+      // Inherit lineage from parent triangles
+      const tri1Lineage = tri1.lineage || [];
+      const tri2Lineage = tri2.lineage || [];
+      const tri1Id = tri1.id || `fallback-tri-${tri1.verts.join('-')}`;
+      const tri2Id = tri2.id || `fallback-tri-${tri2.verts.join('-')}`;
+      quad.lineage = [
+        ...tri1Lineage,
+        tri1Id,
+        ...tri2Lineage,
+        tri2Id
+      ];
+      quad.centroid = null; // Placeholder for optional lazy calculation
+      
+      // ID SPECIFICATION v1.0 Phase 2: Enhanced merge logging with IDs (always show both triangle IDs)
+      if (debugMode && edgesDissolved <= 10) {
+        const tri1IdDisplay = tri1.id || `fallback-tri-${tri1.verts.join('-')}`;
+        const tri2IdDisplay = tri2.id || `fallback-tri-${tri2.verts.join('-')}`;
+        console.log(`[MERGE SUCCESS] ${quad.id} from ${tri1IdDisplay} + ${tri2IdDisplay} via edge ${edgeKey}`);
+      }
+    }
+    
+    return quad;
   }
   
   // ITERATION 40 STEP 4: Multi-pass greedy matching to prevent isolation
@@ -1856,8 +2212,8 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     attempts = 0;
     
     // Main dissolution loop for this pass
-    while (attempts < maxAttempts && dissolveCount < maxAttempts) {
-      attempts++;
+  while (attempts < maxAttempts && dissolveCount < maxAttempts) {
+    attempts++;
     
     // Rebuild edge map (triangles may have been removed)
     const activeTriangles = workingTriangles.filter(t => !t.removed);
@@ -2042,7 +2398,7 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       selectionMethod = 'border-priority';
     } else {
       // 30% chance: Select from all edges (still sorted, so border more likely)
-      const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
+    const randomEdgeIndex = Math.floor(rng.random() * internalEdges.length);
       selectedEdge = internalEdges[randomEdgeIndex];
       isSelectedBorder = isBorderAdjacentEdge(selectedEdge);
       selectionMethod = isSelectedBorder ? 'random-border' : 'random-interior';
@@ -2063,11 +2419,15 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
       }
     }
     
-    // ITERATION 40: Log every potential merge candidate BEFORE validation
-    const sharingTriangles = edgeMap.get(selectedEdge);
-    if (debugMode && sharingTriangles && sharingTriangles.length === 2) {
-      const [tri1, tri2] = sharingTriangles;
-      console.log(`[MERGE CANDIDATE] attempt=${attempts}, edge=${selectedEdge}, tri1Verts=[${tri1.verts.join(',')}], tri2Verts=[${tri2.verts.join(',')}], sharedEdge=[${selectedEdge}], isBorder=${isSelectedBorder}`);
+    // TRIANGLE LIFECYCLE AUDIT: Log every merge attempt with full details
+      const sharingTriangles = edgeMap.get(selectedEdge);
+    if (sharingTriangles && sharingTriangles.length === 2) {
+      const [triA, triB] = sharingTriangles;
+      const sharedVertsList = sharedVerts(triA.verts, triB.verts);
+      const priorityScore = isSelectedBorder ? 'border-priority' : selectionMethod;
+      const triAId = triA.id || `fallback-tri-${triA.verts.join('-')}`;
+      const triBId = triB.id || `fallback-tri-${triB.verts.join('-')}`;
+      console.log(`[MERGE ATTEMPT #${attempts}] Pair: ${triAId} + ${triBId}, shared=[${sharedVertsList.join(',')}], edge=${selectedEdge}, priority=${priorityScore}, isBorder=${isSelectedBorder}`);
     }
     
     // PRIORITY 1 FIX: Use canDissolveEdge() with explicit edge sharing validation
@@ -2117,24 +2477,52 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
         borderMerged.add(selectedEdge);
       }
       
-      // ITERATION 40: Log merge success with full details
+      // TRIANGLE LIFECYCLE AUDIT: Log merge success with full details
+      // ID SPECIFICATION v1.0: Include IDs in merge success log
+      const tri1Id = tri1.id || `fallback-tri-${tri1.verts.join('-')}`;
+      const tri2Id = tri2.id || `fallback-tri-${tri2.verts.join('-')}`;
+      const quadId = quad.id || 'no-id';
+      console.log(`[MERGE SUCCESS] Created quad ID=${quadId} from ${tri1Id} + ${tri2Id}, verts=[${quad.verts.join(',')}], edge=${selectedEdge}`);
       if (debugMode) {
-        console.log(`[MERGE SUCCESS] edge=${selectedEdge}, tri1Verts=[${tri1.verts.join(',')}], tri2Verts=[${tri2.verts.join(',')}], quadVerts=[${quad.verts.join(',')}], isBorder=${isSelectedBorder}`);
         const remainingActive = workingTriangles.filter(t => !t.removed).length;
         console.log(`[MERGE SUCCESS] Remaining: ${remainingActive} triangles after merge`);
       }
     } else {
       invalidEdgeAttempts++;
+      // TRIANGLE LIFECYCLE AUDIT: Log skipped merges with detailed reasons
+      const sharingTriangles = edgeMap.get(selectedEdge);
+      if (sharingTriangles && sharingTriangles.length === 2) {
+        const [triA, triB] = sharingTriangles;
+        const triAId = triA.id || `fallback-tri-${triA.verts.join('-')}`;
+        const triBId = triB.id || `fallback-tri-${triB.verts.join('-')}`;
+        // Try to get rejection reason from canDissolveEdge (it logs internally)
+        // We'll add additional context here
+        const sharedVertsList = sharedVerts(triA.verts, triB.verts);
+        const allVerts = [...new Set([...triA.verts, ...triB.verts])];
+        // Compute potential quad area if merge succeeded
+        let quadArea = 0;
+        if (allVerts.length === 4) {
+          const [v0, v1, v2, v3] = allVerts.map(i => points[i]);
+          if (v0 && v1 && v2 && v3) {
+            // Shoelace formula for quad
+            quadArea = 0.5 * Math.abs(
+              v0.x*v1.y + v1.x*v2.y + v2.x*v3.y + v3.x*v0.y -
+              (v0.y*v1.x + v1.y*v2.x + v2.y*v3.x + v3.y*v0.x)
+            );
+          }
+        }
+        const isCollinear = allVerts.length !== 4;
+        const isDegenerate = quadArea < 1e-4;
+        const reason = 'canDissolveEdge_rejected';
+        console.log(`[MERGE SKIPPED] ${triAId} + ${triBId} - reason: ${reason}, shared=[${sharedVertsList.join(',')}], collinear=${isCollinear}, area=${quadArea.toFixed(4)}, degenerate=${isDegenerate}, edge=${selectedEdge}`);
+      }
       // BORDER ISOLATION AUDIT: Track why edge was rejected
       if (debugMode && attempts <= 30) {
-        const reason = 'canDissolveEdge_rejected';
-        skippedEdgesLog.push({ edge: selectedEdge, reason: reason, attempt: attempts, isBorder: isSelectedBorder });
+        skippedEdgesLog.push({ edge: selectedEdge, reason: 'canDissolveEdge_rejected', attempt: attempts, isBorder: isSelectedBorder });
         if (isSelectedBorder) {
-          borderSkipped.push({ edge: selectedEdge, reason: reason, attempt: attempts });
-          console.log(`[dissolveEdgesToQuads] BORDER EDGE REJECTED: ${selectedEdge}, reason=${reason}`);
+          borderSkipped.push({ edge: selectedEdge, reason: 'canDissolveEdge_rejected', attempt: attempts });
         }
       }
-      // Note: canDissolveEdge() already logs rejection reasons, so we don't duplicate here
     }
   } // End of inner while loop (single pass)
   
@@ -2165,6 +2553,27 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   }
   
   } // End of outer while loop (multi-pass)
+  
+  // TRIANGLE LIFECYCLE AUDIT: Log remaining mergeable pairs after main loop
+  const activeTrianglesAfterMain = workingTriangles.filter(t => !t.removed);
+  if (debugMode && activeTrianglesAfterMain.length > 0) {
+    console.group("Post-Main-Loop - Remaining Candidates");
+    const remainingPairs = countRemainingMergeablePairs(activeTrianglesAfterMain);
+    console.log(`Remaining mergeable pairs: ${remainingPairs.length}`);
+    remainingPairs.forEach((p, idx) => {
+      const triAId = p.triA.id || `fallback-tri-${p.triA.verts.join('-')}`;
+      const triBId = p.triB.id || `fallback-tri-${p.triB.verts.join('-')}`;
+      // Check why not merged by attempting validation
+      const testEdgeMap = buildEdgeMap(activeTrianglesAfterMain);
+      const canMerge = canDissolveEdge(p.edgeKey, testEdgeMap, activeTrianglesAfterMain);
+      const whyNot = canMerge ? 'unknown (should be mergeable)' : 'failed_validation';
+      console.log(`[STILL MERGEABLE] ${triAId} + ${triBId} - shared=[${p.sharedVerts.join(',')}], edge=${p.edgeKey}, why_not_merged=${whyNot}${idx < 10 ? '' : ' (showing first 10)'}`);
+    });
+    if (remainingPairs.length > 10) {
+      console.log(`... and ${remainingPairs.length - 10} more pairs`);
+    }
+    console.groupEnd();
+  }
   
   // ITERATION 40 STEP 5: Boundary Handling Cleanup Pass
   // Post-multi-pass cleanup: Identify and handle boundary survivors
@@ -2258,20 +2667,24 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
     });
   }
   
+  // Build final edge map for remaining triangles to check isolation
+  const finalEdgeMapForCleanup = buildEdgeMap(survivorsBeforeCleanup.map(t => ({ ...t, removed: false })));
+  
   // For boundary survivors: Log but don't force-remove (safety - may create holes)
   // Instead, log them for analysis
   boundarySurvivors.forEach(({ tri, boundaryEdgeCount, onHull }, idx) => {
-    const isIsolated = !finalEdgeMap || (() => {
-      const triEdges = [
-        getEdgeKey(tri.verts[0], tri.verts[1]),
-        getEdgeKey(tri.verts[1], tri.verts[2]),
-        getEdgeKey(tri.verts[2], tri.verts[0])
-      ];
-      return !triEdges.some(e => {
-        const sharing = finalEdgeMap?.get(e);
-        return sharing && sharing.length === 2;
-      });
-    })();
+    const triEdges = [
+      getEdgeKey(tri.verts[0], tri.verts[1]),
+      getEdgeKey(tri.verts[1], tri.verts[2]),
+      getEdgeKey(tri.verts[2], tri.verts[0])
+    ];
+    
+    const hasAdjacentTriangle = triEdges.some(e => {
+      const sharing = finalEdgeMapForCleanup.get(e);
+      return sharing && sharing.length === 2;
+    });
+    
+    const isIsolated = !hasAdjacentTriangle;
     
     if (debugMode) {
       const reason = isIsolated ? 'isolated_boundary' : 'boundary_with_partner';
@@ -2796,9 +3209,35 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   }
   
   // Collect remaining triangles (not dissolved)
+  // ID SPECIFICATION v1.0: Preserve IDs and lineage for remaining triangles
   const remainingTriangles = workingTriangles
     .filter(t => !t.removed)
-    .map(t => ({ type: 'triangle', verts: t.verts }));
+    .map(t => {
+      const triangle = { type: 'triangle', verts: t.verts };
+      // Preserve ID and lineage if present
+      if (useIDs && t.id) {
+        triangle.id = t.id;
+        triangle.lineage = t.lineage || [];
+        triangle.centroid = t.centroid || null;
+      }
+      return triangle;
+    });
+  
+  // TRIANGLE LIFECYCLE AUDIT: Log final survivors with partner analysis
+  if (debugMode) {
+    console.group("Stage 3 End - Final Survivors");
+    console.log(`Total survivors: ${remainingTriangles.length}`);
+    remainingTriangles.forEach((t, idx) => {
+      const hasPartner = hasAnyMergeableNeighbor(t, remainingTriangles);
+      const neighborCount = getNeighborCount(t, remainingTriangles);
+      const area = computeArea(t.verts);
+      const idStr = t.id || 'no-id';
+      const vertsStr = `[${t.verts.join(',')}]`;
+      const hasPartnerStr = hasPartner ? 'YES' : 'NO';
+      console.log(`[SURVIVOR] ID=${idStr}, verts=${vertsStr}, area=${area.toFixed(4)}, hasPartner=${hasPartnerStr}, neighbors=${neighborCount}`);
+    });
+    console.groupEnd();
+  }
   
   // ITERATION 40: Final summary logging - survivors and their adjacent neighbors
   if (debugMode) {
@@ -3031,7 +3470,12 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
   }
   
   // Return quads + remaining triangles
-  return [...quads, ...remainingTriangles];
+  // ID SPECIFICATION v1.0: Return quads, remaining triangles, and counter
+  const result = [...quads, ...remainingTriangles];
+  return {
+    quads: result,
+    quadCounter: localQuadCounter
+  };
 }
 
 /**
@@ -3040,9 +3484,21 @@ function dissolveEdgesToQuads(triangles, hexPointIndices, points, rng, dissolveP
  * @param {Array} points - Points array
  * @param {Function} addPoint - Function to add point and return index
  * @param {Function} midpoint - Function to calculate midpoint
+ * @param {boolean} useIDs - Whether to assign IDs (default: true)
+ * @param {Function} getNextSubQuadId - Function to get next sub-quad ID (optional)
+ * @param {boolean} stepByStepRender - Debug flag (optional)
+ * @param {boolean} isBorder - Whether triangle is on border (optional)
  * @returns {Array} Array of 3 quads
  */
-function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
+function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint, useIDs = true, useUUID = false, generateID = null, stepByStepRender = false, isBorder = false) {
+  // ID SPECIFICATION v1.0 Phase 2: Use centralized generateID if provided, otherwise create local helper
+  let localSubQuadCounter = 0;
+  const getSubQuadId = generateID ? () => generateID('sub') : (() => {
+    if (useUUID) {
+      return `sub-uuid${generateUUID()}`;
+    }
+    return `sub-${String(localSubQuadCounter++).padStart(4, '0')}`;
+  });
   // ITERATION 36 FIX: Loosened degeneracy check (less strict for borders)
   function isDegenerateTriangle(shape) {
     if (!shape.verts || shape.verts.length !== 3) return true;
@@ -3089,8 +3545,9 @@ function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
   let mid20 = midpoint(p2, p0);
   
   // ITERATION 35 FIX: Snap midpoints to bounds if triangle touches border
-  const isBorder = (p0?.isBoundary || p1?.isBoundary || p2?.isBoundary);
-  if (isBorder) {
+  // Use parameter if provided, otherwise calculate from points
+  const triangleIsBorder = isBorder !== undefined ? isBorder : (p0?.isBoundary || p1?.isBoundary || p2?.isBoundary);
+  if (triangleIsBorder) {
     mid01 = snapToBounds(mid01, minX, maxX, minY, maxY);
     mid12 = snapToBounds(mid12, minX, maxX, minY, maxY);
     mid20 = snapToBounds(mid20, minX, maxX, minY, maxY);
@@ -3108,7 +3565,7 @@ function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
   };
   
   // ITERATION 35 FIX: Snap center to bounds if border triangle
-  if (isBorder) {
+  if (triangleIsBorder) {
     center = snapToBounds(center, minX, maxX, minY, maxY);
   }
   
@@ -3133,11 +3590,25 @@ function subdivideTriangleIntoThreeQuads(triangle, points, addPoint, midpoint) {
   }
   
   // Create 3 quads
+  // ID SPECIFICATION v1.0: Assign IDs and lineage to sub-quads
   const subQuads = [
     { type: 'quad', verts: [v0, i01, ic, i20] },
     { type: 'quad', verts: [i01, v1, i12, ic] },
     { type: 'quad', verts: [ic, i12, v2, i20] },
   ];
+  
+  // ID SPECIFICATION v1.0: Assign IDs and lineage if enabled
+  if (useIDs && triangle.id) {
+    subQuads.forEach((subQuad, index) => {
+      subQuad.id = getSubQuadId();
+      // Inherit full lineage from parent triangle
+      subQuad.lineage = [
+        ...(triangle.lineage || []),
+        triangle.id
+      ];
+      subQuad.centroid = null; // Placeholder for optional lazy calculation
+    });
+  }
   
   // ITERATION 35 FIX: Filter invalid sub-quads
   const validSubQuads = subQuads.filter(validateSubQuad);

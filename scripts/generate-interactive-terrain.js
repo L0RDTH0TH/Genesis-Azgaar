@@ -245,23 +245,6 @@ function generateInteractiveHTML(data) {
     #canvas-container.dragging {
       cursor: grabbing;
     }
-    #canvas-proof {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: red;
-      color: white;
-      padding: 15px;
-      font-size: 24px;
-      font-weight: bold;
-      z-index: 9999;
-      border: 3px solid #000;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.5);
-      display: none; /* Shown when Canvas mode active */
-    }
-    #canvas-proof.visible {
-      display: block;
-    }
     .layer-controls {
       display: none; /* Shown when canvas stage selected */
       margin-top: 10px;
@@ -331,7 +314,6 @@ function generateInteractiveHTML(data) {
       <div id="loading-overlay" class="loading-overlay">Generating terrain...</div>
     </div>
     <div id="canvas-container" style="position:relative;">
-      <div id="canvas-proof">USING NEW CANVAS RENDERER – SVG IS DEAD HERE</div>
       <canvas id="canvas-renderer"></canvas>
     </div>
     <div id="layer-controls" class="layer-controls">
@@ -677,20 +659,20 @@ function generateInteractiveHTML(data) {
       
       if (stageKey === '1') {
         // Stage 1: Raw points (orange circles)
+        // Render as actual circles using arc approximation (16 segments for smooth circle)
         centeredPoints.forEach((p, idx) => {
           if (isFinite(p.x) && isFinite(p.y)) {
-            // Render as small circle - use a tiny triangle path for Canvas compatibility
-            const radius = 4;
-            const path = [
-              [p.x, p.y - radius],
-              [p.x + radius * 0.866, p.y + radius * 0.5],
-              [p.x - radius * 0.866, p.y + radius * 0.5],
-              [p.x, p.y - radius], // Close path
-            ];
+            const radius = 5;
+            const segments = 16; // Number of segments for circle approximation
+            const path = [];
+            for (let i = 0; i <= segments; i++) {
+              const angle = (i / segments) * Math.PI * 2;
+              path.push([p.x + radius * Math.cos(angle), p.y + radius * Math.sin(angle)]);
+            }
             cells.push({
               i: idx,
               path,
-              fill: { type: 'color', color: stage.color },
+              fill: { type: 'color', color: '#FFA500' }, // Orange fill
               stroke: { color: '#cc8800', width: 0.5 },
               labels: [],
               layer: 'terrain',
@@ -699,7 +681,7 @@ function generateInteractiveHTML(data) {
           }
         });
       } else if (stageKey === '2' && stage.data) {
-        // Stage 2: Wireframe triangles (gray)
+        // Stage 2: Wireframe triangles (gray #808080, width 2)
         if (Array.isArray(stage.data)) {
           stage.data.forEach((tri, idx) => {
             if (tri && tri.verts && Array.isArray(tri.verts) && tri.verts.length >= 3) {
@@ -710,7 +692,7 @@ function generateInteractiveHTML(data) {
                   i: idx,
                   path,
                   fill: { type: 'color', color: 'none' },
-                  stroke: { color: stage.color, width: 1.5 },
+                  stroke: { color: '#808080', width: 2 },
                   labels: [],
                   layer: 'terrain',
                   bounds: calculateBounds(path),
@@ -742,12 +724,12 @@ function generateInteractiveHTML(data) {
                     bounds: calculateBounds(path),
                   });
                 } else {
-                  // Blue quad with stroke only
+                  // Blue quad with stroke only (#4488ff, width 2)
                   cells.push({
                     i: idx,
                     path,
                     fill: { type: 'color', color: 'none' },
-                    stroke: { color: stage.color, width: 2 },
+                    stroke: { color: '#4488ff', width: 2 },
                     labels: [],
                     layer: 'terrain',
                     bounds: calculateBounds(path),
@@ -807,7 +789,7 @@ function generateInteractiveHTML(data) {
           }
         });
       } else if (stageKey === 'final' && stage.data) {
-        // Stage 6: Final (black rounded quads)
+        // Stage 6: Final (black rounded quads #000, width 2, lineJoin 'round')
         const finalPoints = stage.data.dualPoints || stage.data.points;
         if (finalPoints && Array.isArray(finalPoints)) {
           const finalCentroidX = finalPoints.reduce((sum, p) => sum + (p.x || 0), 0) / finalPoints.length;
@@ -830,7 +812,7 @@ function generateInteractiveHTML(data) {
                     i: idx,
                     path,
                     fill: { type: 'color', color: 'none' },
-                    stroke: { color: stage.color, width: 1.5 },
+                    stroke: { color: '#000', width: 2, lineJoin: 'round' },
                     labels: [],
                     layer: 'terrain',
                     bounds: calculateBounds(path),
@@ -1005,26 +987,18 @@ function generateInteractiveHTML(data) {
         return null;
       }
       
-      // CANVAS-ONLY-PROOF: Show canvas, hide SVG, show red banner
+      // Show canvas, hide SVG
       canvasContainer.style.display = 'block';
       const svgContainer = document.getElementById('svg-container');
       if (svgContainer) {
         svgContainer.style.display = 'none';
-        // CANVAS-ONLY-PROOF: Clear any SVG content
         svgContainer.innerHTML = '';
       }
       
-      // CANVAS-ONLY-PROOF: Show red banner
-      const canvasProof = document.getElementById('canvas-proof');
-      if (canvasProof) {
-        canvasProof.classList.add('visible');
-        console.log('[CANVAS-ONLY-PROOF] Red banner displayed - SVG is dead here');
-      }
-      
-      // CANVAS-ONLY-PROOF: Final SVG check
+      // Final SVG check (should not exist in Canvas mode)
       const finalSVGCheck = document.querySelector('svg');
       if (finalSVGCheck) {
-        console.error('[CANVAS-ONLY-PROOF] SVG STILL EXISTS AFTER CLEANUP - Removing:', finalSVGCheck);
+        console.error('[CANVAS-CHECK] SVG still exists after cleanup - removing:', finalSVGCheck);
         finalSVGCheck.remove();
       }
       
@@ -1331,9 +1305,6 @@ function generateInteractiveHTML(data) {
           return;
         }
         
-        // CANVAS-ONLY-PROOF: Hide red banner and SVG when not in Canvas mode
-        const canvasProof = document.getElementById('canvas-proof');
-        if (canvasProof) canvasProof.classList.remove('visible');
         
         // STEP-BY-STEP DEBUG: Render selected stage using Canvas (stages 1-6) - NO SVG FALLBACK
         if (PIPELINE_STAGES && typeof currentStage !== 'undefined') {
