@@ -2198,6 +2198,10 @@ function generateInteractiveHTML(data) {
       console.error('Script initialization crashed:', err.message, err.stack);
       drawTestPattern(); // Always show something
     }
+    } catch (err) {
+      console.error('[BULLETPROOF-ERROR] Module initialization failed:', err.message, err.stack);
+      alert('Module initialization failed: ' + err.message + '\\nCheck console for details.');
+    }
     
     console.log('Interactive terrain test ready! Click on the grid to generate terrain.');
   </script>
