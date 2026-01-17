@@ -358,8 +358,8 @@ function generateInteractiveHTML(data) {
       alert('Unhandled promise rejection: ' + errorMsg);
     });
     
-    // SYNTAX-CHECK: Page loaded - no syntax errors so far
-    console.log('[SYNTAX-CHECK] Page loaded - no syntax errors so far');
+    // SYNTAX-CHECK-START: Script beginning execution
+    console.log('[SYNTAX-CHECK-START] Script beginning execution');
     
     // BULLETPROOF: Catch errors during module initialization
     try {
