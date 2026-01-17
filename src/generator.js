@@ -950,6 +950,8 @@ function exportCanvas2DData(data, options) {
   const biomes = cells.biome || [];
   const states = cells.state || [];
   const provinces = cells.province || [];
+  // Temperature data from grid (if available)
+  const temperatures = (grid && grid.cells && grid.cells.temp) ? grid.cells.temp : null;
 
   // Collect all cells with paths
   if (cells.v && cells.v.length > 0) {
@@ -990,12 +992,17 @@ function exportCanvas2DData(data, options) {
       // Determine active layer (default to terrain if no layer specified)
       const layer = activeLayers.includes('biomes') && !isWater && biomeId !== undefined ? 'biomes' :
                     activeLayers.includes('states') && !isWater && stateId !== undefined ? 'states' :
+                    activeLayers.includes('temperature') && !isWater && temperatures ? 'temperature' :
                     'terrain';
+
+      // Get temperature for gradient (if available and layer is temperature)
+      const temperature = temperatures && i < temperatures.length ? temperatures[i] : null;
 
       // Extract fill style based on layer
       const fill = getCellFill({
         cellId: i,
         height,
+        temperature,
         biomeId,
         stateId,
         isWater,
@@ -1048,10 +1055,10 @@ function exportCanvas2DData(data, options) {
 
 /**
  * Get cell fill style (color, pattern, or gradient)
- * @param {Object} params - { cellId, height, biomeId, stateId, isWater, layer, biomeColors, STYLE_CONSTANTS }
+ * @param {Object} params - { cellId, height, temperature, biomeId, stateId, isWater, layer, biomeColors, STYLE_CONSTANTS }
  * @returns {Object} Fill style { type: 'color'|'pattern'|'gradient', ... }
  */
-function getCellFill({ cellId, height, biomeId, stateId, isWater, layer, biomeColors, STYLE_CONSTANTS }) {
+function getCellFill({ cellId, height, temperature, biomeId, stateId, isWater, layer, biomeColors, STYLE_CONSTANTS }) {
   if (isWater) {
     return {
       type: 'color',
@@ -1118,11 +1125,67 @@ function getCellFill({ cellId, height, biomeId, stateId, isWater, layer, biomeCo
     };
   }
 
+  // Temperature gradient layer (if temperature data available)
+  if (layer === 'temperature' && temperature !== null && temperature !== undefined) {
+    // Temperature range: -50°C (cold/blue) to +50°C (hot/red)
+    // Map temperature to 0-1 range for gradient stops
+    const minTemp = -50;
+    const maxTemp = 50;
+    const normalized = Math.max(0, Math.min(1, (temperature - minTemp) / (maxTemp - minTemp)));
+    
+    // Color stops: blue (cold) -> green (temperate) -> yellow -> red (hot)
+    return {
+      type: 'gradient',
+      gradient: {
+        type: 'linear',
+        stops: [
+          [0, '#0066cc'], // Cold blue
+          [0.25, '#66ccff'], // Cool blue
+          [0.5, '#66ff66'], // Temperate green
+          [0.75, '#ffcc00'], // Warm yellow
+          [1, '#cc0000'], // Hot red
+        ],
+        // Gradient direction will be determined by cell bounds in renderer
+      },
+      // Fallback color based on normalized temperature
+      color: temperatureToColor(temperature),
+    };
+  }
+
   // Default: terrain/land base color
   return {
     type: 'color',
     color: STYLE_CONSTANTS.landBase,
   };
+}
+
+/**
+ * Convert temperature to hex color (helper for fallback)
+ * @param {number} temp - Temperature in Celsius
+ * @returns {string} Hex color string
+ */
+function temperatureToColor(temp) {
+  const minTemp = -50;
+  const maxTemp = 50;
+  const normalized = Math.max(0, Math.min(1, (temp - minTemp) / (maxTemp - minTemp)));
+  
+  // Interpolate between blue and red
+  let r, g, b;
+  if (normalized < 0.5) {
+    // Blue to green
+    const t = normalized * 2;
+    r = Math.floor(0 + (102 - 0) * t);
+    g = Math.floor(102 + (204 - 102) * t);
+    b = Math.floor(204 + (255 - 204) * t);
+  } else {
+    // Green to red
+    const t = (normalized - 0.5) * 2;
+    r = Math.floor(102 + (204 - 102) * t);
+    g = Math.floor(204 + (0 - 204) * t);
+    b = Math.floor(255 + (0 - 255) * t);
+  }
+  
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 /**
@@ -1256,16 +1319,6 @@ function exportWebGLData(data, options) {
     },
     message: 'WebGL export is stubbed - triangulation requires polygon-to-triangle conversion (e.g., earcut library)',
   };
-  
-  // Stub: Return empty mesh data
-  // Full implementation in Phase 3 (if needed)
-  return {
-    mode: 'webgl',
-    vertices: new Float32Array(0),
-    indices: new Uint16Array(0),
-    triangles: [],
-    uniforms: {},
-  };
 }
 
 /**
@@ -1343,4 +1396,131 @@ export function getRenderer(canvas, options = {}) {
   } else {
     throw new InvalidOptionError('options.mode', mode, `Invalid mode: ${mode}. Must be 'canvas2d' or 'webgl'`);
   }
+}
+
+/**
+ * Export single cell preview as Blob or data URL (for Godot integration)
+ * @param {number} cellId - Cell ID to export
+ * @param {Object} options - Export options { format: 'png'|'webp'|'blob', width, height }
+ * @returns {Promise<Blob|string>} Blob or data URL
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ */
+export function exportPreviewBlob(cellId, options = {}) {
+  requireInitialized();
+
+  if (!state.data) {
+    throw new NoDataError();
+  }
+
+  const format = options.format || 'png';
+  const width = options.width || 256;
+  const height = options.height || 256;
+
+  // Export render data for the specific cell
+  const renderData = exportRenderData({ mode: 'canvas2d', layers: ['terrain', 'biomes', 'states'] });
+  const cell = renderData.cells.find(c => c.i === cellId);
+
+  if (!cell) {
+    throw new Error(`Cell ${cellId} not found in render data`);
+  }
+
+  // Create temporary canvas for rendering
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    throw new Error('Could not get 2D rendering context');
+  }
+
+  // Create renderer for single cell
+  const renderer = new Canvas2DRenderer(canvas, {
+    viewport: { offsetX: width / 2, offsetY: height / 2, scale: 1.0 },
+  });
+
+  // Calculate cell bounds for centering
+  const cellBounds = cell.bounds || calculateCellBounds(cell.path);
+  const centerX = cellBounds.x + (cellBounds.width || 0) / 2;
+  const centerY = cellBounds.y + (cellBounds.height || 0) / 2;
+
+  // Render cell (offset to center)
+  ctx.save();
+  ctx.translate(width / 2 - centerX, height / 2 - centerY);
+  renderer.renderCell(cell, null);
+  ctx.restore();
+
+  // Convert to Blob or data URL
+  return new Promise((resolve, reject) => {
+    if (format === 'blob') {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Failed to create blob'));
+        }
+      }, `image/${format === 'blob' ? 'png' : format}`);
+    } else {
+      const dataUrl = canvas.toDataURL(`image/${format}`);
+      resolve(dataUrl);
+    }
+  });
+}
+
+/**
+ * Convert render data to Godot-friendly JSON format
+ * Paths as flat arrays [x1,y1,x2,y2,...], colors as #rrggbb
+ * @param {Object} renderData - Output from exportRenderData()
+ * @returns {Object} Godot-friendly JSON structure
+ */
+export function convertToGodotFormat(renderData) {
+  if (!renderData || !renderData.cells || !Array.isArray(renderData.cells)) {
+    throw new Error('Invalid render data');
+  }
+
+  const cells = renderData.cells.map(cell => {
+    // Convert path [[x,y],...] to flat array [x1,y1,x2,y2,...]
+    const pathFlat = [];
+    if (cell.path && Array.isArray(cell.path)) {
+      for (const point of cell.path) {
+        if (Array.isArray(point) && point.length >= 2) {
+          pathFlat.push(point[0], point[1]);
+        }
+      }
+    }
+
+    // Extract fill color (use fallback if pattern/gradient)
+    let fillColor = '#ffffff';
+    if (cell.fill) {
+      if (cell.fill.type === 'color') {
+        fillColor = cell.fill.color || '#ffffff';
+      } else if (cell.fill.color) {
+        fillColor = cell.fill.color; // Fallback color for patterns/gradients
+      }
+    }
+
+    // Ensure color is in #rrggbb format
+    if (!fillColor.startsWith('#')) {
+      fillColor = `#${fillColor}`;
+    }
+
+    return {
+      i: cell.i,
+      path: pathFlat, // Flat array: [x1,y1,x2,y2,...]
+      fill: fillColor, // Color as #rrggbb
+      layer: cell.layer || 'terrain',
+      bounds: cell.bounds || null,
+      labels: cell.labels || [], // Labels preserved as-is
+    };
+  });
+
+  return {
+    mode: 'canvas2d',
+    cells: cells,
+    // Comment for Godot: Paths are flat arrays [x1,y1,x2,y2,...] for efficient parsing
+    // Colors are #rrggbb format strings
+    _godotFormat: true,
+    _comment: 'Paths are flat arrays [x1,y1,x2,y2,...]. Colors are #rrggbb hex strings.',
+  };
 }

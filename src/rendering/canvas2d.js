@@ -162,13 +162,36 @@ export class Canvas2DRenderer extends Renderer {
     this.ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
     this.ctx.scale(this.viewport.scale, this.viewport.scale);
 
-    // Render all cells (filtered by layer)
+    // Calculate visible world bounds (viewport culling)
+    const canvasWidth = this.canvas.width;
+    const canvasHeight = this.canvas.height;
+    const scale = this.viewport.scale;
+    const offsetX = this.viewport.offsetX;
+    const offsetY = this.viewport.offsetY;
+    
+    // World bounds visible in viewport (inverse transform)
+    const worldMinX = -offsetX / scale;
+    const worldMinY = -offsetY / scale;
+    const worldMaxX = (canvasWidth - offsetX) / scale;
+    const worldMaxY = (canvasHeight - offsetY) / scale;
+
+    // Render all cells (filtered by layer and viewport culling)
     for (const cell of renderData.cells) {
       if (!cell || !cell.path || cell.path.length < 3) continue;
       
       // Layer filtering: skip if cell layer is not in activeLayers
       if (cell.layer && !this.activeLayers.includes(cell.layer)) {
         continue;
+      }
+
+      // Viewport culling: skip cells outside visible area (optimization)
+      if (cell.bounds) {
+        const cellRight = (cell.bounds.x || 0) + (cell.bounds.width || 0);
+        const cellBottom = (cell.bounds.y || 0) + (cell.bounds.height || 0);
+        if (cellRight < worldMinX || (cell.bounds.x || 0) > worldMaxX ||
+            cellBottom < worldMinY || (cell.bounds.y || 0) > worldMaxY) {
+          continue; // Cell is outside viewport
+        }
       }
 
       // Create or reuse Path2D
@@ -196,15 +219,7 @@ export class Canvas2DRenderer extends Renderer {
 
       // Draw labels (after fill/stroke, so they appear on top)
       if (cell.labels && Array.isArray(cell.labels) && cell.labels.length > 0) {
-        this.ctx.textAlign = 'center';
-        this.ctx.textBaseline = 'middle';
-        cell.labels.forEach(label => {
-          if (!label || !label.text) return;
-          this.ctx.fillStyle = label.color || '#000';
-          this.ctx.font = `${label.fontSize || 12}px sans-serif`;
-          // Labels are in world coordinates, so they'll be transformed with viewport
-          this.ctx.fillText(label.text, label.x || 0, label.y || 0);
-        });
+        this.drawLabels(cell.labels, scale);
       }
     }
 
@@ -521,12 +536,16 @@ export class Canvas2DRenderer extends Renderer {
     try {
       switch (type) {
         case 'desert':
-          // Desert pattern: sparse dots/vegetation
+          // Desert pattern: sparse dots/vegetation (deterministic via hash)
           ctx.fillStyle = this.darkenColor(baseColor, 0.15);
           const dotCount = Math.floor(4 * density);
+          const patternSeed = this.hash(`${type}-${baseColor}-${density}`);
           for (let i = 0; i < dotCount; i++) {
-            const x = (Math.random() * size) | 0;
-            const y = (Math.random() * size) | 0;
+            // Use hash-based deterministic random positions
+            const hash1 = this.hash(`${patternSeed}-${i}-x`);
+            const hash2 = this.hash(`${patternSeed}-${i}-y`);
+            const x = (hash1 * size) | 0;
+            const y = (hash2 * size) | 0;
             ctx.beginPath();
             ctx.arc(x, y, 1.5, 0, Math.PI * 2);
             ctx.fill();
@@ -543,13 +562,17 @@ export class Canvas2DRenderer extends Renderer {
           break;
           
         case 'deciduous':
-          // Deciduous forest: tree canopy circles
+          // Deciduous forest: tree canopy circles (deterministic via hash)
           ctx.fillStyle = this.darkenColor(baseColor, 0.2);
           const treeCount = Math.floor(6 * density);
+          const deciduousSeed = this.hash(`${type}-${baseColor}-${density}`);
           for (let i = 0; i < treeCount; i++) {
-            const x = (Math.random() * size) | 0;
-            const y = (Math.random() * size) | 0;
-            const radius = 2 + Math.random() * 2;
+            const hash1 = this.hash(`${deciduousSeed}-${i}-x`);
+            const hash2 = this.hash(`${deciduousSeed}-${i}-y`);
+            const hash3 = this.hash(`${deciduousSeed}-${i}-r`);
+            const x = (hash1 * size) | 0;
+            const y = (hash2 * size) | 0;
+            const radius = 2 + hash3 * 2;
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -557,13 +580,17 @@ export class Canvas2DRenderer extends Renderer {
           break;
           
         case 'rainforest':
-          // Rainforest: dense overlapping circles
+          // Rainforest: dense overlapping circles (deterministic via hash)
           ctx.fillStyle = this.darkenColor(baseColor, 0.25);
           const forestCount = Math.floor(10 * density);
+          const rainforestSeed = this.hash(`${type}-${baseColor}-${density}`);
           for (let i = 0; i < forestCount; i++) {
-            const x = (Math.random() * size) | 0;
-            const y = (Math.random() * size) | 0;
-            const radius = 2 + Math.random() * 3;
+            const hash1 = this.hash(`${rainforestSeed}-${i}-x`);
+            const hash2 = this.hash(`${rainforestSeed}-${i}-y`);
+            const hash3 = this.hash(`${rainforestSeed}-${i}-r`);
+            const x = (hash1 * size) | 0;
+            const y = (hash2 * size) | 0;
+            const radius = 2 + hash3 * 3;
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -571,13 +598,17 @@ export class Canvas2DRenderer extends Renderer {
           break;
           
         case 'conifer':
-          // Conifer (taiga): triangular tree shapes
+          // Conifer (taiga): triangular tree shapes (deterministic via hash)
           ctx.fillStyle = this.darkenColor(baseColor, 0.2);
           const coniferCount = Math.floor(8 * density);
+          const coniferSeed = this.hash(`${type}-${baseColor}-${density}`);
           for (let i = 0; i < coniferCount; i++) {
-            const x = (Math.random() * size) | 0;
-            const y = (Math.random() * size) | 0;
-            const height = 3 + Math.random() * 2;
+            const hash1 = this.hash(`${coniferSeed}-${i}-x`);
+            const hash2 = this.hash(`${coniferSeed}-${i}-y`);
+            const hash3 = this.hash(`${coniferSeed}-${i}-h`);
+            const x = (hash1 * size) | 0;
+            const y = (hash2 * size) | 0;
+            const height = 3 + hash3 * 2;
             ctx.beginPath();
             ctx.moveTo(x, y);
             ctx.lineTo(x - 1.5, y + height);
@@ -601,9 +632,12 @@ export class Canvas2DRenderer extends Renderer {
           }
           ctx.fillStyle = this.darkenColor(baseColor, 0.15);
           const vegCount = Math.floor(3 * density);
+          const wetlandSeed = this.hash(`${type}-${baseColor}-${density}`);
           for (let i = 0; i < vegCount; i++) {
-            const x = (Math.random() * size) | 0;
-            const y = (Math.random() * size) | 0;
+            const hash1 = this.hash(`${wetlandSeed}-${i}-x`);
+            const hash2 = this.hash(`${wetlandSeed}-${i}-y`);
+            const x = (hash1 * size) | 0;
+            const y = (hash2 * size) | 0;
             ctx.beginPath();
             ctx.arc(x, y, 1, 0, Math.PI * 2);
             ctx.fill();
@@ -675,5 +709,84 @@ export class Canvas2DRenderer extends Renderer {
     
     // Default: solid color
     return '#ffffff';
+  }
+
+  /**
+   * Draw labels with font scaling, outline, and collision avoidance
+   * @param {Array} labels - Label array [{ text, x, y, fontSize, color }]
+   * @param {number} scale - Current viewport scale
+   */
+  drawLabels(labels, scale) {
+    if (!labels || !Array.isArray(labels) || labels.length === 0) return;
+    
+    // Scale font size based on zoom (smaller at low zoom, larger at high zoom)
+    // At scale 1.0, use original size; at scale < 0.5, reduce; at scale > 2.0, increase
+    const fontScaleFactor = Math.max(0.5, Math.min(2.0, scale));
+    
+    // Collision avoidance: track used positions at low zoom
+    const minScaleForLabels = 0.3; // Hide labels below this scale
+    const minScaleForCollision = 0.5; // Apply collision avoidance below this scale
+    const labelPositions = [];
+    
+    if (scale < minScaleForLabels) {
+      return; // Skip labels at very low zoom
+    }
+    
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    
+    for (const label of labels) {
+      if (!label || !label.text) continue;
+      
+      const baseFontSize = label.fontSize || 12;
+      const scaledFontSize = Math.max(6, Math.floor(baseFontSize * fontScaleFactor));
+      const x = label.x || 0;
+      const y = label.y || 0;
+      const color = label.color || '#000';
+      
+      // Collision avoidance at low zoom
+      if (scale < minScaleForCollision) {
+        const minDistance = 30; // Minimum pixel distance between labels
+        let tooClose = false;
+        for (const pos of labelPositions) {
+          const dx = (x - pos.x) * scale;
+          const dy = (y - pos.y) * scale;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          if (distance < minDistance) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue; // Skip overlapping label
+        labelPositions.push({ x, y });
+      }
+      
+      // Draw text with outline/shadow for readability
+      this.ctx.font = `${scaledFontSize}px sans-serif`;
+      
+      // Outline/shadow for better readability
+      this.ctx.strokeStyle = '#ffffff';
+      this.ctx.lineWidth = scaledFontSize * 0.15;
+      this.ctx.strokeText(label.text, x, y);
+      
+      // Fill text
+      this.ctx.fillStyle = color;
+      this.ctx.fillText(label.text, x, y);
+    }
+  }
+
+  /**
+   * Simple hash function for deterministic pattern generation
+   * @param {string} str - Input string
+   * @returns {number} Hash value (0-1)
+   */
+  hash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash) / 2147483647; // Normalize to 0-1
   }
 }

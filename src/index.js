@@ -18,6 +18,8 @@ export {
   resetGeneratorState,
   exportRenderData,
   getRenderer,
+  exportPreviewBlob,
+  convertToGodotFormat,
 } from './generator.js';
 
 // Utility exports (for advanced usage)
