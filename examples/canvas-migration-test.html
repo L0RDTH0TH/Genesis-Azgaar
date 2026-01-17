@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Canvas-Only Migration Test (Phase 0)</title>
+  <title>Canvas-Only Migration Test (Phase 2)</title>
   <style>
     body {
       margin: 0;
@@ -75,11 +75,12 @@
 </head>
 <body>
   <div class="container">
-    <h1>🎨 Canvas-Only Migration Test (Phase 0)</h1>
+    <h1>🎨 Canvas-Only Migration Test (Phase 2)</h1>
     <div class="controls">
       <button id="generateBtn">Generate Map</button>
       <button id="exportBtn">Export Render Data</button>
       <button id="renderBtn">Render to Canvas</button>
+      <button id="zoomToBurgBtn" disabled>Zoom to First Burg</button>
       <label style="margin-left: 20px; color: #aaa;">
         Mode:
         <select id="modeSelect" style="margin-left: 8px; padding: 4px; background: #2a2a2a; color: #fff; border: 1px solid #666; border-radius: 4px;">
@@ -87,6 +88,12 @@
           <option value="webgl">WebGL (Stub)</option>
         </select>
       </label>
+      <div style="margin-top: 10px; color: #aaa; font-size: 12px;">
+        <span>Controls: </span>
+        <span>Click to highlight cell</span>
+        <span style="margin-left: 15px;">Mouse wheel to zoom</span>
+        <span style="margin-left: 15px;">Drag to pan</span>
+      </div>
     </div>
     <canvas id="map-preview" width="960" height="540"></canvas>
     <div id="status" class="status">Ready - Click "Generate Map" to start</div>
@@ -97,15 +104,39 @@
   </div>
 
   <script type="module">
-    // Import library (assuming bundled or using import maps)
-    // In real usage, this would be: import { initGenerator, loadOptions, generateMap, exportRenderData, getRenderer } from './path/to/library.js';
-    // For now, we'll use a placeholder that shows the expected API
+    // Import Delaunator (peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library (using dev server or dist bundle)
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    let AzgaarGenesis;
+    try {
+      AzgaarGenesis = await import(libraryPath);
+    } catch (error) {
+      console.error(`Failed to load library from ${libraryPath}:`, error);
+      document.getElementById('status').textContent = `❌ Failed to load library from ${libraryPath}. Make sure to use a dev server (e.g., npm run dev) or build first.`;
+      throw error;
+    }
+
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      exportRenderData, 
+      getRenderer,
+      getMapData
+    } = AzgaarGenesis;
 
     const statusEl = document.getElementById('status');
     const canvas = document.getElementById('map-preview');
     const generateBtn = document.getElementById('generateBtn');
     const exportBtn = document.getElementById('exportBtn');
     const renderBtn = document.getElementById('renderBtn');
+    const zoomToBurgBtn = document.getElementById('zoomToBurgBtn');
     const modeSelect = document.getElementById('modeSelect');
     const exportOutput = document.getElementById('exportOutput');
     const exportDataEl = document.getElementById('exportData');
@@ -113,6 +144,7 @@
     let mapData = null;
     let renderData = null;
     let renderer = null;
+    let highlightedCellId = null;
 
     function updateStatus(message, type = '') {
       statusEl.textContent = message;
@@ -123,27 +155,27 @@
       try {
         updateStatus('Generating map...', '');
         generateBtn.disabled = true;
+        console.time('[Phase 2] Map Generation');
 
-        // Placeholder for actual library call (uncomment when testing with real library)
-        // const { initGenerator, loadOptions, generateMap } = await import('./src/index.js');
-        // initGenerator({ canvas: null });
-        // loadOptions({ 
-        //   seed: 'test-canvas-migration',
-        //   mapWidth: 960,
-        //   mapHeight: 540,
-        //   points: 2, // Low density for testing (density ~0.125-0.25)
-        // });
-        // mapData = generateMap();
-
-        // Simulate for now (Phase 1 - use real library when ready)
-        await new Promise(resolve => setTimeout(resolve, 500));
-        mapData = { 
-          mock: true, 
-          message: 'Generation placeholder - uncomment import/generateMap calls above to test with real library',
-          note: 'Phase 1 exportRenderData is now implemented - will extract real paths/fills/strokes/labels from generated map'
-        };
+        // Initialize generator
+        initGenerator({ canvas: null });
         
-        updateStatus('✅ Map generated (stubbed)', 'success');
+        // Load options for small test map (low density ~0.125-0.25, ~50-200 cells)
+        loadOptions({ 
+          seed: `test-canvas-migration-${Date.now()}`,
+          mapWidth: 960,
+          mapHeight: 540,
+          cellsDesired: 5000, // Low density for testing
+          statesNumber: 8,
+          culturesNumber: 5,
+          religionsNumber: 3,
+        });
+        
+        // Generate map
+        mapData = generateMap(Delaunator);
+        
+        console.timeEnd('[Phase 2] Map Generation');
+        updateStatus('✅ Map generated', 'success');
         exportBtn.disabled = false;
         renderBtn.disabled = false;
       } catch (error) {
@@ -162,58 +194,28 @@
         }
 
         updateStatus('Exporting render data...', '');
+        console.time('[Phase 2] Export Render Data');
         
         const mode = modeSelect.value;
         
-        // Placeholder for actual library call (uncomment when testing with real library)
-        // const { exportRenderData } = await import('./src/index.js');
-        // renderData = exportRenderData({ mode });
-
-        // Simulate for now (Phase 1 - use real library when ready)
-        if (mode === 'canvas2d') {
-          // Phase 1: exportRenderData now implements full path/fill/stroke/label extraction
-          // When using real library, this will extract from actual map data
-          renderData = {
-            mode: 'canvas2d',
-            cells: [
-              { 
-                i: 0, 
-                path: [[10, 10], [100, 10], [100, 100], [10, 100]], 
-                fill: { type: 'color', color: '#4CAF50' }, 
-                stroke: { color: null, width: 1, dashArray: null },
-                labels: [],
-                layer: 'biomes',
-                bounds: { x: 10, y: 10, width: 90, height: 90 }
-              },
-              { 
-                i: 1, 
-                path: [[110, 10], [200, 10], [200, 100], [110, 100]], 
-                fill: { type: 'color', color: '#FFC107' }, 
-                stroke: { color: null, width: 1, dashArray: null },
-                labels: [],
-                layer: 'terrain',
-                bounds: { x: 110, y: 10, width: 90, height: 90 }
-              },
-            ],
-            patterns: {},
-            gradients: {},
-            message: 'Phase 1: exportCanvas2DData now extracts real paths/fills/strokes/labels - uncomment import above to test with real library'
-          };
-        } else {
-          renderData = {
-            mode: 'webgl',
-            vertices: new Float32Array(0),
-            indices: new Uint16Array(0),
-            triangles: [],
-            uniforms: {},
-            message: 'WebGL export is stubbed - will be implemented in Phase 3 if needed'
-          };
-        }
-
-        exportDataEl.textContent = JSON.stringify(renderData, null, 2);
+        // Export render data using real library
+        renderData = exportRenderData({ mode, layers: ['terrain', 'biomes', 'states'] });
+        
+        console.timeEnd('[Phase 2] Export Render Data');
+        
+        // Show preview (truncated for large maps)
+        const preview = {
+          mode: renderData.mode,
+          cellCount: renderData.cells?.length || 0,
+          sampleCell: renderData.cells?.[0] || null,
+          patterns: renderData.patterns || {},
+          gradients: renderData.gradients || {},
+        };
+        exportDataEl.textContent = JSON.stringify(preview, null, 2);
         exportOutput.style.display = 'block';
         
-        updateStatus(`✅ Render data exported (mode: ${mode})`, 'success');
+        updateStatus(`✅ Render data exported: ${preview.cellCount} cells (mode: ${mode})`, 'success');
+        zoomToBurgBtn.disabled = false;
       } catch (error) {
         updateStatus(`❌ Export error: ${error.message}`, 'error');
         console.error('Export error:', error);
@@ -228,44 +230,150 @@
         }
 
         updateStatus('Rendering to canvas...', '');
+        console.time('[Phase 2] Canvas Rendering');
         
         const mode = modeSelect.value;
         
-        // Placeholder for actual library call
-        // const { getRenderer } = await import('./src/index.js');
-        // renderer = getRenderer(canvas, { mode, fallbackTo2D: true });
+        // Get renderer using real library
+        renderer = getRenderer(canvas, { 
+          mode, 
+          fallbackTo2D: true,
+          viewport: {
+            offsetX: 0,
+            offsetY: 0,
+            scale: 1.0,
+          }
+        });
 
-        // Simulate for now (Phase 0 stub)
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
-        if (mode === 'canvas2d' && renderData.cells && Array.isArray(renderData.cells)) {
-          // Stub rendering: draw sample cells
-          renderData.cells.forEach(cell => {
-            if (!cell.path || cell.path.length < 3) return;
-            
-            ctx.fillStyle = cell.fill?.color || '#ffffff';
-            ctx.strokeStyle = cell.stroke?.color || '#333';
-            ctx.lineWidth = cell.stroke?.width || 1;
-            
-            ctx.beginPath();
-            ctx.moveTo(cell.path[0][0], cell.path[0][1]);
-            for (let i = 1; i < cell.path.length; i++) {
-              ctx.lineTo(cell.path[i][0], cell.path[i][1]);
-            }
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-          });
-        } else if (mode === 'webgl') {
+        // Render using Canvas2DRenderer.renderMap()
+        if (mode === 'canvas2d' && renderer && typeof renderer.renderMap === 'function') {
+          renderer.renderMap(renderData);
+        } else {
           updateStatus('⚠️ WebGL rendering is stubbed - falling back to Canvas 2D', 'error');
-          // Would use PixiRenderer in Phase 3
+          if (renderer && typeof renderer.renderMap === 'function') {
+            renderer.renderMap(renderData);
+          }
         }
         
-        updateStatus('✅ Rendered to canvas (stub - full rendering in Phase 1)', 'success');
+        console.timeEnd('[Phase 2] Canvas Rendering');
+        updateStatus(`✅ Rendered ${renderData.cells?.length || 0} cells to canvas`, 'success');
       } catch (error) {
         updateStatus(`❌ Render error: ${error.message}`, 'error');
         console.error('Render error:', error);
+      }
+    });
+
+    // Zoom to first burg cell
+    zoomToBurgBtn.addEventListener('click', () => {
+      if (!renderer || !renderData || !renderData.cells) {
+        updateStatus('❌ Render map first', 'error');
+        return;
+      }
+
+      // Find first cell with burg label
+      const burgCell = renderData.cells.find(cell => 
+        cell.labels && Array.isArray(cell.labels) && cell.labels.length > 0
+      );
+
+      if (!burgCell || !burgCell.bounds) {
+        updateStatus('⚠️ No burg cells found to zoom to', 'error');
+        return;
+      }
+
+      console.time('[Phase 2] Zoom to Cell');
+      renderer.zoomToCell(burgCell.bounds, 3.0);
+      console.timeEnd('[Phase 2] Zoom to Cell');
+      updateStatus(`✅ Zoomed to cell ${burgCell.i} (burg: ${burgCell.labels[0]?.text || 'N/A'})`, 'success');
+    });
+
+    // Click handler for hit-testing
+    canvas.addEventListener('click', (event) => {
+      if (!renderer || !renderData) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+
+      console.time('[Phase 2] Hit Test');
+      const hitCellId = renderer.hitTest(x, y);
+      console.timeEnd('[Phase 2] Hit Test');
+
+      if (hitCellId !== null) {
+        const hitCell = renderData.cells.find(c => c.i === hitCellId);
+        updateStatus(`🔍 Clicked cell ${hitCellId} ${hitCell?.labels?.[0]?.text ? `(${hitCell.labels[0].text})` : ''}`, 'success');
+        highlightedCellId = hitCellId;
+        // Optionally re-render with highlight
+        renderer.renderMap(renderData);
+      } else {
+        updateStatus('🔍 No cell hit', '');
+        highlightedCellId = null;
+        renderer.renderMap(renderData);
+      }
+    });
+
+    // Mouse wheel zoom
+    canvas.addEventListener('wheel', (event) => {
+      if (!renderer) return;
+      event.preventDefault();
+
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+
+      const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1;
+      const newScale = Math.max(0.1, Math.min(10, renderer.viewport.scale * zoomFactor));
+
+      // Zoom toward mouse position
+      const worldX = (mouseX - renderer.viewport.offsetX) / renderer.viewport.scale;
+      const worldY = (mouseY - renderer.viewport.offsetY) / renderer.viewport.scale;
+
+      renderer.viewport.scale = newScale;
+      renderer.viewport.offsetX = mouseX - worldX * newScale;
+      renderer.viewport.offsetY = mouseY - worldY * newScale;
+
+      renderer.redraw();
+    });
+
+    // Mouse drag pan
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let dragStartOffsetX = 0;
+    let dragStartOffsetY = 0;
+
+    canvas.addEventListener('mousedown', (event) => {
+      if (!renderer) return;
+      isDragging = true;
+      dragStartX = event.clientX;
+      dragStartY = event.clientY;
+      dragStartOffsetX = renderer.viewport.offsetX;
+      dragStartOffsetY = renderer.viewport.offsetY;
+      canvas.style.cursor = 'grabbing';
+    });
+
+    canvas.addEventListener('mousemove', (event) => {
+      if (!renderer || !isDragging) return;
+      
+      const deltaX = event.clientX - dragStartX;
+      const deltaY = event.clientY - dragStartY;
+      
+      renderer.viewport.offsetX = dragStartOffsetX + deltaX;
+      renderer.viewport.offsetY = dragStartOffsetY + deltaY;
+      
+      renderer.redraw();
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        canvas.style.cursor = 'default';
+      }
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      if (isDragging) {
+        isDragging = false;
+        canvas.style.cursor = 'default';
       }
     });
 
