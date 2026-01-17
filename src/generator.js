@@ -1052,7 +1052,6 @@ function exportCanvas2DData(data, options) {
  * @returns {Object} Fill style { type: 'color'|'pattern'|'gradient', ... }
  */
 function getCellFill({ cellId, height, biomeId, stateId, isWater, layer, biomeColors, STYLE_CONSTANTS }) {
-  // For now, all fills are solid colors (patterns/gradients can be added later)
   if (isWater) {
     return {
       type: 'color',
@@ -1061,9 +1060,51 @@ function getCellFill({ cellId, height, biomeId, stateId, isWater, layer, biomeCo
   }
 
   if (layer === 'biomes' && biomeId !== undefined && biomeId >= 0 && biomeId < biomeColors.length) {
+    const baseColor = biomeColors[biomeId];
+    
+    // Add patterns for certain biomes (forests, deserts)
+    // Biome IDs: 1=hot desert, 2=cold desert, 5-9=forests, 12=wetland
+    if (biomeId === 1 || biomeId === 2) {
+      // Desert patterns (sand dunes / sparse vegetation)
+      return {
+        type: 'pattern',
+        pattern: {
+          type: 'desert',
+          baseColor: baseColor,
+          density: biomeId === 1 ? 0.3 : 0.2, // Hot desert sparser
+        },
+        color: baseColor, // Fallback color
+      };
+    } else if (biomeId >= 5 && biomeId <= 9) {
+      // Forest patterns (tree canopy texture)
+      // 5=tropical seasonal, 6=temperate deciduous, 7=tropical rainforest, 8=temperate rainforest, 9=taiga
+      const patternType = biomeId === 9 ? 'conifer' : (biomeId >= 7 ? 'rainforest' : 'deciduous');
+      return {
+        type: 'pattern',
+        pattern: {
+          type: patternType,
+          baseColor: baseColor,
+          density: biomeId === 7 ? 0.8 : (biomeId === 8 ? 0.7 : 0.6), // Rainforest denser
+        },
+        color: baseColor, // Fallback color
+      };
+    } else if (biomeId === 12) {
+      // Wetland pattern (swamp/marsh texture)
+      return {
+        type: 'pattern',
+        pattern: {
+          type: 'wetland',
+          baseColor: baseColor,
+          density: 0.4,
+        },
+        color: baseColor, // Fallback color
+      };
+    }
+    
+    // Default: solid color for other biomes (savanna, grassland, tundra, etc.)
     return {
       type: 'color',
-      color: biomeColors[biomeId],
+      color: baseColor,
     };
   }
 
@@ -1179,8 +1220,42 @@ function getStateColor(stateId) {
  * @param {Object} options - Export options
  * @returns {Object} WebGL rendering data
  */
+/**
+ * Export WebGL rendering data (meshes/triangles for GPU rendering)
+ * @param {Object} data - Map data { grid, pack, options }
+ * @param {Object} options - Export options { layers: ['terrain','biomes','states',...] }
+ * @returns {Object} WebGL rendering data (mesh format for Option 3)
+ */
 function exportWebGLData(data, options) {
-  console.warn('[exportWebGLData] WebGL export is stubbed - not yet implemented');
+  const { pack, grid, options: genOptions } = data;
+  const cells = pack.cells || {};
+  const vertices = pack.vertices || {};
+  const activeLayers = options.layers || ['terrain', 'biomes'];
+
+  // TODO: Triangulate cell polygons using earcut or similar library
+  // For now, return stub mesh data structure
+  
+  // Basic mesh structure for WebGL:
+  // - vertices: Float32Array of [x, y, r, g, b, a] per vertex (interleaved)
+  // - indices: Uint16Array of triangle indices
+  // - cells: Array of { cellId, triangleOffset, triangleCount, color }
+  
+  console.warn('[exportWebGLData] WebGL export is stubbed - mesh triangulation not yet implemented');
+  console.log('[exportWebGLData] Would triangulate', cells.v?.length || 0, 'cells for WebGL rendering');
+  
+  return {
+    mode: 'webgl',
+    vertices: new Float32Array(0), // Stub: empty vertex buffer
+    indices: new Uint16Array(0), // Stub: empty index buffer
+    cells: [], // Stub: cell metadata (cellId, color, triangle ranges)
+    uniforms: {
+      // Transformation matrices would go here (model, view, projection)
+      scale: 1.0,
+      offsetX: 0,
+      offsetY: 0,
+    },
+    message: 'WebGL export is stubbed - triangulation requires polygon-to-triangle conversion (e.g., earcut library)',
+  };
   
   // Stub: Return empty mesh data
   // Full implementation in Phase 3 (if needed)

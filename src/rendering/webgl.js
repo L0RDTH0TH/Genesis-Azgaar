@@ -36,17 +36,28 @@ export class PixiRenderer extends Renderer {
       throw new Error('WebGL not available - use getRenderer() factory to get fallback');
     }
 
-    // Stub: PixiJS Application would be initialized here
-    // const PIXI = require('pixi.js'); // Commented out until Phase 3
-    // this.app = new PIXI.Application({ view: canvas, ... });
-    
+    // WebGL is available, but PixiJS is not loaded (stub)
+    this.gl = gl;
     this.viewport = {
-      x: options.viewport?.x || 0,
-      y: options.viewport?.y || 0,
+      offsetX: options.viewport?.offsetX || 0,
+      offsetY: options.viewport?.offsetY || 0,
       scale: options.viewport?.scale || 1.0,
     };
     
-    console.warn('[PixiRenderer] WebGL renderer is stubbed - not yet implemented');
+    // Stub: PixiJS Application would be initialized here
+    // import * as PIXI from 'pixi.js'; // Commented out - no external deps without approval
+    // this.app = new PIXI.Application({ 
+    //   view: canvas, 
+    //   width: canvas.width,
+    //   height: canvas.height,
+    //   antialias: true,
+    //   backgroundColor: 0xf0f0f0,
+    // });
+    // this.container = new PIXI.Container();
+    // this.app.stage.addChild(this.container);
+    
+    console.log('[PixiRenderer] WebGL renderer stub active - PixiJS not loaded, using placeholder rendering');
+    console.log('[PixiRenderer] To enable full WebGL rendering, add PixiJS library and uncomment initialization code');
   }
 
   /**
@@ -56,6 +67,31 @@ export class PixiRenderer extends Renderer {
   renderGrid(gridData) {
     console.warn('[PixiRenderer.renderGrid] Stub - not yet implemented');
     // Stub: Would render using PixiJS Graphics API or raw WebGL buffers
+  }
+
+  /**
+   * Render Azgaar map data (all cells from exportRenderData output)
+   * @param {Object} renderData - Output from exportRenderData({ mode: 'webgl' })
+   */
+  renderMap(renderData) {
+    if (!renderData || !renderData.vertices || !renderData.indices) {
+      console.warn('[PixiRenderer.renderMap] Invalid renderData or mesh not yet triangulated');
+      return;
+    }
+
+    // Stub: Would render using PixiJS Graphics API or raw WebGL buffers
+    // For now, use basic Canvas 2D fallback rendering as placeholder
+    console.log('[PixiRenderer.renderMap] Stub: Would render', renderData.cells?.length || 0, 'cells with WebGL');
+    
+    // Placeholder: If PixiJS was loaded, would do:
+    // this.container.removeChildren();
+    // for (const cell of renderData.cells) {
+    //   const graphics = new PIXI.Graphics();
+    //   graphics.beginFill(cell.color);
+    //   // Draw triangles from vertices/indices
+    //   this.container.addChild(graphics);
+    // }
+    // this.app.render(this.container);
   }
 
   /**

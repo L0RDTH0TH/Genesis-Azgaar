@@ -47,6 +47,12 @@ export class Canvas2DRenderer extends Renderer {
     
     // Store render data for redraw
     this._renderDataCache = null;
+    
+    // Layer filtering (active layers to render)
+    this.activeLayers = options.layers || ['terrain', 'biomes', 'states'];
+    
+    // Viewport bounds (for clamping)
+    this.viewportBounds = null; // Set after first render based on cell bounds
   }
 
   /**
@@ -124,6 +130,30 @@ export class Canvas2DRenderer extends Renderer {
     // Store for redraw
     this._renderDataCache = renderData;
 
+    // Update active layers from renderData if provided
+    if (renderData.activeLayers && Array.isArray(renderData.activeLayers)) {
+      this.activeLayers = renderData.activeLayers;
+    }
+
+    // Calculate viewport bounds from cell bounds (for clamping)
+    if (!this.viewportBounds && renderData.cells.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const cell of renderData.cells) {
+        if (cell.bounds) {
+          minX = Math.min(minX, cell.bounds.x || 0);
+          minY = Math.min(minY, cell.bounds.y || 0);
+          maxX = Math.max(maxX, (cell.bounds.x || 0) + (cell.bounds.width || 0));
+          maxY = Math.max(maxY, (cell.bounds.y || 0) + (cell.bounds.height || 0));
+        }
+      }
+      if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+        this.viewportBounds = { minX, minY, maxX, maxY };
+      }
+    }
+
+    // Clamp viewport to bounds
+    this.clampViewport();
+
     // Clear canvas
     this.clear();
 
@@ -132,9 +162,14 @@ export class Canvas2DRenderer extends Renderer {
     this.ctx.translate(this.viewport.offsetX, this.viewport.offsetY);
     this.ctx.scale(this.viewport.scale, this.viewport.scale);
 
-    // Render all cells
+    // Render all cells (filtered by layer)
     for (const cell of renderData.cells) {
       if (!cell || !cell.path || cell.path.length < 3) continue;
+      
+      // Layer filtering: skip if cell layer is not in activeLayers
+      if (cell.layer && !this.activeLayers.includes(cell.layer)) {
+        continue;
+      }
 
       // Create or reuse Path2D
       const cacheKey = `cell-${cell.i}`;
@@ -243,8 +278,9 @@ export class Canvas2DRenderer extends Renderer {
    * Zoom viewport to focus on cell (redraw at new scale)
    * @param {Object} cellBounds - Cell bounds { x, y, width, height }
    * @param {number} zoomScale - Zoom scale factor (default: 2.0)
+   * @param {boolean} smooth - Whether to animate zoom (default: false)
    */
-  zoomToCell(cellBounds, zoomScale = 2.0) {
+  zoomToCell(cellBounds, zoomScale = 2.0, smooth = false) {
     if (!cellBounds || !isFinite(cellBounds.x) || !isFinite(cellBounds.y)) {
       console.warn('[Canvas2DRenderer.zoomToCell] Invalid cellBounds');
       return;
@@ -254,17 +290,85 @@ export class Canvas2DRenderer extends Renderer {
     const cellCenterX = cellBounds.x + (cellBounds.width || 0) / 2;
     const cellCenterY = cellBounds.y + (cellBounds.height || 0) / 2;
 
-    // Update viewport scale
-    this.viewport.scale = zoomScale;
-
-    // Calculate offset to center cell in viewport
+    // Target viewport state
+    const targetScale = Math.max(0.1, Math.min(10, zoomScale));
     const canvasCenterX = this.canvas.width / 2;
     const canvasCenterY = this.canvas.height / 2;
-    this.viewport.offsetX = canvasCenterX - cellCenterX * zoomScale;
-    this.viewport.offsetY = canvasCenterY - cellCenterY * zoomScale;
+    const targetOffsetX = canvasCenterX - cellCenterX * targetScale;
+    const targetOffsetY = canvasCenterY - cellCenterY * targetScale;
 
-    // Redraw with new viewport
-    this.redraw();
+    if (smooth && typeof requestAnimationFrame !== 'undefined') {
+      // Smooth zoom animation
+      const startScale = this.viewport.scale;
+      const startOffsetX = this.viewport.offsetX;
+      const startOffsetY = this.viewport.offsetY;
+      const duration = 300; // ms
+      const startTime = performance.now();
+      
+      const animate = (currentTime) => {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        // Easing function (ease-out)
+        const eased = 1 - Math.pow(1 - progress, 3);
+        
+        this.viewport.scale = startScale + (targetScale - startScale) * eased;
+        this.viewport.offsetX = startOffsetX + (targetOffsetX - startOffsetX) * eased;
+        this.viewport.offsetY = startOffsetY + (targetOffsetY - startOffsetY) * eased;
+        
+        // Clamp during animation
+        this.clampViewport();
+        this.redraw();
+        
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+      
+      requestAnimationFrame(animate);
+    } else {
+      // Instant zoom
+      this.viewport.scale = targetScale;
+      this.viewport.offsetX = targetOffsetX;
+      this.viewport.offsetY = targetOffsetY;
+      this.clampViewport();
+      this.redraw();
+    }
+  }
+
+  /**
+   * Clamp viewport to map bounds (prevent panning outside)
+   */
+  clampViewport() {
+    if (!this.viewportBounds) return;
+
+    const { minX, minY, maxX, maxY } = this.viewportBounds;
+    const canvasWidth = this.canvas.width;
+    const canvasHeight = this.canvas.height;
+    const scale = this.viewport.scale;
+
+    // Calculate visible world bounds at current scale
+    const worldWidth = canvasWidth / scale;
+    const worldHeight = canvasHeight / scale;
+
+    // Clamp offset to keep map within view
+    const maxOffsetX = maxX * scale - canvasWidth;
+    const minOffsetX = minX * scale;
+    const maxOffsetY = maxY * scale - canvasHeight;
+    const minOffsetY = minY * scale;
+
+    this.viewport.offsetX = Math.max(minOffsetX, Math.min(maxOffsetX, this.viewport.offsetX));
+    this.viewport.offsetY = Math.max(minOffsetY, Math.min(maxOffsetY, this.viewport.offsetY));
+  }
+
+  /**
+   * Set active layers for filtering
+   * @param {Array<string>} layers - Layer names to render (e.g. ['terrain', 'biomes'])
+   */
+  setActiveLayers(layers) {
+    if (Array.isArray(layers)) {
+      this.activeLayers = layers;
+      this.redraw();
+    }
   }
 
   /**
@@ -364,26 +468,25 @@ export class Canvas2DRenderer extends Renderer {
 
   /**
    * Get or create CanvasPattern (cached)
-   * @param {Object} patternDef - Pattern definition { type, ... }
-   * @returns {CanvasPattern} Pattern object
+   * @param {Object} patternDef - Pattern definition { type, baseColor, density, ... }
+   * @returns {CanvasPattern|string} Pattern object or fallback color string
    */
   getOrCreatePattern(patternDef) {
-    const cacheKey = patternDef.type || 'default';
+    if (!patternDef || !patternDef.type) {
+      return patternDef?.baseColor || patternDef?.color || '#cccccc';
+    }
+    
+    // Cache key includes type and baseColor for pattern variations
+    const cacheKey = `${patternDef.type}-${patternDef.baseColor || 'default'}-${patternDef.density || 0.5}`;
     if (this.patternCache.has(cacheKey)) {
       return this.patternCache.get(cacheKey);
     }
     
-    // Stub: Generate simple pattern (full implementation can be added later)
-    if (typeof console !== 'undefined' && console.warn) {
-      console.warn(`[Canvas2DRenderer] Pattern "${cacheKey}" is stubbed - using default pattern`);
+    // Create pattern canvas based on type
+    const patternCanvas = this.createPatternCanvas(patternDef);
+    if (!patternCanvas) {
+      return patternDef.baseColor || patternDef.color || '#cccccc';
     }
-    
-    const patternCanvas = document.createElement('canvas');
-    patternCanvas.width = 20;
-    patternCanvas.height = 20;
-    const patternCtx = patternCanvas.getContext('2d');
-    patternCtx.fillStyle = '#cccccc';
-    patternCtx.fillRect(0, 0, 20, 20);
     
     const pattern = this.ctx.createPattern(patternCanvas, 'repeat');
     if (pattern) {
@@ -392,7 +495,159 @@ export class Canvas2DRenderer extends Renderer {
     }
     
     // Fallback to solid color if pattern creation fails
-    return '#cccccc';
+    return patternDef.baseColor || patternDef.color || '#cccccc';
+  }
+
+  /**
+   * Create a pattern canvas for rendering
+   * @param {Object} patternDef - Pattern definition { type, baseColor, density, ... }
+   * @returns {HTMLCanvasElement|null} Pattern canvas or null if failed
+   */
+  createPatternCanvas(patternDef) {
+    const { type, baseColor = '#cccccc', density = 0.5 } = patternDef;
+    const size = 24; // Pattern tile size
+    
+    const patternCanvas = document.createElement('canvas');
+    patternCanvas.width = size;
+    patternCanvas.height = size;
+    const ctx = patternCanvas.getContext('2d');
+    
+    if (!ctx) return null;
+    
+    // Fill base color
+    ctx.fillStyle = baseColor;
+    ctx.fillRect(0, 0, size, size);
+    
+    try {
+      switch (type) {
+        case 'desert':
+          // Desert pattern: sparse dots/vegetation
+          ctx.fillStyle = this.darkenColor(baseColor, 0.15);
+          const dotCount = Math.floor(4 * density);
+          for (let i = 0; i < dotCount; i++) {
+            const x = (Math.random() * size) | 0;
+            const y = (Math.random() * size) | 0;
+            ctx.beginPath();
+            ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // Add wavy lines (dunes)
+          ctx.strokeStyle = this.darkenColor(baseColor, 0.1);
+          ctx.lineWidth = 0.5;
+          for (let y = 0; y < size; y += 4) {
+            ctx.beginPath();
+            ctx.moveTo(0, y + Math.sin((y / size) * Math.PI * 2) * 1);
+            ctx.lineTo(size, y + Math.sin((y / size) * Math.PI * 2) * 1);
+            ctx.stroke();
+          }
+          break;
+          
+        case 'deciduous':
+          // Deciduous forest: tree canopy circles
+          ctx.fillStyle = this.darkenColor(baseColor, 0.2);
+          const treeCount = Math.floor(6 * density);
+          for (let i = 0; i < treeCount; i++) {
+            const x = (Math.random() * size) | 0;
+            const y = (Math.random() * size) | 0;
+            const radius = 2 + Math.random() * 2;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+          
+        case 'rainforest':
+          // Rainforest: dense overlapping circles
+          ctx.fillStyle = this.darkenColor(baseColor, 0.25);
+          const forestCount = Math.floor(10 * density);
+          for (let i = 0; i < forestCount; i++) {
+            const x = (Math.random() * size) | 0;
+            const y = (Math.random() * size) | 0;
+            const radius = 2 + Math.random() * 3;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+          
+        case 'conifer':
+          // Conifer (taiga): triangular tree shapes
+          ctx.fillStyle = this.darkenColor(baseColor, 0.2);
+          const coniferCount = Math.floor(8 * density);
+          for (let i = 0; i < coniferCount; i++) {
+            const x = (Math.random() * size) | 0;
+            const y = (Math.random() * size) | 0;
+            const height = 3 + Math.random() * 2;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x - 1.5, y + height);
+            ctx.lineTo(x + 1.5, y + height);
+            ctx.closePath();
+            ctx.fill();
+          }
+          break;
+          
+        case 'wetland':
+          // Wetland: wavy water lines + sparse dots
+          ctx.strokeStyle = this.darkenColor(baseColor, 0.2);
+          ctx.lineWidth = 0.8;
+          for (let y = 0; y < size; y += 3) {
+            ctx.beginPath();
+            ctx.moveTo(0, y + Math.sin((y / size) * Math.PI * 4) * 1.5);
+            for (let x = 0; x <= size; x += 2) {
+              ctx.lineTo(x, y + Math.sin((x / size) * Math.PI * 4) * 1.5);
+            }
+            ctx.stroke();
+          }
+          ctx.fillStyle = this.darkenColor(baseColor, 0.15);
+          const vegCount = Math.floor(3 * density);
+          for (let i = 0; i < vegCount; i++) {
+            const x = (Math.random() * size) | 0;
+            const y = (Math.random() * size) | 0;
+            ctx.beginPath();
+            ctx.arc(x, y, 1, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+          
+        default:
+          // Unknown pattern type - return base color filled canvas
+          break;
+      }
+    } catch (error) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(`[Canvas2DRenderer] Pattern "${type}" generation failed:`, error);
+      }
+      // Return base color filled canvas on error
+    }
+    
+    return patternCanvas;
+  }
+
+  /**
+   * Darken a color by a factor
+   * @param {string} color - Hex color string
+   * @param {number} factor - Darkening factor (0-1)
+   * @returns {string} Darkened hex color
+   */
+  darkenColor(color, factor) {
+    if (!color || typeof color !== 'string' || !color.startsWith('#')) {
+      return color;
+    }
+    
+    // Parse hex
+    const hex = color.slice(1);
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    
+    // Darken
+    const newR = Math.max(0, Math.floor(r * (1 - factor)));
+    const newG = Math.max(0, Math.floor(g * (1 - factor)));
+    const newB = Math.max(0, Math.floor(b * (1 - factor)));
+    
+    // Convert back to hex
+    return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
   }
 
   /**

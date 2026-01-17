@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Canvas-Only Migration Test (Phase 2)</title>
+  <title>Canvas-Only Migration Test (Phase 3)</title>
   <style>
     body {
       margin: 0;
@@ -75,7 +75,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>🎨 Canvas-Only Migration Test (Phase 2)</h1>
+    <h1>🎨 Canvas-Only Migration Test (Phase 3)</h1>
     <div class="controls">
       <button id="generateBtn">Generate Map</button>
       <button id="exportBtn">Export Render Data</button>
@@ -89,6 +89,18 @@
         </select>
       </label>
       <div style="margin-top: 10px; color: #aaa; font-size: 12px;">
+        <span><strong>Layers:</strong></span>
+        <label style="margin-left: 10px;">
+          <input type="checkbox" id="layerTerrain" checked> Terrain
+        </label>
+        <label style="margin-left: 10px;">
+          <input type="checkbox" id="layerBiomes" checked> Biomes
+        </label>
+        <label style="margin-left: 10px;">
+          <input type="checkbox" id="layerStates"> States
+        </label>
+      </div>
+      <div style="margin-top: 10px; color: #aaa; font-size: 12px;">
         <span>Controls: </span>
         <span>Click to highlight cell</span>
         <span style="margin-left: 15px;">Mouse wheel to zoom</span>
@@ -97,6 +109,9 @@
     </div>
     <canvas id="map-preview" width="960" height="540"></canvas>
     <div id="status" class="status">Ready - Click "Generate Map" to start</div>
+    <div id="performance" style="margin-top: 10px; padding: 5px 10px; background: #2a2a2a; border-radius: 5px; font-size: 12px; color: #aaa; display: none;">
+      <strong>Performance:</strong> <span id="perfMetrics"></span>
+    </div>
     <div id="exportOutput" style="display: none; margin-top: 15px;">
       <h3>Export Data Preview:</h3>
       <pre id="exportData"></pre>
@@ -138,13 +153,35 @@
     const renderBtn = document.getElementById('renderBtn');
     const zoomToBurgBtn = document.getElementById('zoomToBurgBtn');
     const modeSelect = document.getElementById('modeSelect');
+    const layerTerrain = document.getElementById('layerTerrain');
+    const layerBiomes = document.getElementById('layerBiomes');
+    const layerStates = document.getElementById('layerStates');
     const exportOutput = document.getElementById('exportOutput');
     const exportDataEl = document.getElementById('exportData');
+    const performanceDiv = document.getElementById('performance');
+    const perfMetricsEl = document.getElementById('perfMetrics');
 
     let mapData = null;
     let renderData = null;
     let renderer = null;
     let highlightedCellId = null;
+    let activeLayers = ['terrain', 'biomes']; // Default active layers
+
+    function getActiveLayers() {
+      const layers = [];
+      if (layerTerrain.checked) layers.push('terrain');
+      if (layerBiomes.checked) layers.push('biomes');
+      if (layerStates.checked) layers.push('states');
+      return layers.length > 0 ? layers : ['terrain']; // Fallback to terrain if all unchecked
+    }
+
+    function updatePerformanceMetrics(label, timeMs) {
+      if (!performanceDiv || !perfMetricsEl) return;
+      performanceDiv.style.display = 'block';
+      const existing = perfMetricsEl.textContent;
+      const newMetric = `${label}: ${timeMs.toFixed(2)}ms`;
+      perfMetricsEl.textContent = existing ? `${existing} | ${newMetric}` : newMetric;
+    }
 
     function updateStatus(message, type = '') {
       statusEl.textContent = message;
@@ -155,7 +192,7 @@
       try {
         updateStatus('Generating map...', '');
         generateBtn.disabled = true;
-        console.time('[Phase 2] Map Generation');
+        const genStart = performance.now();
 
         // Initialize generator
         initGenerator({ canvas: null });
@@ -174,8 +211,9 @@
         // Generate map
         mapData = generateMap(Delaunator);
         
-        console.timeEnd('[Phase 2] Map Generation');
+        const genTime = console.timeEnd('[Phase 2] Map Generation');
         updateStatus('✅ Map generated', 'success');
+        updatePerformanceMetrics('Generation', performance.now() - genTime);
         exportBtn.disabled = false;
         renderBtn.disabled = false;
       } catch (error) {
@@ -194,14 +232,17 @@
         }
 
         updateStatus('Exporting render data...', '');
-        console.time('[Phase 2] Export Render Data');
+        console.time('[Phase 3] Export Render Data');
         
         const mode = modeSelect.value;
+        activeLayers = getActiveLayers();
         
-        // Export render data using real library
-        renderData = exportRenderData({ mode, layers: ['terrain', 'biomes', 'states'] });
-        
-        console.timeEnd('[Phase 2] Export Render Data');
+        // Export render data using real library (with current layer selection)
+        const exportStart = performance.now();
+        renderData = exportRenderData({ mode, layers: activeLayers });
+        const exportTime = performance.now() - exportStart;
+        console.timeEnd('[Phase 3] Export Render Data');
+        updatePerformanceMetrics('Export', exportTime);
         
         // Show preview (truncated for large maps)
         const preview = {
@@ -230,14 +271,20 @@
         }
 
         updateStatus('Rendering to canvas...', '');
-        console.time('[Phase 2] Canvas Rendering');
         
         const mode = modeSelect.value;
+        activeLayers = getActiveLayers();
+        
+        // Update renderData with active layers
+        if (renderData && mode === 'canvas2d') {
+          renderData.activeLayers = activeLayers;
+        }
         
         // Get renderer using real library
         renderer = getRenderer(canvas, { 
           mode, 
           fallbackTo2D: true,
+          layers: activeLayers,
           viewport: {
             offsetX: 0,
             offsetY: 0,
@@ -245,18 +292,29 @@
           }
         });
 
-        // Render using Canvas2DRenderer.renderMap()
+        // Render using Canvas2DRenderer.renderMap() or PixiRenderer.renderMap()
+        const renderStart = performance.now();
         if (mode === 'canvas2d' && renderer && typeof renderer.renderMap === 'function') {
+          if (typeof renderer.setActiveLayers === 'function') {
+            renderer.setActiveLayers(activeLayers);
+          }
           renderer.renderMap(renderData);
-        } else {
-          updateStatus('⚠️ WebGL rendering is stubbed - falling back to Canvas 2D', 'error');
+        } else if (mode === 'webgl') {
           if (renderer && typeof renderer.renderMap === 'function') {
+            console.log('[Test] WebGL stub: Using PixiRenderer (placeholder)');
             renderer.renderMap(renderData);
+          } else {
+            updateStatus('⚠️ WebGL rendering is stubbed - falling back to Canvas 2D', 'error');
+            if (renderer && typeof renderer.renderMap === 'function') {
+              renderer.renderMap(renderData);
+            }
           }
         }
         
-        console.timeEnd('[Phase 2] Canvas Rendering');
-        updateStatus(`✅ Rendered ${renderData.cells?.length || 0} cells to canvas`, 'success');
+        const renderTime = performance.now() - renderStart;
+        console.log(`[Phase 3] Canvas Rendering: ${renderTime.toFixed(2)}ms`);
+        updatePerformanceMetrics('Rendering', renderTime);
+        updateStatus(`✅ Rendered ${renderData.cells?.length || 0} cells (layers: ${activeLayers.join(', ')})`, 'success');
       } catch (error) {
         updateStatus(`❌ Render error: ${error.message}`, 'error');
         console.error('Render error:', error);
@@ -280,10 +338,35 @@
         return;
       }
 
-      console.time('[Phase 2] Zoom to Cell');
-      renderer.zoomToCell(burgCell.bounds, 3.0);
-      console.timeEnd('[Phase 2] Zoom to Cell');
+      const zoomStart = performance.now();
+      renderer.zoomToCell(burgCell.bounds, 3.0, true); // Smooth zoom
+      const zoomTime = performance.now() - zoomStart;
+      updatePerformanceMetrics('Zoom', zoomTime);
       updateStatus(`✅ Zoomed to cell ${burgCell.i} (burg: ${burgCell.labels[0]?.text || 'N/A'})`, 'success');
+    });
+
+    // Layer toggle handlers
+    [layerTerrain, layerBiomes, layerStates].forEach(checkbox => {
+      checkbox.addEventListener('change', () => {
+        if (!renderer || !renderData) return;
+        
+        activeLayers = getActiveLayers();
+        renderData.activeLayers = activeLayers;
+        
+        // Update renderer layers if supported
+        if (typeof renderer.setActiveLayers === 'function') {
+          renderer.setActiveLayers(activeLayers);
+        }
+        
+        // Re-render with new layers
+        const renderStart = performance.now();
+        if (typeof renderer.renderMap === 'function') {
+          renderer.renderMap(renderData);
+        }
+        const renderTime = performance.now() - renderStart;
+        updatePerformanceMetrics('Layer Toggle', renderTime);
+        updateStatus(`Layers updated: ${activeLayers.join(', ')}`, 'success');
+      });
     });
 
     // Click handler for hit-testing
@@ -294,9 +377,12 @@
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
 
-      console.time('[Phase 2] Hit Test');
-      const hitCellId = renderer.hitTest(x, y);
-      console.timeEnd('[Phase 2] Hit Test');
+        const hitStart = performance.now();
+        const hitCellId = renderer.hitTest(x, y);
+        const hitTime = performance.now() - hitStart;
+        if (hitCellId !== null) {
+          updatePerformanceMetrics('Hit Test', hitTime);
+        }
 
       if (hitCellId !== null) {
         const hitCell = renderData.cells.find(c => c.i === hitCellId);
