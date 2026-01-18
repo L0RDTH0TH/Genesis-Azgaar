@@ -22,3 +22,4 @@ export * from './emblems.js';
 export * from './regraph.js';
 export * from './dualGridStates.js';
 export * from './gridAdapters.js';
+export * from './localVoronoi.js';

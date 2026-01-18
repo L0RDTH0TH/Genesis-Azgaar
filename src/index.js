@@ -11,6 +11,7 @@ export {
   initGenerator,
   loadOptions,
   generateMap,
+  generateLocal,    // Phase 4: Local Voronoi generation within dual grid cells
   getMapData,
   renderPreviewSVG, // Legacy API (for backward compatibility)
   renderToCanvas,   // Phase 1: Canvas rendering

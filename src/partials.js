@@ -132,12 +132,29 @@ export function resolvePhaseDependencies(phasesToRun, skipPhases = []) {
 /**
  * Get phase-specific seed from main seed
  * Ensures RNG consistency across partial runs
+ * Phase 4: Supports cellId for per-cell reproducible seeds
  * @param {string|number} mainSeed - Main generation seed
  * @param {string} phase - Phase name
+ * @param {number|null} cellId - Optional cell ID for local generation
  * @returns {string} Phase-specific seed
  */
-export function getPhaseSeed(mainSeed, phase) {
-  return `${mainSeed}_${phase}`;
+export function getPhaseSeed(mainSeed, phase, cellId = null) {
+  let seed = `${mainSeed}_${phase}`;
+  
+  // Phase 4: Include cellId in seed hash for per-cell reproducibility
+  if (cellId !== null && cellId !== undefined) {
+    // Simple hash: combine seed string with cellId
+    let hash = 0;
+    const seedStr = String(seed) + String(cellId);
+    for (let i = 0; i < seedStr.length; i++) {
+      const char = seedStr.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    seed = String(Math.abs(hash));
+  }
+  
+  return seed;
 }
 
 /**
@@ -353,33 +370,71 @@ export function getFallbackForPhase(phase, stateData) {
 }
 
 /**
- * Cache phase data in state.cached
+ * Cache phase data in state.cached or state.subCaches[cellId]
+ * Phase 4: Supports per-cell caching via cellId parameter
  * @param {Object} state - Generator state object
  * @param {string} phase - Phase name
  * @param {Object} phaseData - Data to cache
+ * @param {number|null} cellId - Optional cell ID for per-cell cache
  */
-export function cachePhase(state, phase, phaseData) {
-  if (!state.cached) {
-    state.cached = {};
+export function cachePhase(state, phase, phaseData, cellId = null) {
+  // Determine target cache (global or per-cell)
+  let targetCache;
+  if (cellId !== null && cellId !== undefined) {
+    // Per-cell cache
+    if (!state.subCaches) {
+      state.subCaches = {};
+    }
+    if (!state.subCaches[cellId]) {
+      state.subCaches[cellId] = {};
+    }
+    targetCache = state.subCaches[cellId];
+  } else {
+    // Global cache
+    if (!state.cached) {
+      state.cached = {};
+    }
+    targetCache = state.cached;
   }
-  state.cached[phase] = efficientDeepCopyOfRelevantData(phaseData);
+  
+  targetCache[phase] = efficientDeepCopyOfRelevantData(phaseData);
 }
 
 /**
- * Restore phase data from cache
+ * Restore phase data from cache (global or per-cell)
+ * Phase 4: Supports per-cell cache lookup via cellId parameter
  * @param {Object} state - Generator state object
  * @param {string} phase - Phase name
+ * @param {number|null} cellId - Optional cell ID for per-cell cache
  * @returns {Object|null} Cached phase data, or null if not cached
  */
-export function restoreFromCache(state, phase) {
-  if (!state.cached || !state.cached[phase]) {
+export function restoreFromCache(state, phase, cellId = null) {
+  // Determine target cache (global or per-cell)
+  let targetCache;
+  if (cellId !== null && cellId !== undefined) {
+    // Per-cell cache
+    if (!state.subCaches || !state.subCaches[cellId]) {
+      return null;
+    }
+    targetCache = state.subCaches[cellId];
+  } else {
+    // Global cache
+    if (!state.cached) {
+      return null;
+    }
+    targetCache = state.cached;
+  }
+  
+  if (!targetCache[phase]) {
     return null;
   }
-  return efficientDeepCopyOfRelevantData(state.cached[phase]);
+  
+  return efficientDeepCopyOfRelevantData(targetCache[phase]);
 }
 
 /**
  * Execute a phase with wrapper handling skips, caching, fallbacks, dependencies, and RNG
+ * Phase 4: Supports per-cell execution via cellId parameter
  * @param {Object} params - Execution parameters
  * @param {string} params.phase - Phase name
  * @param {Function} params.phaseFunction - Function to execute for this phase
@@ -387,6 +442,7 @@ export function restoreFromCache(state, phase) {
  * @param {Object} params.stateData - Current state data {grid, pack, options, seed}
  * @param {Array<string>} params.skipPhases - Phases to skip
  * @param {Function} params.DelaunatorClass - Delaunator class (if needed)
+ * @param {number|null} params.cellId - Optional cell ID for per-cell execution (Phase 4)
  * @returns {Object} Updated state data
  */
 export function executePhaseWithWrapper({
@@ -396,36 +452,40 @@ export function executePhaseWithWrapper({
   stateData,
   skipPhases = [],
   DelaunatorClass = null,
+  cellId = null,
 }) {
   // Check if phase should be skipped
   if (skipPhases.includes(phase)) {
-    console.log(`[partials] Skipping phase: ${phase}`);
+    const cellLabel = cellId !== null ? ` (cell ${cellId})` : '';
+    console.log(`[partials] Skipping phase: ${phase}${cellLabel}`);
     
-    // Try to restore from cache
-    const cached = restoreFromCache(state, phase);
+    // Try to restore from cache (global or per-cell)
+    const cached = restoreFromCache(state, phase, cellId);
     if (cached) {
-      console.log(`[partials] Restored ${phase} from cache`);
+      console.log(`[partials] Restored ${phase} from cache${cellLabel}`);
       // Merge cached data into stateData
       return mergePhaseData(stateData, cached, phase);
     }
     
     // Use fallback
-    console.log(`[partials] Using fallback for ${phase}`);
+    console.log(`[partials] Using fallback for ${phase}${cellLabel}`);
     const fallback = getFallbackForPhase(phase, stateData);
     return mergePhaseData(stateData, fallback, phase);
   }
   
-  // Check cache first
-  const cached = restoreFromCache(state, phase);
+  // Check cache first (global or per-cell)
+  const cached = restoreFromCache(state, phase, cellId);
   if (cached) {
-    console.log(`[partials] Using cached ${phase}`);
+    const cellLabel = cellId !== null ? ` (cell ${cellId})` : '';
+    console.log(`[partials] Using cached ${phase}${cellLabel}`);
     return mergePhaseData(stateData, cached, phase);
   }
   
   // Execute phase function
-  console.log(`[partials] Executing phase: ${phase}`);
+  const cellLabel = cellId !== null ? ` (cell ${cellId})` : '';
+  console.log(`[partials] Executing phase: ${phase}${cellLabel}`);
   const seed = stateData.seed || String(Date.now());
-  const phaseSeed = getPhaseSeed(seed, phase);
+  const phaseSeed = getPhaseSeed(seed, phase, cellId); // Phase 4: Include cellId
   const phaseRng = new RNG(phaseSeed);
   
   // Call phase function with appropriate parameters
@@ -433,11 +493,12 @@ export function executePhaseWithWrapper({
     stateData,
     rng: phaseRng,
     DelaunatorClass,
+    cellId, // Pass cellId to phase function if needed
   });
   
-  // Cache result
+  // Cache result (global or per-cell)
   const phaseData = getPhaseData(result, phase);
-  cachePhase(state, phase, phaseData);
+  cachePhase(state, phase, phaseData, cellId); // Phase 4: Pass cellId
   
   return result;
 }

@@ -42,6 +42,7 @@ import {
   assignVariantsToQuads,
   mapDualGridStatesToPack,
   adaptDualGridToVoronoiInput,
+  generateLocalVoronoi,
 } from './core/index.js';
 import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
@@ -62,6 +63,7 @@ let state = {
   options: getDefaultOptions(),
   data: null, // { grid, pack, seed }
   cached: {}, // Phase cache for partial generation
+  subCaches: {}, // Phase 4: Per-cell caches for local generations { [cellId]: { [phase]: data } }
   initialized: false,
 };
 
@@ -951,6 +953,75 @@ export function renderPreview(options = {}) {
   } else {
     // SVG rendering
     return renderToSVG(options);
+  }
+}
+
+/**
+ * Generate local Voronoi subdivision within a selected dual grid cell (Phase 4)
+ * Creates a constrained Voronoi diagram inside the quad shape and optionally runs phases
+ * @param {number} cellId - Cell/quad ID from dualGrid.level0Quads
+ * @param {Array<string>} phasesToRun - Phases to run on local sub-grid (default: ['voronoi'])
+ * @param {Object} optionsOverride - Optional options override for local generation
+ * @param {Function} DelaunatorClass - Delaunator class (required)
+ * @returns {Object} {localGrid, localPack, localData} Local generation result
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet or dualGrid missing
+ * @throws {GenerationError} If local generation fails
+ */
+export function generateLocal(cellId, phasesToRun = ['voronoi'], optionsOverride = {}, DelaunatorClass = null) {
+  requireInitialized();
+
+  if (!state.data) {
+    throw new NoDataError();
+  }
+
+  if (!state.data.dualGrid) {
+    throw new GenerationError('Dual grid is required for local generation. Generate map with gridMode: "dualPrecursor" first.');
+  }
+
+  if (DelaunatorClass === null && phasesToRun.includes(PHASES.VORONOI)) {
+    throw new GenerationError('Delaunator is required for local Voronoi generation');
+  }
+
+  try {
+    // Merge options
+    const localOptions = {
+      ...state.options,
+      ...optionsOverride,
+      seed: optionsOverride.seed || state.data.seed,
+    };
+
+    // Generate local Voronoi base (always runs Voronoi phase for local grid)
+    const { localGrid, localPack, localData } = generateLocalVoronoi(
+      cellId,
+      ['voronoi'], // Always generate Voronoi base for local grid
+      localOptions,
+      state.data,
+      DelaunatorClass
+    );
+
+    // Log local generation
+    const localCellCount = localPack.cells.i.length;
+    if (typeof console !== 'undefined' && console.log) {
+      console.log(`Generated local Voronoi for cell ${cellId}: ${localCellCount} sub-cells`);
+    }
+
+    // For Phase 4, we return the local grid/pack
+    // Future: Run additional phases on local sub-grid if requested
+    // Note: Running phases like heightmap/biomes on local sub-grid requires
+    // adapting those phases to work with local bounds and data
+    
+    return {
+      localGrid,
+      localPack,
+      localData,
+      cellId,
+    };
+  } catch (error) {
+    if (error instanceof GenerationError || error instanceof NoDataError) {
+      throw error;
+    }
+    throw new GenerationError(`Local generation failed for cell ${cellId}: ${error.message}`);
   }
 }
 

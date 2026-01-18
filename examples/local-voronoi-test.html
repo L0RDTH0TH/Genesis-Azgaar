@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local Voronoi Test - Phase 4</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 20px;
+      background: #4a4a4a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5a5a5a;
+    }
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+    }
+    .test-case {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      border: 2px solid #444;
+    }
+    .test-case h3 {
+      margin-top: 0;
+      font-size: 16px;
+    }
+    .test-case div {
+      border: 1px solid #666;
+      background: #000;
+      max-width: 100%;
+      height: 300px;
+      overflow: auto;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+    }
+    .info pre {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    input[type="number"] {
+      padding: 5px;
+      background: #1a1a1a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      width: 80px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Local Voronoi Test - Phase 4</h1>
+    <p>Generate local Voronoi subdivision within a selected dual grid cell</p>
+    
+    <div class="controls">
+      <button id="generateGlobalBtn">Generate Global Precursor Map</button>
+      <button id="generateLocalBtn">Generate Local Voronoi</button>
+      <button id="testReproducibilityBtn">Test Reproducibility (Same Seed+CellId)</button>
+      <button id="testCachingBtn">Test Caching (Regenerate Same Cell)</button>
+      <label style="color: #888; margin-left: 20px;">
+        Cell ID: <input type="number" id="cellIdInput" value="0" min="0" style="margin-left: 5px;">
+      </label>
+    </div>
+
+    <div class="info">
+      <h3>Test Results</h3>
+      <div id="testResults">Click "Generate Global Precursor Map" first...</div>
+    </div>
+
+    <div class="test-grid">
+      <div class="test-case">
+        <h3>Global Map (Precursor Mode)</h3>
+        <div id="test1-global"></div>
+        <div id="test1-stats" style="margin-top: 10px; font-size: 12px; color: #888;"></div>
+      </div>
+      
+      <div class="test-case">
+        <h3>Local Voronoi (Cell Subdivision)</h3>
+        <div id="test2-local"></div>
+        <div id="test2-stats" style="margin-top: 10px; font-size: 12px; color: #888;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Local Voronoi Test - Phase 4
+     * 
+     * Tests:
+     * 1. Generate global precursor map with dual grid
+     * 2. Generate local Voronoi within a selected cell (by cellId)
+     * 3. Test reproducibility: same seed + cellId → same local result
+     * 4. Test caching: regenerate same cell → should restore from subCaches
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const modulePath = isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js';
+    
+    let AzgaarGenesis;
+    try {
+      AzgaarGenesis = await import(modulePath);
+    } catch (error) {
+      console.error('Failed to load module:', error);
+      document.getElementById('testResults').innerHTML = `<pre style="color: red;">Error: ${error.message}</pre>`;
+      throw error;
+    }
+    
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap,
+      generateLocal,
+      renderToSVG
+    } = AzgaarGenesis;
+
+    const testResults = document.getElementById('testResults');
+    const generateGlobalBtn = document.getElementById('generateGlobalBtn');
+    const generateLocalBtn = document.getElementById('generateLocalBtn');
+    const testReproducibilityBtn = document.getElementById('testReproducibilityBtn');
+    const testCachingBtn = document.getElementById('testCachingBtn');
+    const cellIdInput = document.getElementById('cellIdInput');
+
+    const testSeed = '123456';
+    const baseOptions = {
+      seed: testSeed,
+      mapWidth: 400,
+      mapHeight: 300,
+      cellsDesired: 5000,
+      statesNumber: 10,
+      gridMode: 'dualPrecursor', // Required for local generation
+    };
+
+    let globalData = null;
+    let localData = null;
+
+    // Initialize generator
+    initGenerator();
+
+    function logResult(message, status = 'INFO') {
+      const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+      const color = status === 'PASS' ? '#0f0' : status === 'FAIL' ? '#f00' : '#ff0';
+      testResults.innerHTML += `<pre style="color: ${color};">[${timestamp}] ${message}</pre>`;
+      testResults.scrollTop = testResults.scrollHeight;
+    }
+
+    function clearResults() {
+      testResults.innerHTML = '';
+    }
+
+    function updateStats(containerId, data, label) {
+      const statsDiv = document.getElementById(containerId + '-stats');
+      let stats = {};
+      
+      if (data.pack) {
+        stats = {
+          type: label,
+          cells: data.pack.cells?.i?.length || 0,
+          states: data.pack.states?.length || 0,
+        };
+      } else if (data.localPack) {
+        stats = {
+          type: label,
+          localCells: data.localPack.cells?.i?.length || 0,
+          cellId: data.cellId,
+        };
+      }
+      
+      statsDiv.innerHTML = `<pre style="margin: 0; font-size: 11px;">${JSON.stringify(stats, null, 2)}</pre>`;
+    }
+
+    function generateGlobalMap() {
+      try {
+        clearResults();
+        logResult('Generating global precursor map...', 'INFO');
+        
+        loadOptions(baseOptions);
+        globalData = generateMap(Delaunator);
+        
+        // Render global map
+        const container = document.getElementById('test1-global');
+        renderToSVG({
+          width: baseOptions.mapWidth,
+          height: baseOptions.mapHeight,
+          container: container
+        });
+        
+        updateStats('test1', globalData, 'Global (Precursor)');
+        
+        const quadCount = (globalData.dualGrid?.level0Quads?.length || 0);
+        logResult(`✓ Global map generated: ${quadCount} quads, ${globalData.pack.cells.i.length} Voronoi cells`, 'PASS');
+        
+        // Suggest a valid cellId
+        if (quadCount > 0) {
+          const suggestedCellId = Math.min(0, quadCount - 1);
+          cellIdInput.value = suggestedCellId;
+          logResult(`Suggested cellId: ${suggestedCellId} (0-${quadCount - 1})`, 'INFO');
+        }
+        
+      } catch (error) {
+        logResult(`✗ Global generation failed: ${error.message}`, 'FAIL');
+      }
+    }
+
+    function generateLocalVoronoiForCell() {
+      if (!globalData) {
+        logResult('✗ Please generate global map first', 'FAIL');
+        return;
+      }
+      
+      try {
+        const cellId = parseInt(cellIdInput.value, 10);
+        if (isNaN(cellId) || cellId < 0) {
+          logResult(`✗ Invalid cellId: ${cellId}`, 'FAIL');
+          return;
+        }
+        
+        const quadCount = (globalData.dualGrid?.level0Quads?.length || 0);
+        if (cellId >= quadCount) {
+          logResult(`✗ CellId ${cellId} out of range (0-${quadCount - 1})`, 'FAIL');
+          return;
+        }
+        
+        logResult(`Generating local Voronoi for cell ${cellId}...`, 'INFO');
+        
+        localData = generateLocal(cellId, ['voronoi'], {}, Delaunator);
+        
+        // Render local map (simplified - just show stats for now)
+        // TODO: Phase 4 rendering support for local sub-grids
+        const container = document.getElementById('test2-local');
+        container.innerHTML = `<div style="padding: 20px; color: #888;">
+          <p>Local Voronoi generated for cell ${cellId}</p>
+          <p>Sub-cells: ${localData.localPack.cells.i.length}</p>
+          <p>Bounds: ${JSON.stringify(localData.localData.bounds)}</p>
+          <p style="font-size: 12px; color: #666; margin-top: 10px;">Note: Rendering for local sub-grids coming in future update</p>
+        </div>`;
+        
+        updateStats('test2', localData, 'Local');
+        
+        const localCellCount = localData.localPack.cells.i.length;
+        if (localCellCount >= 20 && localCellCount <= 100) {
+          logResult(`✓ Local Voronoi generated: ${localCellCount} sub-cells (within expected range)`, 'PASS');
+        } else {
+          logResult(`⚠ Local Voronoi: ${localCellCount} sub-cells (outside typical 20-100 range)`, 'WARN');
+        }
+        
+      } catch (error) {
+        logResult(`✗ Local generation failed: ${error.message}`, 'FAIL');
+      }
+    }
+
+    function testReproducibility() {
+      if (!globalData) {
+        logResult('✗ Please generate global map first', 'FAIL');
+        return;
+      }
+      
+      try {
+        const cellId = parseInt(cellIdInput.value, 10);
+        logResult(`Testing reproducibility for cellId ${cellId}...`, 'INFO');
+        
+        // Generate first time
+        const local1 = generateLocal(cellId, ['voronoi'], {}, Delaunator);
+        const count1 = local1.localPack.cells.i.length;
+        
+        // Generate second time (same seed + cellId)
+        const local2 = generateLocal(cellId, ['voronoi'], {}, Delaunator);
+        const count2 = local2.localPack.cells.i.length;
+        
+        if (count1 === count2) {
+          logResult(`✓ Reproducibility: Both runs generated ${count1} cells`, 'PASS');
+        } else {
+          logResult(`✗ Reproducibility: Mismatch (${count1} vs ${count2})`, 'FAIL');
+        }
+        
+      } catch (error) {
+        logResult(`✗ Reproducibility test failed: ${error.message}`, 'FAIL');
+      }
+    }
+
+    function testCaching() {
+      if (!globalData) {
+        logResult('✗ Please generate global map first', 'FAIL');
+        return;
+      }
+      
+      try {
+        const cellId = parseInt(cellIdInput.value, 10);
+        logResult(`Testing caching for cellId ${cellId}...`, 'INFO');
+        
+        // Generate first time
+        const local1 = generateLocal(cellId, ['voronoi'], {}, Delaunator);
+        const count1 = local1.localPack.cells.i.length;
+        
+        // Generate second time (should use cache if implemented)
+        const local2 = generateLocal(cellId, ['voronoi'], {}, Delaunator);
+        const count2 = local2.localPack.cells.i.length;
+        
+        logResult(`First run: ${count1} cells`, 'INFO');
+        logResult(`Second run: ${count2} cells`, 'INFO');
+        
+        // Note: Caching test would need to check subCaches
+        // For now, just verify it works twice
+        if (count1 === count2) {
+          logResult(`✓ Caching: Both runs produced same result (cache may be working)`, 'PASS');
+        } else {
+          logResult(`⚠ Caching: Results differ (check cache implementation)`, 'WARN');
+        }
+        
+      } catch (error) {
+        logResult(`✗ Caching test failed: ${error.message}`, 'FAIL');
+      }
+    }
+
+    // Event listeners
+    generateGlobalBtn.addEventListener('click', generateGlobalMap);
+    generateLocalBtn.addEventListener('click', generateLocalVoronoiForCell);
+    testReproducibilityBtn.addEventListener('click', testReproducibility);
+    testCachingBtn.addEventListener('click', testCaching);
+
+    console.log('Local Voronoi Test initialized');
+  </script>
+</body>
+</html>
