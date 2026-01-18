@@ -62,9 +62,13 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
     const feature = pack.features?.[cells.f?.[onborderCell]];
     if (feature?.type === 'lake' && feature.shoreline?.every(ofSameType)) continue;
 
-    const startingVertex = cells.v[cellId]?.find((v) =>
-      vertices.c[v]?.some(ofDifferentType)
-    );
+    // Defensive check: ensure vertices and cells.v exist
+    if (!vertices || !vertices.c || !cells.v || !cells.v[cellId]) continue;
+    
+    const startingVertex = cells.v[cellId]?.find((v) => {
+      if (v === undefined || v === null || v < 0 || v >= vertices.c.length) return false;
+      return vertices.c[v]?.some(ofDifferentType);
+    });
     if (startingVertex === undefined) continue;
 
     const vertexChain = connectVertices({
@@ -109,6 +113,11 @@ function getIsolines(pack, getType, options = { fill: false, waterGap: false, ha
  * @returns {Array<number>} Chain of vertex IDs
  */
 function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, closeRing }) {
+  // Defensive check: ensure vertices structure exists
+  if (!vertices || !vertices.c || !vertices.v) {
+    return [];
+  }
+  
   const MAX_ITERATIONS = vertices.c.length;
   const chain = [];
   let next = startingVertex;
@@ -116,6 +125,12 @@ function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, c
   for (let i = 0; i === 0 || next !== startingVertex; i++) {
     const previous = chain[chain.length - 1];
     const current = next;
+    
+    // Defensive check: ensure vertex index is valid
+    if (current === undefined || current === null || current < 0 || current >= vertices.c.length) {
+      break;
+    }
+    
     chain.push(current);
 
     const neibCells = vertices.c[current];
@@ -129,12 +144,13 @@ function connectVertices({ vertices, startingVertex, ofSameType, addToChecked, c
     if (v1 !== undefined && v1 !== previous && c1 !== c2) next = v1;
     else if (v2 !== undefined && v2 !== previous && c2 !== c3) next = v2;
     else if (v3 !== undefined && v3 !== previous && c1 !== c3) next = v3;
+    else break; // No valid next vertex found
 
     if (next >= vertices.c.length || next === current) break;
     if (i >= MAX_ITERATIONS) break;
   }
 
-  if (closeRing) chain.push(startingVertex);
+  if (closeRing && chain.length > 0) chain.push(startingVertex);
   return chain;
 }
 

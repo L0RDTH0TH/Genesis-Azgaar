@@ -6,13 +6,12 @@
  * =============================================================================
  */
 
-// Public API - stateful generator functions
+// Public API - stateful generator functions (SVG-only)
 export {
   initGenerator,
   loadOptions,
   generateMap,
   getMapData,
-  renderPreview,
   renderPreviewSVG,
   loadMapData,
   resetGeneratorState,

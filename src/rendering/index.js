@@ -1,12 +1,13 @@
 /**
  * =============================================================================
  * index.js
- * Desc: Rendering module exports
+ * Desc: Rendering module exports (SVG-only)
  * Author: Lordthoth (based on original by Azgaar)
  * =============================================================================
+ * 
+ * NOTE: Canvas rendering removed - SVG-only pipeline
  */
 
-export { renderMap } from './canvas.js';
 export {
   renderMapSVG,
   drawBiomesSVG,

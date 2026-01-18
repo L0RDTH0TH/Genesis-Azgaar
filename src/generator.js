@@ -15,7 +15,6 @@ import {
   InvalidOptionError,
   GenerationError,
   NoDataError,
-  NoCanvasError,
 } from './utils/errors.js';
 import {
   createVoronoiDiagram,
@@ -44,7 +43,6 @@ import {
 } from './core/index.js';
 import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
-import { renderMap } from './rendering/canvas.js';
 import { renderMapSVG } from './rendering/svg.js';
 import {
   validateSkipPhases,
@@ -58,7 +56,6 @@ import {
  * Singleton state for the generator
  */
 let state = {
-  canvas: null,
   container: null, // SVG container element (optional)
   options: getDefaultOptions(),
   data: null, // { grid, pack, seed }
@@ -275,7 +272,7 @@ function getPhaseFunction(phase) {
       
     case PHASES.PACK_CREATION:
       return ({ stateData, DelaunatorClass }) => {
-        const useFullPack = stateData.options.fullRendering === true || state.canvas !== null;
+        const useFullPack = stateData.options.fullRendering === true;
         let pack;
         
         if (useFullPack) {
@@ -407,23 +404,15 @@ export function resetGeneratorState() {
 }
 
 /**
- * Initialize the generator with optional canvas or container for rendering
+ * Initialize the generator with optional container for SVG rendering
  * @param {Object} params - Initialization parameters
- * @param {HTMLCanvasElement|null} params.canvas - Optional canvas element for canvas rendering
  * @param {HTMLElement|null} params.container - Optional container element for SVG rendering
- * @throws {InitializationError} If already initialized or invalid elements provided
+ * @throws {InitializationError} If already initialized or invalid container provided
  */
-export function initGenerator({ canvas = null, container = null } = {}) {
+export function initGenerator({ container = null } = {}) {
   if (state.initialized) {
     throw new InitializationError(
       'Generator already initialized. Cannot initialize multiple times.'
-    );
-  }
-
-  // Validate canvas if provided
-  if (canvas !== null && !(canvas instanceof HTMLCanvasElement)) {
-    throw new InitializationError(
-      `Invalid canvas element. Expected HTMLCanvasElement, got ${typeof canvas}`
     );
   }
 
@@ -434,7 +423,6 @@ export function initGenerator({ canvas = null, container = null } = {}) {
     );
   }
 
-  state.canvas = canvas;
   state.container = container;
   state.initialized = true;
 }
@@ -669,33 +657,8 @@ function serializeDualGrid(dualGrid) {
   };
 }
 
-/**
- * Render stored map data to the initialized canvas
- * @throws {InitializationError} If generator not initialized
- * @throws {NoDataError} If no data generated yet
- * @throws {NoCanvasError} If no canvas provided (only if rendering is explicitly required)
- */
-export function renderPreview() {
-  requireInitialized();
-
-  if (!state.data) {
-    throw new NoDataError();
-  }
-
-  if (!state.canvas) {
-    // No-op with warning if no canvas
-    if (typeof console !== 'undefined' && console.warn) {
-      console.warn('renderPreview() called but no canvas was provided during initialization. Skipping render.');
-    }
-    return;
-  }
-
-  try {
-    renderMap(state.canvas, state.data);
-  } catch (error) {
-    throw new GenerationError(`Rendering failed: ${error.message}`);
-  }
-}
+// NOTE: renderPreview() removed - Canvas rendering not supported in SVG-only pipeline
+// Use renderPreviewSVG() instead for SVG rendering
 
 /**
  * Render stored map data to SVG (returns SVG string or appends to container)

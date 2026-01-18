@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Complete SVG + Dual-Grid Terrain - Azgaar Genesis</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #fff;
+      padding: 20px;
+      overflow-x: hidden;
+    }
+    
+    #map-container {
+      width: 100vw;
+      height: 90vh;
+      background: #000;
+      border: 3px solid #0f0;
+      overflow: auto;
+      position: relative;
+    }
+    
+    #map-container svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    
+    .controls {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(42, 42, 42, 0.95);
+      padding: 15px;
+      border-radius: 8px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 250px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    
+    button {
+      padding: 10px 15px;
+      background: #4a4a4a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #5a5a5a;
+    }
+    
+    button:active {
+      background: #3a3a3a;
+    }
+    
+    button.active {
+      background: #0a5;
+      border-color: #0f0;
+    }
+    
+    label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 5px 0;
+      font-size: 13px;
+    }
+    
+    input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+    
+    .info {
+      margin-top: 10px;
+      padding: 10px;
+      background: rgba(26, 26, 26, 0.9);
+      border-radius: 4px;
+      font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .info pre {
+      color: #0f0;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    
+    .error {
+      color: #f00;
+    }
+    
+    .success {
+      color: #0f0;
+    }
+    
+    h3 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    ============================================================================
+    COMPLETE SVG + DUAL-GRID TERRAIN RENDERER
+    ============================================================================
+    
+    Source: Branch fix/complete-svg-with-dual-grid
+    Base: experiment/dual-grid-politics (commit 6d96893)
+    
+    Features:
+    - Complete modular Azgaar SVG rendering pipeline (all layers):
+      * Elevation shading (ocean/land base layers)
+      * Biome coloring (full isoline paths with water gaps)
+      * Rivers as smooth SVG paths
+      * Coastlines and feature boundaries
+      * Burgs/cities with labels
+      * States and provinces with borders
+      * Complete multi-layer rendering
+    
+    - Dual-grid generator/pipeline:
+      * Stålberg-inspired hex-to-quad algorithm
+      * Political state generation from quad grid
+      * Burg snapping to dual-grid points
+      * Pattern/variant assignment for visual variety
+    
+    What was removed:
+    - All Canvas/WebGL rendering code (canvas.js, canvas2d.js, webgl.js, renderer-interface.js)
+    - Canvas parameters from initGenerator() and renderPreview() function
+    - Canvas-related state properties and NoCanvasError
+    
+    How to extend:
+    - Add zoom/pan controls (SVG transform manipulation)
+    - Add layer toggles (hide/show SVG groups by ID: biomes, states, borders, rivers, burgs)
+    - Add dual-grid overlay visualization (render quad grid as SVG paths)
+    - Add interactive features (click handlers on SVG elements for details)
+    - Add pipeline stage controls (render raw points, triangles, smoothed, final)
+    
+    ============================================================================
+  -->
+  
+  <div id="map-container"></div>
+  
+  <div class="controls">
+    <h3>SVG + Dual-Grid Renderer</h3>
+    
+    <button id="generateBtn">Generate New Map</button>
+    <button id="regenerateBtn">Regenerate (Same Seed)</button>
+    
+    <div style="margin-top: 10px;">
+      <label>
+        <input type="checkbox" id="dualGridToggle" checked>
+        <span>Enable Dual-Grid Politics</span>
+      </label>
+    </div>
+    
+    <div class="info">
+      <div id="status">Ready. Click "Generate New Map" to start.</div>
+      <pre id="console" style="display: none;"></pre>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Complete SVG + Dual-Grid terrain renderer
+     * Combines full modular Azgaar SVG rendering with dual-grid political system
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Module path: prefer dev source if available, else use dist
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const modulePath = isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js';
+    
+    const mapContainer = document.getElementById('map-container');
+    const generateBtn = document.getElementById('generateBtn');
+    const regenerateBtn = document.getElementById('regenerateBtn');
+    const dualGridToggle = document.getElementById('dualGridToggle');
+    const statusEl = document.getElementById('status');
+    const consoleEl = document.getElementById('console');
+    
+    let AzgaarGenesis;
+    let currentSeed = String(Date.now());
+    let currentOptions = {
+      seed: currentSeed,
+      mapWidth: 1200,
+      mapHeight: 800,
+      cellsDesired: 10000,
+      statesNumber: 15,
+      culturesNumber: 10,
+      religionsNumber: 5,
+      useDualGridPolitics: true,
+      politicsMode: {
+        hexLayers: 20,
+        relaxationIterations: 200,
+        dampingFactor: 0.3,
+        dissolveProbability: 0.5,
+      },
+    };
+    
+    // Console logging helper
+    function log(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const logMessage = `[${timestamp}] ${message}`;
+      console.log(logMessage);
+      
+      if (consoleEl) {
+        consoleEl.style.display = 'block';
+        const color = type === 'error' ? '#f00' : type === 'success' ? '#0f0' : type === 'warn' ? '#ff0' : '#0ff';
+        consoleEl.innerHTML += `<span style="color: ${color}">${logMessage}</span>\n`;
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      }
+      
+      if (statusEl && type !== 'info') {
+        statusEl.textContent = message;
+        statusEl.className = type;
+      }
+    }
+    
+    // Load module
+    try {
+      log(`Loading Azgaar Genesis module from: ${modulePath}`, 'info');
+      AzgaarGenesis = await import(modulePath);
+      log('Module loaded successfully', 'success');
+    } catch (error) {
+      const errorMsg = `Failed to load module: ${error.message}. Make sure to run "npm run build" first or use a dev server.`;
+      log(errorMsg, 'error');
+      statusEl.innerHTML = `<span class="error">${errorMsg}</span>`;
+      throw error;
+    }
+    
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData, 
+      renderPreviewSVG
+    } = AzgaarGenesis;
+    
+    // Initialize generator with SVG container
+    try {
+      initGenerator({ container: mapContainer });
+      log('Generator initialized with SVG container', 'success');
+    } catch (error) {
+      log(`Initialization failed: ${error.message}`, 'error');
+      throw error;
+    }
+    
+    /**
+     * Generate and render a new map
+     */
+    async function generateAndRender() {
+      try {
+        log('Starting map generation...', 'info');
+        statusEl.textContent = 'Generating map...';
+        statusEl.className = '';
+        
+        // Clear previous render
+        mapContainer.innerHTML = '';
+        
+        // Generate new seed
+        currentSeed = String(Date.now());
+        currentOptions.seed = currentSeed;
+        
+        // Update dual-grid setting from toggle
+        currentOptions.useDualGridPolitics = dualGridToggle.checked;
+        
+        if (currentOptions.useDualGridPolitics) {
+          log('Dual-grid politics mode: ENABLED', 'success');
+          log(`Dual-grid config: hexLayers=${currentOptions.politicsMode.hexLayers}, iterations=${currentOptions.politicsMode.relaxationIterations}`, 'info');
+        } else {
+          log('Dual-grid politics mode: DISABLED (using classic Voronoi)', 'info');
+        }
+        
+        log(`Seed: ${currentSeed}`, 'info');
+        
+        // Load options
+        loadOptions(currentOptions);
+        log('Options loaded', 'info');
+        
+        // Generate map data
+        log('Generating map data...', 'info');
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const genTime = performance.now() - startTime;
+        log(`Map data generated in ${genTime.toFixed(0)}ms`, 'success');
+        
+        // Validate data
+        if (!data || !data.pack) {
+          throw new Error('Map generation returned invalid data (no pack)');
+        }
+        
+        // Log dual-grid info if enabled
+        if (currentOptions.useDualGridPolitics && data.pack.dualGrid) {
+          const dg = data.pack.dualGrid;
+          log('Dual-grid initialized successfully', 'success');
+          log(`Dual-grid stats: ${dg.points?.length || 0} points, ${dg.level0Quads?.length || 0} Level-0 quads, ${dg.level1Quads?.length || 0} Level-1 quads`, 'info');
+        }
+        
+        log(`Generated: ${data.pack.cells?.i?.length || 0} cells, ${data.pack.states?.length || 0} states`, 'success');
+        
+        // Render to SVG
+        log('Rendering to SVG...', 'info');
+        log('Rendering SVG layer: ocean base', 'info');
+        log('Rendering SVG layer: features', 'info');
+        log('Rendering SVG layer: land base', 'info');
+        log('Rendering SVG layer: biomes', 'info');
+        log('Rendering SVG layer: states', 'info');
+        log('Rendering SVG layer: rivers', 'info');
+        log('Rendering SVG layer: borders', 'info');
+        log('Rendering SVG layer: burgs', 'info');
+        
+        const renderStartTime = performance.now();
+        renderPreviewSVG({ 
+          width: currentOptions.mapWidth, 
+          height: currentOptions.mapHeight 
+        });
+        const renderTime = performance.now() - renderStartTime;
+        log(`SVG rendered successfully in ${renderTime.toFixed(0)}ms`, 'success');
+        
+        // Validate SVG was created
+        const svg = mapContainer.querySelector('svg');
+        if (!svg) {
+          throw new Error('SVG element not found in container after rendering');
+        }
+        
+        log(`SVG dimensions: ${svg.getAttribute('width')}x${svg.getAttribute('height')}`, 'success');
+        log(`SVG viewBox: ${svg.getAttribute('viewBox')}`, 'info');
+        
+        // Check for SVG groups (layers)
+        const groups = svg.querySelectorAll('g');
+        log(`SVG groups (layers) found: ${groups.length}`, 'info');
+        groups.forEach(g => {
+          const id = g.getAttribute('id');
+          if (id) log(`  - Layer: ${id} (${g.children.length} elements)`, 'info');
+        });
+        
+        // Check for elements
+        const paths = svg.querySelectorAll('path');
+        const rects = svg.querySelectorAll('rect');
+        const circles = svg.querySelectorAll('circle');
+        log(`SVG elements: ${paths.length} paths, ${rects.length} rects, ${circles.length} circles`, 'info');
+        
+        // Update status
+        const cellCount = data.pack.cells?.i?.length || 0;
+        const stateCount = data.pack.states?.length || 0;
+        const dualGridInfo = currentOptions.useDualGridPolitics && data.pack.dualGrid 
+          ? ` | Dual-grid: ${data.pack.dualGrid.level0Quads?.length || 0} quads` 
+          : '';
+        statusEl.textContent = `Map generated: ${cellCount} cells, ${stateCount} states${dualGridInfo}`;
+        statusEl.className = 'success';
+        
+        log('Map generation complete!', 'success');
+        
+      } catch (error) {
+        const errorMsg = `Generation failed: ${error.message}`;
+        log(errorMsg, 'error');
+        statusEl.innerHTML = `<span class="error">${errorMsg}</span>`;
+        console.error('Full error:', error);
+      }
+    }
+    
+    /**
+     * Regenerate with same seed
+     */
+    async function regenerate() {
+      try {
+        log('Regenerating with same seed...', 'info');
+        currentOptions.seed = currentSeed;
+        currentOptions.useDualGridPolitics = dualGridToggle.checked;
+        await generateAndRender();
+      } catch (error) {
+        log(`Regeneration failed: ${error.message}`, 'error');
+      }
+    }
+    
+    // Event listeners
+    generateBtn.addEventListener('click', generateAndRender);
+    regenerateBtn.addEventListener('click', regenerate);
+    dualGridToggle.addEventListener('change', () => {
+      log(`Dual-grid politics ${dualGridToggle.checked ? 'ENABLED' : 'DISABLED'}`, 'info');
+    });
+    
+    // Initial log
+    log('Complete SVG + Dual-Grid Terrain Renderer ready', 'success');
+    log('Dual-grid politics mode: ENABLED by default', 'info');
+    log('Click "Generate New Map" to start', 'info');
+  </script>
+</body>
+</html>
