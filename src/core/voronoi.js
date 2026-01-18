@@ -234,6 +234,42 @@ export function createVoronoiDiagram(options, rng, DelaunatorClass = null) {
 }
 
 /**
+ * Create Voronoi diagram from pre-placed points (Phase 3: for dual grid adaptation)
+ * @param {Array<Array<number>>} points - Pre-placed points [[x, y], ...]
+ * @param {Array<Array<number>>} boundary - Boundary points [[x, y], ...]
+ * @param {Object} options - Generation options {mapWidth, mapHeight, seed}
+ * @param {Function} DelaunatorClass - Delaunator class (required)
+ * @returns {Object} Grid object with Voronoi data
+ */
+export function createVoronoiFromPoints(points, boundary, options, DelaunatorClass) {
+  if (!DelaunatorClass) {
+    throw new Error('Delaunator is required as a peer dependency');
+  }
+  
+  const { mapWidth, mapHeight } = options;
+  const allPoints = points.concat(boundary || []);
+  const delaunay = DelaunatorClass.from(allPoints);
+  const voronoi = new Voronoi(delaunay, allPoints, points.length);
+  const cells = voronoi.cells;
+  cells.i = createTypedArray({ maxValue: points.length, length: points.length }).map((_, i) => i);
+  const vertices = voronoi.vertices;
+  
+  const spacing = Math.sqrt((mapWidth * mapHeight) / points.length);
+  
+  return {
+    seed: options.seed || null,
+    spacing,
+    cellsDesired: points.length,
+    boundary: boundary || [],
+    points,
+    cellsX: Math.floor(mapWidth / spacing),
+    cellsY: Math.floor(mapHeight / spacing),
+    cells,
+    vertices,
+  };
+}
+
+/**
  * Find cell index on a regular square grid
  * @param {number} x - X coordinate
  * @param {number} y - Y coordinate

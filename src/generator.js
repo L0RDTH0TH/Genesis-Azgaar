@@ -18,6 +18,7 @@ import {
 } from './utils/errors.js';
 import {
   createVoronoiDiagram,
+  createVoronoiFromPoints,
   generateHeightmap,
   calculateMapCoordinates,
   generatePrecipitation,
@@ -40,6 +41,7 @@ import {
   assignPatternsToQuads,
   assignVariantsToQuads,
   mapDualGridStatesToPack,
+  adaptDualGridToVoronoiInput,
 } from './core/index.js';
 import { PHASES } from './utils/constants.js';
 import { createPackFromGrid } from './core/regraph.js';
@@ -239,15 +241,44 @@ function getPhaseFunction(phase) {
       
     case PHASES.VORONOI:
       return ({ stateData, rng, DelaunatorClass }) => {
-        const grid = createVoronoiDiagram(
-          {
-            mapWidth: stateData.options.mapWidth,
-            mapHeight: stateData.options.mapHeight,
-            cellsDesired: stateData.options.cellsDesired,
-          },
-          rng,
-          DelaunatorClass
-        );
+        // Phase 3: If dualGrid exists (precursor mode), adapt it to Voronoi input
+        let grid;
+        
+        if (stateData.dualGrid && stateData.options.gridMode === 'dualPrecursor') {
+          // Adapt dual grid to Voronoi input (extract quad centroids as points)
+          const adaptedInput = adaptDualGridToVoronoiInput(stateData.dualGrid, stateData.options);
+          
+          // Create Voronoi from adapted points (bypass point placement)
+          if (!DelaunatorClass) {
+            throw new Error('Delaunator is required for Voronoi generation in precursor mode');
+          }
+          
+          const { points, boundary } = adaptedInput;
+          
+          // Create Voronoi from adapted points using helper function
+          grid = createVoronoiFromPoints(points, boundary, stateData.options, DelaunatorClass);
+          
+          // Keep reference to dual grid for later phases
+          grid.dualGridSource = stateData.dualGrid;
+          grid.adaptedFrom = 'dualGrid';
+          
+          // Log adaptation
+          if (typeof console !== 'undefined' && console.log) {
+            console.log(`Adapted dual grid to ${points.length} points for Voronoi`);
+          }
+        } else {
+          // Standard mode: create Voronoi normally
+          grid = createVoronoiDiagram(
+            {
+              mapWidth: stateData.options.mapWidth,
+              mapHeight: stateData.options.mapHeight,
+              cellsDesired: stateData.options.cellsDesired,
+            },
+            rng,
+            DelaunatorClass
+          );
+        }
+        
         return { ...stateData, grid };
       };
       

@@ -183,6 +183,13 @@
         stats.dualGridPoints = pointCount;
       }
       
+      // Phase 3: Check if grid was adapted from dual grid
+      const gridAdapted = data.grid?.adaptedFrom === 'dualGrid';
+      if (gridAdapted) {
+        stats.gridAdapted = true;
+        stats.voronoiPointsFromQuads = data.grid?.points?.length || 0;
+      }
+      
       statsDiv.innerHTML = `<pre style="margin: 0; font-size: 11px;">${JSON.stringify(stats, null, 2)}</pre>`;
     }
 
@@ -207,15 +214,38 @@
         const hasDualGrid = data.dualGrid !== null && data.dualGrid !== undefined;
         const quadCount = hasDualGrid ? 
           ((data.dualGrid.level0Quads?.length || 0) + (data.dualGrid.level1Quads?.length || 0)) : 0;
+        const gridAdapted = data.grid?.adaptedFrom === 'dualGrid';
+        const voronoiPointCount = data.grid?.points?.length || 0;
+        const packCellCount = data.pack.cells.i.length;
         
         if (gridMode === 'dualPrecursor') {
           if (hasDualGrid) {
-            logResult(`✓ Dual precursor mode: ${quadCount} quads, ${data.pack.cells.i.length} Voronoi cells`, 'PASS');
+            logResult(`✓ Dual precursor mode: ${quadCount} quads, ${packCellCount} Voronoi cells`, 'PASS');
+            
+            // Phase 3: Verify adaptation
+            if (gridAdapted) {
+              logResult(`  → Grid adapted: ${voronoiPointCount} points from ${quadCount} quads`, 'PASS');
+              
+              // Check that Voronoi points ≈ quad count (approximately, as some quads might be filtered)
+              const ratio = voronoiPointCount / quadCount;
+              if (ratio > 0.9 && ratio <= 1.1) {
+                logResult(`  → Point count matches quad count (ratio: ${ratio.toFixed(2)})`, 'PASS');
+              } else {
+                logResult(`  ⚠ Point/quad ratio: ${ratio.toFixed(2)} (expected ~1.0)`, 'WARN');
+              }
+            } else {
+              logResult(`  ✗ Grid not adapted from dual grid!`, 'FAIL');
+            }
           } else {
             logResult(`✗ Dual precursor mode: dualGrid missing!`, 'FAIL');
           }
         } else {
-          logResult(`✓ Standard mode: ${data.pack.cells.i.length} Voronoi cells (no dual grid)`, 'PASS');
+          logResult(`✓ Standard mode: ${packCellCount} Voronoi cells (no dual grid)`, 'PASS');
+          
+          // Verify no adaptation occurred
+          if (gridAdapted) {
+            logResult(`  ✗ Grid was adapted in standard mode (should not happen)`, 'FAIL');
+          }
         }
         
         return data;
@@ -257,8 +287,25 @@
       
       const quadCount = (precursorData.dualGrid?.level0Quads?.length || 0) + 
                         (precursorData.dualGrid?.level1Quads?.length || 0);
+      const voronoiPointCount = precursorData.grid?.points?.length || 0;
+      
       if (quadCount > 0) {
         logResult(`Precursor mode generated ${quadCount} dual grid quads`, 'PASS');
+      }
+      
+      // Phase 3: Verify adapter integration
+      if (precursorData.grid?.adaptedFrom === 'dualGrid') {
+        logResult(`Phase 3: Grid adapted successfully (${voronoiPointCount} Voronoi points from ${quadCount} quads)`, 'PASS');
+        
+        // Check that pack structure is correct
+        const packCells = precursorData.pack.cells.i.length;
+        if (packCells === voronoiPointCount) {
+          logResult(`Phase 3: Pack cells match adapted Voronoi points (${packCells} cells)`, 'PASS');
+        } else {
+          logResult(`Phase 3: Pack cells (${packCells}) != Voronoi points (${voronoiPointCount})`, 'WARN');
+        }
+      } else {
+        logResult(`Phase 3: ⚠ Grid not marked as adapted (check adapter integration)`, 'WARN');
       }
     });
 
