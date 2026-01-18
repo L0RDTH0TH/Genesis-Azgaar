@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Baseline Fidelity Test - Iteration 5 Unfuck Migration</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+    #svgContainer {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+      width: 100%;
+      max-width: 1200px;
+      height: auto;
+    }
+    #svgContainer svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      max-width: 1200px;
+      width: 100%;
+    }
+    .info h3 {
+      margin-top: 0;
+    }
+    .info pre {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button {
+      padding: 10px 20px;
+      background: #4a4a4a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5a5a5a;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Baseline Fidelity Test - Iteration 5 Unfuck Migration</h1>
+    <p>This is the "golden" reference test before any changes. Use fixed seed (123456) for reproducible output.</p>
+    
+    <div class="controls">
+      <button id="generateBtn">Generate Baseline Map</button>
+      <button id="exportSvgBtn">Export SVG</button>
+      <button id="exportJsonBtn">Export JSON</button>
+    </div>
+
+    <div id="svgContainer"></div>
+
+    <div class="info">
+      <h3>Baseline Map Statistics</h3>
+      <div id="mapStats">Click "Generate Baseline Map" to generate...</div>
+      <details style="margin-top: 15px;">
+        <summary style="cursor: pointer; color: #888;">Console Log Output (click to view)</summary>
+        <pre id="consoleOutput" style="white-space: pre-wrap; word-wrap: break-word;"></pre>
+      </details>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Baseline Fidelity Test - Golden Reference
+     * 
+     * Purpose: This test file establishes a visual and data "golden" reference
+     * before any changes are made in Iteration 5 unfuck migration.
+     * 
+     * Requirements:
+     * - Fixed seed: 123456 (for reproducibility)
+     * - Default options (no skips)
+     * - Full generation pipeline
+     * - Render to SVG
+     * - Log key statistics: number of cells, burgs, states
+     * - Export SVG string for comparison
+     * - Export JSON for data comparison
+     * 
+     * Date: 2026-01-18
+     * Branch: feat/iteration5-unfuck-migration-start
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Use bundled dist file for production, or source for development
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const modulePath = isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js';
+    
+    let AzgaarGenesis;
+    try {
+      AzgaarGenesis = await import(modulePath);
+    } catch (error) {
+      console.error('Failed to load Azgaar Genesis module:', error);
+      document.getElementById('mapStats').innerHTML = `<pre style="color: red;">Error: Failed to load module from ${modulePath}. Make sure to run "npm run build" first.</pre>`;
+      throw error;
+    }
+    
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData, 
+      renderPreviewSVG
+    } = AzgaarGenesis;
+
+    const svgContainer = document.getElementById('svgContainer');
+    const generateBtn = document.getElementById('generateBtn');
+    const exportSvgBtn = document.getElementById('exportSvgBtn');
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const mapStats = document.getElementById('mapStats');
+    const consoleOutput = document.getElementById('consoleOutput');
+
+    // FIXED SEED for reproducibility
+    const BASELINE_SEED = '123456';
+    
+    // Default options (no skips)
+    const baselineOptions = {
+      seed: BASELINE_SEED,
+      mapWidth: 1200,
+      mapHeight: 800,
+      cellsDesired: 15000,
+      statesNumber: 15,
+      culturesNumber: 10,
+      religionsNumber: 5,
+      // No skipPhases - full generation
+    };
+
+    let currentSvgString = null;
+    let currentJsonData = null;
+
+    // Initialize generator with container for SVG
+    initGenerator({ container: svgContainer });
+
+    // Capture console.log for display
+    const originalLog = console.log;
+    const logMessages = [];
+    console.log = function(...args) {
+      logMessages.push(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)).join(' '));
+      originalLog.apply(console, args);
+    };
+
+    function updateMapStats(data) {
+      const { pack, seed, options } = data;
+      const stats = {
+        seed,
+        dimensions: `${options.mapWidth}x${options.mapHeight}`,
+        cells: pack.cells?.i?.length || 0,
+        states: pack.states?.length || 0,
+        burgs: pack.burgs?.filter(b => b && !b.removed)?.length || 0,
+        rivers: pack.rivers?.length || 0,
+        cultures: pack.cultures?.length || 0,
+        religions: pack.religions?.length || 0,
+        provinces: pack.provinces?.length || 0,
+        features: pack.features?.length || 0,
+      };
+      
+      mapStats.innerHTML = `<pre>${JSON.stringify(stats, null, 2)}</pre>`;
+      
+      // Log key statistics (as per requirements)
+      console.log('=== BASELINE MAP STATISTICS ===');
+      console.log(`Seed: ${stats.seed}`);
+      console.log(`Number of cells: ${stats.cells}`);
+      console.log(`Number of burgs: ${stats.burgs}`);
+      console.log(`Number of states: ${stats.states}`);
+      console.log(`Number of rivers: ${stats.rivers}`);
+      console.log(`Number of cultures: ${stats.cultures}`);
+      console.log(`Number of religions: ${stats.religions}`);
+      console.log(`Dimensions: ${stats.dimensions}`);
+      console.log('==============================');
+      
+      // Update console output display
+      consoleOutput.textContent = logMessages.join('\n');
+    }
+
+    function generateBaselineMap() {
+      try {
+        mapStats.textContent = 'Generating baseline map...';
+        logMessages.length = 0; // Clear previous logs
+        
+        console.log('=== BASELINE FIDELITY TEST - GENERATION START ===');
+        console.log(`Seed: ${BASELINE_SEED}`);
+        console.log(`Options:`, baselineOptions);
+        
+        // Load options (defaults, no skips)
+        loadOptions(baselineOptions);
+        
+        // Generate map (full pipeline, no skips)
+        const data = generateMap(Delaunator);
+        
+        // Render to SVG
+        const svgString = renderPreviewSVG({ 
+          width: baselineOptions.mapWidth, 
+          height: baselineOptions.mapHeight 
+        });
+        currentSvgString = svgString;
+        
+        // Get JSON data
+        const jsonData = getMapData();
+        currentJsonData = jsonData;
+        
+        // Update stats
+        updateMapStats(data);
+        
+        console.log('=== BASELINE MAP GENERATION COMPLETE ===');
+        console.log('SVG rendered to container');
+        console.log('JSON data available for export');
+        
+        // Update console output display
+        consoleOutput.textContent = logMessages.join('\n');
+        
+      } catch (error) {
+        console.error('Baseline generation failed:', error);
+        mapStats.innerHTML = `<pre style="color: red;">Error: ${error.message}</pre>`;
+        consoleOutput.textContent = `Error: ${error.message}\n\nStack: ${error.stack}`;
+      }
+    }
+
+    function exportSvg() {
+      if (!currentSvgString) {
+        alert('Please generate a map first');
+        return;
+      }
+      
+      try {
+        const blob = new Blob([currentSvgString], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `baseline-fidelity-test-${BASELINE_SEED}.svg`;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log('SVG exported:', `baseline-fidelity-test-${BASELINE_SEED}.svg`);
+      } catch (error) {
+        console.error('SVG export failed:', error);
+        alert(`Export failed: ${error.message}`);
+      }
+    }
+
+    function exportJson() {
+      if (!currentJsonData) {
+        alert('Please generate a map first');
+        return;
+      }
+      
+      try {
+        const jsonString = JSON.stringify(currentJsonData, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `baseline-fidelity-test-${BASELINE_SEED}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        console.log('JSON exported:', `baseline-fidelity-test-${BASELINE_SEED}.json`);
+      } catch (error) {
+        console.error('JSON export failed:', error);
+        alert(`Export failed: ${error.message}`);
+      }
+    }
+
+    // Event listeners
+    generateBtn.addEventListener('click', generateBaselineMap);
+    exportSvgBtn.addEventListener('click', exportSvg);
+    exportJsonBtn.addEventListener('click', exportJson);
+
+    // Auto-generate on load
+    console.log('Baseline Fidelity Test initialized');
+    console.log('Click "Generate Baseline Map" to create golden reference');
+  </script>
+</body>
+</html>

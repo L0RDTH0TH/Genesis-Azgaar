@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Minimal Example</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #canvas {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="960" height="540"></canvas>
+
+  <script type="module">
+    /**
+     * Minimal working example - smallest possible integration
+     * Auto-generates on load, renders to canvas, logs JSON
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const { initGenerator, loadOptions, generateMap, getMapData, renderPreview } = 
+      await import(isDev ? '/src/index.js' : '/dist/azgaar-library.es.js');
+
+    const canvas = document.getElementById('canvas');
+    
+    // Initialize, configure, generate, render, export
+    initGenerator({ canvas });
+    loadOptions({ seed: '42', mapWidth: 960, mapHeight: 540, cellsDesired: 10000 });
+    const data = generateMap(Delaunator);
+    renderPreview();
+    const json = getMapData();
+    
+    console.log('Map generated:', { seed: data.seed, json });
+  </script>
+</body>
+</html>

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Performance Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    .controls {
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    button.secondary {
+      background: #2196F3;
+    }
+    button.secondary:hover {
+      background: #0b7dda;
+    }
+    .results {
+      margin-top: 20px;
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #2a2a2a;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #444;
+    }
+    th {
+      background: #1a1a1a;
+      color: #4CAF50;
+      font-weight: bold;
+    }
+    tr:hover {
+      background: #333;
+    }
+    .good {
+      color: #4f4;
+    }
+    .warning {
+      color: #ff4;
+    }
+    .bad {
+      color: #f44;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 14px;
+    }
+    .error {
+      color: #f44;
+      margin-top: 10px;
+      padding: 10px;
+      background: #2a1a1a;
+      border-radius: 4px;
+    }
+    .stats-summary {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+    }
+    .stat-box {
+      background: #1a1a1a;
+      padding: 15px;
+      border-radius: 4px;
+    }
+    .stat-label {
+      color: #aaa;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+    .stat-value {
+      color: #fff;
+      font-size: 24px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Performance Test</h1>
+  <p>Test large map generation performance. Target: &lt;5s for 10k+ cells on modern hardware.</p>
+
+  <div class="controls">
+    <button id="test10kBtn">Test 10k Cells</button>
+    <button id="test20kBtn">Test 20k Cells</button>
+    <button id="test50kBtn">Test 50k Cells</button>
+    <button id="multiRunBtn" class="secondary">Run 5 Tests (10k)</button>
+    <button id="clearBtn">Clear Results</button>
+  </div>
+
+  <div id="message"></div>
+  <div id="statsSummary" class="stats-summary" style="display: none;"></div>
+  <div class="results">
+    <table id="resultsTable">
+      <thead>
+        <tr>
+          <th>Run #</th>
+          <th>Cells</th>
+          <th>Seed</th>
+          <th>Generation (ms)</th>
+          <th>Render (ms)</th>
+          <th>Total (ms)</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody">
+      </tbody>
+    </table>
+  </div>
+  <div class="info" id="info"></div>
+
+  <script type="module">
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      renderPreview 
+    } from libraryPath;
+
+    const test10kBtn = document.getElementById('test10kBtn');
+    const test20kBtn = document.getElementById('test20kBtn');
+    const test50kBtn = document.getElementById('test50kBtn');
+    const multiRunBtn = document.getElementById('multiRunBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const messageDiv = document.getElementById('message');
+    const statsSummaryDiv = document.getElementById('statsSummary');
+    const resultsBody = document.getElementById('resultsBody');
+    const infoDiv = document.getElementById('info');
+
+    let runCount = 0;
+    const results = [];
+
+    // Create hidden canvas for rendering tests
+    const canvas = document.createElement('canvas');
+    canvas.width = 1920;
+    canvas.height = 1080;
+    initGenerator({ canvas });
+
+    function clearMessage() {
+      messageDiv.innerHTML = '';
+      messageDiv.className = '';
+    }
+
+    function showMessage(message, type = 'info') {
+      clearMessage();
+      messageDiv.innerHTML = message;
+      messageDiv.className = type;
+    }
+
+    function showInfo(message) {
+      infoDiv.textContent = message;
+    }
+
+    function getStatusClass(time) {
+      if (time < 3000) return 'good';
+      if (time < 5000) return 'warning';
+      return 'bad';
+    }
+
+    function addResult(cells, seed, genTime, renderTime, totalTime) {
+      runCount++;
+      const result = { runCount, cells, seed, genTime, renderTime, totalTime };
+      results.push(result);
+
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>${runCount}</td>
+        <td>${cells.toLocaleString()}</td>
+        <td>${seed}</td>
+        <td class="${getStatusClass(genTime)}">${genTime.toFixed(2)}</td>
+        <td>${renderTime.toFixed(2)}</td>
+        <td class="${getStatusClass(totalTime)}">${totalTime.toFixed(2)}</td>
+        <td>${totalTime < 5000 ? '✓ Good' : totalTime < 7000 ? '⚠ Warning' : '✗ Slow'}</td>
+      `;
+      resultsBody.appendChild(row);
+
+      updateStats();
+    }
+
+    function updateStats() {
+      if (results.length === 0) {
+        statsSummaryDiv.style.display = 'none';
+        return;
+      }
+
+      const genTimes = results.map(r => r.genTime);
+      const renderTimes = results.map(r => r.renderTime);
+      const totalTimes = results.map(r => r.totalTime);
+
+      const avgGen = genTimes.reduce((a, b) => a + b, 0) / genTimes.length;
+      const avgRender = renderTimes.reduce((a, b) => a + b, 0) / renderTimes.length;
+      const avgTotal = totalTimes.reduce((a, b) => a + b, 0) / totalTimes.length;
+      const minTotal = Math.min(...totalTimes);
+      const maxTotal = Math.max(...totalTimes);
+
+      statsSummaryDiv.style.display = 'grid';
+      statsSummaryDiv.innerHTML = `
+        <div class="stat-box">
+          <div class="stat-label">Runs</div>
+          <div class="stat-value">${results.length}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Avg Generation</div>
+          <div class="stat-value">${avgGen.toFixed(0)}ms</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Avg Render</div>
+          <div class="stat-value">${avgRender.toFixed(0)}ms</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Avg Total</div>
+          <div class="stat-value">${avgTotal.toFixed(0)}ms</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Min Total</div>
+          <div class="stat-value">${minTotal.toFixed(0)}ms</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Max Total</div>
+          <div class="stat-value">${maxTotal.toFixed(0)}ms</div>
+        </div>
+      `;
+    }
+
+    async function runTest(cellsDesired) {
+      try {
+        test10kBtn.disabled = true;
+        test20kBtn.disabled = true;
+        test50kBtn.disabled = true;
+        multiRunBtn.disabled = true;
+        
+        showInfo(`Generating ${cellsDesired.toLocaleString()} cell map...`);
+        
+        const seed = String(Date.now() + Math.random());
+        loadOptions({
+          seed,
+          mapWidth: 1920,
+          mapHeight: 1080,
+          cellsDesired,
+          statesNumber: 18,
+          cultures: 12,
+        });
+        
+        const genStart = performance.now();
+        const data = generateMap(Delaunator);
+        const genTime = performance.now() - genStart;
+        
+        const renderStart = performance.now();
+        renderPreview();
+        const renderTime = performance.now() - renderStart;
+        
+        const totalTime = performance.now() - genStart;
+        
+        addResult(cellsDesired, seed, genTime, renderTime, totalTime);
+        
+        showMessage(
+          `Generated ${cellsDesired.toLocaleString()} cells in ${totalTime.toFixed(2)}ms (gen: ${genTime.toFixed(2)}ms, render: ${renderTime.toFixed(2)}ms)`,
+          totalTime < 5000 ? 'info' : 'error'
+        );
+        showInfo(`Run ${runCount} complete`);
+        
+      } catch (error) {
+        showMessage(`Error: ${error.message}`, 'error');
+        console.error('Test error:', error);
+      } finally {
+        test10kBtn.disabled = false;
+        test20kBtn.disabled = false;
+        test50kBtn.disabled = false;
+        multiRunBtn.disabled = false;
+      }
+    }
+
+    async function runMultipleTests(count = 5, cellsDesired = 10000) {
+      for (let i = 0; i < count; i++) {
+        await runTest(cellsDesired);
+        // Small delay between runs
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    test10kBtn.addEventListener('click', () => runTest(10000));
+    test20kBtn.addEventListener('click', () => runTest(20000));
+    test50kBtn.addEventListener('click', () => runTest(50000));
+    multiRunBtn.addEventListener('click', () => runMultipleTests(5, 10000));
+    clearBtn.addEventListener('click', () => {
+      results.length = 0;
+      runCount = 0;
+      resultsBody.innerHTML = '';
+      statsSummaryDiv.style.display = 'none';
+      clearMessage();
+      showInfo('Results cleared');
+    });
+  </script>
+</body>
+</html>

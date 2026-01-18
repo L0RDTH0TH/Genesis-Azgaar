@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azgaar Genesis - Godot WebView Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+    #canvas {
+      border: 2px solid #444;
+      background: #000;
+      display: block;
+    }
+    button {
+      margin-top: 10px;
+      padding: 8px 16px;
+      font-size: 14px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #45a049;
+    }
+    button:disabled {
+      background: #666;
+      cursor: not-allowed;
+    }
+    .info {
+      margin-top: 10px;
+      color: #aaa;
+      font-size: 12px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Azgaar Genesis - Godot WebView Pattern</h1>
+  <canvas id="canvas" width="800" height="600"></canvas>
+  <button id="generateBtn">Generate Map</button>
+  <div class="info" id="info"></div>
+
+  <script type="module">
+    /**
+     * This example demonstrates the exact pattern Godot WebView will use:
+     * 1. Load library and Delaunator
+     * 2. Initialize generator with canvas
+     * 3. Load options (from Godot via postMessage or direct JS call)
+     * 4. Generate map
+     * 5. Render preview
+     * 6. Export JSON via postMessage back to Godot
+     */
+
+    // Import Delaunator (peer dependency)
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    // Import the library (in Godot, this would be from res://assets/ui_web/js/azgaar/azgaar-genesis.esm.js)
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const libraryPath = isDev 
+      ? '/src/index.js' 
+      : '/dist/azgaar-library.es.js';
+    
+    import { 
+      initGenerator, 
+      loadOptions, 
+      generateMap, 
+      getMapData, 
+      renderPreview 
+    } from libraryPath;
+
+    const canvas = document.getElementById('canvas');
+    const generateBtn = document.getElementById('generateBtn');
+    const infoDiv = document.getElementById('info');
+
+    // Initialize generator (called once, typically from Godot)
+    initGenerator({ canvas });
+
+    // Example: Receive options from Godot via postMessage
+    // In real Godot integration, you'd listen for:
+    // window.addEventListener('message', (event) => {
+    //   if (event.data.type === 'generateMap') {
+    //     loadOptions(event.data.options);
+    //     const data = generateMap(Delaunator);
+    //     renderPreview();
+    //     const json = getMapData();
+    //     // Send back to Godot
+    //     window.parent.postMessage({ type: 'mapGenerated', data: json }, '*');
+    //   }
+    // });
+
+    async function generate() {
+      try {
+        generateBtn.disabled = true;
+        infoDiv.textContent = 'Generating...';
+        
+        // Load options (in Godot, these come from GDScript)
+        loadOptions({
+          seed: '42', // Fixed seed for reproducible results
+          mapWidth: 800,
+          mapHeight: 600,
+          cellsDesired: 10000,
+          statesNumber: 18,
+          cultures: 12,
+        });
+        
+        // Generate map
+        const startTime = performance.now();
+        const data = generateMap(Delaunator);
+        const generateTime = performance.now() - startTime;
+        
+        // Render to canvas
+        renderPreview();
+        
+        // Get JSON for Godot
+        const json = getMapData();
+        
+        // In real Godot integration, send JSON back:
+        // window.parent.postMessage({ 
+        //   type: 'mapGenerated', 
+        //   data: json,
+        //   seed: data.seed 
+        // }, '*');
+        
+        infoDiv.textContent = `Generated in ${generateTime.toFixed(0)}ms (seed: ${data.seed})`;
+        
+        // Log for debugging (remove in production)
+        console.log('Map generated:', {
+          seed: data.seed,
+          cells: data.grid.cells.i.length,
+          jsonSize: JSON.stringify(json).length
+        });
+        
+      } catch (error) {
+        infoDiv.textContent = `Error: ${error.message}`;
+        console.error('Generation error:', error);
+      } finally {
+        generateBtn.disabled = false;
+      }
+    }
+
+    generateBtn.addEventListener('click', generate);
+
+    // Auto-generate on load (for demo; in Godot, generation is triggered by GDScript)
+    window.addEventListener('load', () => {
+      setTimeout(generate, 100);
+    });
+  </script>
+</body>
+</html>
