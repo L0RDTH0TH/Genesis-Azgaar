@@ -63,6 +63,9 @@ const DEFAULT_OPTIONS = {
   // Rendering options (Phase 5)
   fullRendering: false, // Use full Voronoi pack for polygon rendering (slower but better quality)
 
+  // Grid mode (Phase 2)
+  gridMode: 'standard', // 'standard' = default Voronoi, 'dualPrecursor' = dual grid as precursor to Voronoi
+
   // Dual-grid politics (experimental)
   useDualGridPolitics: false, // Enable dual-grid politics mode (experimental)
   politicsMode: {

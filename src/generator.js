@@ -122,7 +122,7 @@ function generateMapInternal(options, DelaunatorClass, phasesToRun = null) {
   // Validate skipPhases if provided
   const skipPhases = options.skipPhases || [];
   if (skipPhases.length > 0) {
-    validateSkipPhases(skipPhases);
+    validateSkipPhases(skipPhases, options);
   }
   
   // Determine which phases to run
@@ -153,7 +153,16 @@ function generateMapInternal(options, DelaunatorClass, phasesToRun = null) {
   }
   
   // Execute phases in order
-  const phaseOrder = [
+  // Conditionally add DUAL_GRID as first phase if gridMode is 'dualPrecursor'
+  const phaseOrder = [];
+  
+  // If gridMode is 'dualPrecursor', add DUAL_GRID first as precursor
+  if (options.gridMode === 'dualPrecursor') {
+    phaseOrder.push(PHASES.DUAL_GRID);
+  }
+  
+  // Then add remaining phases in order
+  phaseOrder.push(
     PHASES.VORONOI,
     PHASES.HEIGHTMAP,
     PHASES.MARKUP_GRID,
@@ -195,6 +204,7 @@ function generateMapInternal(options, DelaunatorClass, phasesToRun = null) {
     pack: stateData.pack,
     options: stateData.options,
     seed: stateData.seed,
+    dualGrid: stateData.dualGrid || null, // Include dual grid if generated (Phase 2)
   };
 }
 
@@ -205,6 +215,28 @@ function generateMapInternal(options, DelaunatorClass, phasesToRun = null) {
  */
 function getPhaseFunction(phase) {
   switch (phase) {
+    case PHASES.DUAL_GRID:
+      return ({ stateData, rng, DelaunatorClass }) => {
+        // Build dual grid as precursor (organic quads)
+        const hexLayers = stateData.options.politicsMode?.hexLayers ?? stateData.options.politicsMode?.baseHexRings ?? 20;
+        const dualGridOptions = {
+          ...stateData.options,
+          DelaunatorClass,
+        };
+        const dualGrid = buildStalbergQuadGrid(hexLayers, rng, dualGridOptions);
+        
+        // Store dual grid in state data
+        stateData.dualGrid = dualGrid;
+        
+        // Log quad count
+        const quadCount = (dualGrid.level0Quads?.length || 0) + (dualGrid.level1Quads?.length || 0);
+        if (typeof console !== 'undefined' && console.log) {
+          console.log(`Running precursor dual grid: ${quadCount} quads generated`);
+        }
+        
+        return stateData;
+      };
+      
     case PHASES.VORONOI:
       return ({ stateData, rng, DelaunatorClass }) => {
         const grid = createVoronoiDiagram(

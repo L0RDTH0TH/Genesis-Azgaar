@@ -256,6 +256,29 @@
         console.log('SVG rendered to container');
         console.log('JSON data available for export');
         
+        // Phase 2: Test dual precursor mode (if not already using it)
+        if (baselineOptions.gridMode !== 'dualPrecursor') {
+          console.log('=== PHASE 2 TEST: Dual Precursor Mode ===');
+          try {
+            // Test with dual precursor mode
+            const testOptions = { ...baselineOptions, gridMode: 'dualPrecursor' };
+            loadOptions(testOptions);
+            const precursorData = generateMap(Delaunator);
+            
+            // Check if dualGrid was created
+            if (precursorData.dualGrid) {
+              const quadCount = (precursorData.dualGrid.level0Quads?.length || 0) + 
+                                (precursorData.dualGrid.level1Quads?.length || 0);
+              console.log(`✓ Dual precursor mode: ${quadCount} quads generated`);
+              console.log(`  Grid mode: ${testOptions.gridMode}`);
+            } else {
+              console.warn('⚠ Dual precursor mode: dualGrid not found in result');
+            }
+          } catch (error) {
+            console.warn('⚠ Dual precursor test failed:', error.message);
+          }
+        }
+        
         // Update console output display
         consoleOutput.textContent = logMessages.join('\n');
         

@@ -11,6 +11,7 @@
  * Used for phase identification, skip validation, and caching
  */
 export const PHASES = {
+  DUAL_GRID: 'dualGrid', // Precursor grid phase (organic quads) - Phase 2
   VORONOI: 'voronoi',
   HEIGHTMAP: 'heightmap',
   MARKUP_GRID: 'markupGrid',

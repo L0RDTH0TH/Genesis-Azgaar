@@ -17,7 +17,8 @@ import { getDefaultBiomes } from './core/index.js';
  * Defines which phases must run before a given phase
  */
 export const PHASE_DEPENDENCIES = {
-  [PHASES.VORONOI]: [],
+  [PHASES.DUAL_GRID]: [], // Precursor base phase (no dependencies)
+  [PHASES.VORONOI]: [], // No dependencies in standard mode; depends on DUAL_GRID in precursor mode (handled in validatePhaseDependencies)
   [PHASES.HEIGHTMAP]: [PHASES.VORONOI],
   [PHASES.MARKUP_GRID]: [PHASES.HEIGHTMAP],
   [PHASES.MAP_COORDINATES]: [],
@@ -59,10 +60,18 @@ export function validatePhaseNames(phases, context = 'phases') {
 /**
  * Validate that skipPhases array contains valid phase names
  * @param {Array<string>} skipPhases - Array of phase names to skip
- * @throws {GenerationError} If invalid phase names found
+ * @param {Object} options - Optional options object to check gridMode
+ * @throws {GenerationError} If invalid phase names found or DUAL_GRID skipped in precursor mode
  */
-export function validateSkipPhases(skipPhases) {
+export function validateSkipPhases(skipPhases, options = {}) {
   validatePhaseNames(skipPhases, 'skipPhases');
+  
+  // Phase 2: Check if DUAL_GRID is skipped in precursor mode
+  if (options.gridMode === 'dualPrecursor' && skipPhases.includes(PHASES.DUAL_GRID)) {
+    throw new GenerationError(
+      'Cannot skip DUAL_GRID in precursor mode. DUAL_GRID must run as the precursor to Voronoi when gridMode is "dualPrecursor".'
+    );
+  }
 }
 
 /**
@@ -219,6 +228,20 @@ export function getFallbackForPhase(phase, stateData) {
   const numCells = pack?.cells?.i?.length || grid?.cells?.i?.length || 0;
   
   switch (phase) {
+    case PHASES.DUAL_GRID:
+      // Default: empty dual grid structure
+      return {
+        dualGrid: {
+          points: [],
+          dualPoints: [],
+          level0Quads: [],
+          level1Quads: [],
+          neighbors: new Map(),
+        },
+        grid,
+        pack,
+        options,
+      };
     case PHASES.HEIGHTMAP:
       // Default: flat heightmap (all zeros or low values)
       if (grid && grid.cells) {

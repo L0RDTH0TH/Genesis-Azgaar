@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dual Precursor Test - Phase 2</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 20px;
+      background: #4a4a4a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5a5a5a;
+    }
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+    }
+    .test-case {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      border: 2px solid #444;
+    }
+    .test-case h3 {
+      margin-top: 0;
+      font-size: 16px;
+    }
+    .test-case div {
+      border: 1px solid #666;
+      background: #000;
+      max-width: 100%;
+      height: 300px;
+      overflow: auto;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+    }
+    .info pre {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Dual Precursor Test - Phase 2</h1>
+    <p>Compare standard mode (Voronoi only) vs dual precursor mode (Dual Grid → Voronoi)</p>
+    
+    <div class="controls">
+      <button id="generateStandardBtn">Generate Standard Mode</button>
+      <button id="generatePrecursorBtn">Generate Dual Precursor Mode</button>
+      <button id="generateBothBtn">Generate Both (Compare)</button>
+    </div>
+
+    <div class="info">
+      <h3>Test Results</h3>
+      <div id="testResults">Click a button to generate maps...</div>
+    </div>
+
+    <div class="test-grid">
+      <div class="test-case">
+        <h3>Standard Mode (gridMode: 'standard')</h3>
+        <div id="test1-standard"></div>
+        <div id="test1-stats" style="margin-top: 10px; font-size: 12px; color: #888;"></div>
+      </div>
+      
+      <div class="test-case">
+        <h3>Dual Precursor Mode (gridMode: 'dualPrecursor')</h3>
+        <div id="test2-precursor"></div>
+        <div id="test2-stats" style="margin-top: 10px; font-size: 12px; color: #888;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Dual Precursor Test - Phase 2
+     * 
+     * Tests:
+     * 1. Standard mode: Voronoi only (no dual grid precursor)
+     * 2. Dual precursor mode: DUAL_GRID runs first, then Voronoi
+     * 3. Compare: Both modes side-by-side
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const modulePath = isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js';
+    
+    let AzgaarGenesis;
+    try {
+      AzgaarGenesis = await import(modulePath);
+    } catch (error) {
+      console.error('Failed to load module:', error);
+      document.getElementById('testResults').innerHTML = `<pre style="color: red;">Error: ${error.message}</pre>`;
+      throw error;
+    }
+    
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap,
+      renderToSVG
+    } = AzgaarGenesis;
+
+    const testResults = document.getElementById('testResults');
+    const generateStandardBtn = document.getElementById('generateStandardBtn');
+    const generatePrecursorBtn = document.getElementById('generatePrecursorBtn');
+    const generateBothBtn = document.getElementById('generateBothBtn');
+
+    const testSeed = '123456';
+    const baseOptions = {
+      seed: testSeed,
+      mapWidth: 400,
+      mapHeight: 300,
+      cellsDesired: 5000,
+      statesNumber: 10,
+    };
+
+    // Initialize generator
+    initGenerator();
+
+    function logResult(message, status = 'INFO') {
+      const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+      const color = status === 'PASS' ? '#0f0' : status === 'FAIL' ? '#f00' : '#ff0';
+      testResults.innerHTML += `<pre style="color: ${color};">[${timestamp}] ${message}</pre>`;
+      testResults.scrollTop = testResults.scrollHeight;
+    }
+
+    function clearResults() {
+      testResults.innerHTML = '';
+    }
+
+    function updateStats(containerId, data, gridMode) {
+      const statsDiv = document.getElementById(containerId + '-stats');
+      const { pack, dualGrid } = data;
+      
+      const stats = {
+        gridMode,
+        cells: pack.cells?.i?.length || 0,
+        states: pack.states?.length || 0,
+        burgs: pack.burgs?.filter(b => b && !b.removed)?.length || 0,
+      };
+      
+      if (dualGrid) {
+        const quadCount = (dualGrid.level0Quads?.length || 0) + (dualGrid.level1Quads?.length || 0);
+        const pointCount = dualGrid.points?.length || 0;
+        stats.dualGridQuads = quadCount;
+        stats.dualGridPoints = pointCount;
+      }
+      
+      statsDiv.innerHTML = `<pre style="margin: 0; font-size: 11px;">${JSON.stringify(stats, null, 2)}</pre>`;
+    }
+
+    function generateMapInMode(gridMode, containerId, statsId) {
+      try {
+        const options = { ...baseOptions, gridMode };
+        loadOptions(options);
+        const data = generateMap(Delaunator);
+        
+        // Render to SVG
+        const container = document.getElementById(containerId);
+        renderToSVG({
+          width: options.mapWidth,
+          height: options.mapHeight,
+          container: container
+        });
+        
+        // Update stats
+        updateStats(containerId, data, gridMode);
+        
+        // Log results
+        const hasDualGrid = data.dualGrid !== null && data.dualGrid !== undefined;
+        const quadCount = hasDualGrid ? 
+          ((data.dualGrid.level0Quads?.length || 0) + (data.dualGrid.level1Quads?.length || 0)) : 0;
+        
+        if (gridMode === 'dualPrecursor') {
+          if (hasDualGrid) {
+            logResult(`✓ Dual precursor mode: ${quadCount} quads, ${data.pack.cells.i.length} Voronoi cells`, 'PASS');
+          } else {
+            logResult(`✗ Dual precursor mode: dualGrid missing!`, 'FAIL');
+          }
+        } else {
+          logResult(`✓ Standard mode: ${data.pack.cells.i.length} Voronoi cells (no dual grid)`, 'PASS');
+        }
+        
+        return data;
+      } catch (error) {
+        logResult(`✗ ${gridMode} mode failed: ${error.message}`, 'FAIL');
+        throw error;
+      }
+    }
+
+    // Event listeners
+    generateStandardBtn.addEventListener('click', () => {
+      clearResults();
+      logResult('Generating standard mode map...', 'INFO');
+      generateMapInMode('standard', 'test1-standard', 'test1-stats');
+    });
+
+    generatePrecursorBtn.addEventListener('click', () => {
+      clearResults();
+      logResult('Generating dual precursor mode map...', 'INFO');
+      generateMapInMode('dualPrecursor', 'test2-precursor', 'test2-stats');
+    });
+
+    generateBothBtn.addEventListener('click', () => {
+      clearResults();
+      logResult('Generating both modes for comparison...', 'INFO');
+      
+      // Generate standard
+      logResult('Generating standard mode...', 'INFO');
+      const standardData = generateMapInMode('standard', 'test1-standard', 'test1-stats');
+      
+      // Generate precursor
+      logResult('Generating dual precursor mode...', 'INFO');
+      const precursorData = generateMapInMode('dualPrecursor', 'test2-precursor', 'test2-stats');
+      
+      // Compare
+      logResult('=== COMPARISON ===', 'INFO');
+      logResult(`Standard: ${standardData.pack.cells.i.length} cells, dualGrid: ${standardData.dualGrid ? 'present' : 'absent'}`, 'INFO');
+      logResult(`Precursor: ${precursorData.pack.cells.i.length} cells, dualGrid: ${precursorData.dualGrid ? 'present' : 'absent'}`, 'INFO');
+      
+      const quadCount = (precursorData.dualGrid?.level0Quads?.length || 0) + 
+                        (precursorData.dualGrid?.level1Quads?.length || 0);
+      if (quadCount > 0) {
+        logResult(`Precursor mode generated ${quadCount} dual grid quads`, 'PASS');
+      }
+    });
+
+    console.log('Dual Precursor Test initialized');
+  </script>
+</body>
+</html>
