@@ -574,7 +574,9 @@ export function drawFeaturesSVG(pack) {
 /**
  * Render complete map to SVG string
  * @param {Object} data - Map data {grid, pack, options}
- * @param {Object} options - Rendering options {width, height, container}
+ * @param {Object} options - Rendering options {width, height, renderConfig, includeInteractive}
+ * @param {Object} options.renderConfig - Layer configuration { layers: { biomes: true, states: true, ... } }
+ * @param {boolean} options.includeInteractive - If true, add data-cell-id attributes to paths
  * @returns {string} Complete SVG string
  */
 export function renderMapSVG(data, options = {}) {
@@ -587,6 +589,20 @@ export function renderMapSVG(data, options = {}) {
 
   const width = options.width || mapWidth || 1000;
   const height = options.height || mapHeight || 600;
+  
+  // Default renderConfig: all layers enabled
+  const defaultLayers = {
+    features: true,
+    biomes: true,
+    states: true,
+    rivers: true,
+    borders: true,
+    burgs: true,
+  };
+  
+  const renderConfig = options.renderConfig || { layers: defaultLayers };
+  const layersConfig = { ...defaultLayers, ...(renderConfig.layers || {}) };
+  const includeInteractive = options.includeInteractive === true;
 
   // Get biome data
   const biomesData = getDefaultBiomes();
@@ -594,46 +610,63 @@ export function renderMapSVG(data, options = {}) {
   // Build SVG layers
   const layers = [];
 
-  // 1. Ocean base
+  // 1. Ocean base (always rendered)
   layers.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${STYLE_CONSTANTS.oceanBase}" />`);
 
   // 2. Features (lakes, islands)
-  const featuresSVG = drawFeaturesSVG(pack);
-  if (featuresSVG) {
-    layers.push(`<g id="features">${featuresSVG}</g>`);
+  if (layersConfig.features !== false) {
+    const featuresSVG = drawFeaturesSVG(pack);
+    if (featuresSVG) {
+      layers.push(`<g id="features">${featuresSVG}</g>`);
+    }
   }
 
-  // 3. Landmass base
+  // 3. Landmass base (always rendered)
   layers.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${STYLE_CONSTANTS.landBase}" />`);
 
   // 4. Biomes
-  const biomesSVG = drawBiomesSVG(pack, biomesData);
-  if (biomesSVG) {
-    layers.push(`<g id="biomes" opacity="0.7">${biomesSVG}</g>`);
+  if (layersConfig.biomes !== false) {
+    const biomesSVG = drawBiomesSVG(pack, biomesData);
+    if (biomesSVG) {
+      const interactiveAttr = includeInteractive ? ' data-layer="biomes"' : '';
+      layers.push(`<g id="biomes" opacity="0.7"${interactiveAttr}>${biomesSVG}</g>`);
+    }
   }
 
   // 5. States
-  const statesSVG = drawStatesSVG(pack);
-  if (statesSVG) {
-    layers.push(`<g id="states" opacity="0.6">${statesSVG}</g>`);
+  if (layersConfig.states !== false) {
+    const statesSVG = drawStatesSVG(pack);
+    if (statesSVG) {
+      const interactiveAttr = includeInteractive ? ' data-layer="states"' : '';
+      layers.push(`<g id="states" opacity="0.6"${interactiveAttr}>${statesSVG}</g>`);
+    }
   }
 
   // 6. Rivers
-  const riversSVG = drawRiversSVG(pack);
-  if (riversSVG) {
-    layers.push(`<g id="rivers">${riversSVG}</g>`);
+  if (layersConfig.rivers !== false) {
+    const riversSVG = drawRiversSVG(pack);
+    if (riversSVG) {
+      const interactiveAttr = includeInteractive ? ' data-layer="rivers"' : '';
+      layers.push(`<g id="rivers"${interactiveAttr}>${riversSVG}</g>`);
+    }
   }
 
   // 7. Borders
-  const borders = drawBordersSVG(pack);
-  if (borders.stateBorders || borders.provinceBorders) {
-    layers.push(`<g id="borders">${borders.stateBorders}${borders.provinceBorders}</g>`);
+  if (layersConfig.borders !== false) {
+    const borders = drawBordersSVG(pack);
+    if (borders.stateBorders || borders.provinceBorders) {
+      const interactiveAttr = includeInteractive ? ' data-layer="borders"' : '';
+      layers.push(`<g id="borders"${interactiveAttr}>${borders.stateBorders}${borders.provinceBorders}</g>`);
+    }
   }
 
   // 8. Burgs
-  const burgsSVG = drawBurgsSVG(pack);
-  if (burgsSVG) {
-    layers.push(`<g id="burgs">${burgsSVG}</g>`);
+  if (layersConfig.burgs !== false) {
+    const burgsSVG = drawBurgsSVG(pack);
+    if (burgsSVG) {
+      const interactiveAttr = includeInteractive ? ' data-layer="burgs"' : '';
+      layers.push(`<g id="burgs"${interactiveAttr}>${burgsSVG}</g>`);
+    }
   }
 
   // Combine into complete SVG

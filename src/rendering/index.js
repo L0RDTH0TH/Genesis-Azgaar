@@ -1,11 +1,11 @@
 /**
  * =============================================================================
  * index.js
- * Desc: Rendering module exports (SVG-only)
+ * Desc: Rendering module exports (SVG + Canvas)
  * Author: Lordthoth (based on original by Azgaar)
  * =============================================================================
  * 
- * NOTE: Canvas rendering removed - SVG-only pipeline
+ * NOTE: Canvas rendering restored in Phase 1
  */
 
 export {
@@ -17,3 +17,11 @@ export {
   drawBurgsSVG,
   drawFeaturesSVG,
 } from './svg.js';
+
+export {
+  generateCellPath,
+  generateDualGridPaths,
+  generateInteractiveCellGroup,
+} from './svgPaths.js';
+
+export { Canvas2DRenderer } from './canvas2d.js';

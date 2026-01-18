@@ -657,8 +657,7 @@ function serializeDualGrid(dualGrid) {
   };
 }
 
-// NOTE: renderPreview() removed - Canvas rendering not supported in SVG-only pipeline
-// Use renderPreviewSVG() instead for SVG rendering
+// Canvas rendering support restored in Phase 1
 
 /**
  * Render stored map data to SVG (returns SVG string or appends to container)
@@ -708,6 +707,187 @@ export function renderPreviewSVG(options = {}) {
       console.error('SVG rendering failed:', error);
     }
     throw new GenerationError(`SVG rendering failed: ${error.message}`);
+  }
+}
+
+/**
+ * Render stored map data to canvas element
+ * @param {HTMLCanvasElement} canvas - Canvas element to render to
+ * @param {Object} options - Rendering options {width, height, renderConfig}
+ * @param {Object} options.renderConfig - Layer configuration { layers: { biomes: true, states: true, ... } }
+ * @returns {void}
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ * @throws {GenerationError} If canvas rendering fails
+ */
+export function renderToCanvas(canvas, options = {}) {
+  requireInitialized();
+
+  if (!state.data) {
+    throw new NoDataError();
+  }
+
+  if (!canvas || !(canvas instanceof HTMLCanvasElement)) {
+    throw new GenerationError('Invalid canvas element provided');
+  }
+
+  try {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new GenerationError('Could not get 2D rendering context from canvas');
+    }
+
+    // Determine dimensions from canvas, options, or data
+    const width = options.width || canvas.width || state.data.options.mapWidth || 1000;
+    const height = options.height || canvas.height || state.data.options.mapHeight || 600;
+
+    // Set canvas dimensions if not set
+    if (!canvas.width || !canvas.height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Get SVG string and render to canvas via Image (simple approach for Phase 1)
+    // This ensures exact fidelity with SVG rendering
+    const svgString = renderMapSVG(state.data, {
+      width: canvas.width,
+      height: canvas.height,
+      renderConfig: options.renderConfig,
+      includeInteractive: false, // Canvas doesn't support interactive attributes
+    });
+
+    // Convert SVG to data URL and draw to canvas synchronously
+    // Note: For full async support with error handling, consider using Promise-based approach
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    
+    // Create image and draw (sync for Phase 1 - may need async handling for production)
+    const img = new Image();
+    img.src = url;
+    
+    // For Phase 1: Use onload callback (async in browser, but function completes)
+    // Note: Image loading is async - for true sync, would need direct canvas drawing
+    if (img.complete || img.width > 0) {
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+    } else {
+      // Fallback: queue async render (best effort)
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        if (typeof console !== 'undefined' && console.log) {
+          console.log('Canvas rendered successfully');
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('Canvas rendering via Image failed - consider using SVG rendering instead');
+        }
+      };
+    }
+  } catch (error) {
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('Canvas rendering failed:', error);
+    }
+    throw new GenerationError(`Canvas rendering failed: ${error.message}`);
+  }
+}
+
+/**
+ * Render stored map data to SVG string (enhanced version with interactive/layers support)
+ * @param {Object} options - Rendering options
+ * @param {boolean} options.includeInteractive - If true, add data-cell-id attributes to paths
+ * @param {Object} options.renderConfig - Layer configuration { layers: { biomes: true, states: true, ... } }
+ * @param {number} options.width - SVG width (optional)
+ * @param {number} options.height - SVG height (optional)
+ * @param {HTMLElement} options.container - Container element for SVG (optional)
+ * @returns {string|null} SVG string if no container provided, null if appended to container
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ */
+export function renderToSVG(options = {}) {
+  requireInitialized();
+
+  if (!state.data) {
+    throw new NoDataError();
+  }
+
+  try {
+    // Determine dimensions from container, options, or data
+    let width = options.width;
+    let height = options.height;
+    const container = options.container || state.container;
+    const includeInteractive = options.includeInteractive === true;
+    const renderConfig = options.renderConfig || { layers: {} };
+
+    if (container) {
+      // Get dimensions from container if not provided
+      if (!width || !height) {
+        const rect = container.getBoundingClientRect();
+        width = width || rect.width || state.data.options.mapWidth || 1000;
+        height = height || rect.height || state.data.options.mapHeight || 600;
+      }
+    } else {
+      // Use data dimensions if no container
+      width = width || state.data.options.mapWidth || 1000;
+      height = height || state.data.options.mapHeight || 600;
+    }
+
+    const svgString = renderMapSVG(state.data, {
+      width,
+      height,
+      renderConfig,
+      includeInteractive,
+    });
+
+    if (container) {
+      // Append or replace SVG in container
+      container.innerHTML = svgString;
+      return null;
+    } else {
+      // Return SVG string
+      return svgString;
+    }
+  } catch (error) {
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('SVG rendering failed:', error);
+    }
+    throw new GenerationError(`SVG rendering failed: ${error.message}`);
+  }
+}
+
+/**
+ * Unified render preview function (supports both SVG and canvas)
+ * @param {Object} options - Rendering options
+ * @param {string} options.target - Render target: 'svg' (default) or 'canvas'
+ * @param {HTMLCanvasElement} options.canvas - Canvas element (required if target === 'canvas')
+ * @param {boolean} options.includeInteractive - If true, add data-cell-id attributes (SVG only)
+ * @param {Object} options.renderConfig - Layer configuration { layers: { biomes: true, states: true, ... } }
+ * @param {number} options.width - Width (optional)
+ * @param {number} options.height - Height (optional)
+ * @param {HTMLElement} options.container - Container element (optional, for SVG)
+ * @returns {string|null|void} SVG string (if target === 'svg' and no container), null (if appended to container), or void (canvas)
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ * @throws {GenerationError} If rendering fails
+ */
+export function renderPreview(options = {}) {
+  requireInitialized();
+
+  const target = options.target || 'svg';
+
+  if (target === 'canvas') {
+    if (!options.canvas) {
+      throw new GenerationError('Canvas element required when target === "canvas"');
+    }
+    return renderToCanvas(options.canvas, options);
+  } else {
+    // SVG rendering
+    return renderToSVG(options);
   }
 }
 

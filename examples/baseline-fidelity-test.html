@@ -134,7 +134,10 @@
       loadOptions, 
       generateMap, 
       getMapData, 
-      renderPreviewSVG
+      renderPreviewSVG,
+      renderToCanvas,
+      renderToSVG,
+      renderPreview
     } = AzgaarGenesis;
 
     const svgContainer = document.getElementById('svgContainer');
@@ -221,12 +224,26 @@
         // Generate map (full pipeline, no skips)
         const data = generateMap(Delaunator);
         
-        // Render to SVG
+        // Render to SVG (baseline - no options)
         const svgString = renderPreviewSVG({ 
           width: baselineOptions.mapWidth, 
           height: baselineOptions.mapHeight 
         });
         currentSvgString = svgString;
+        
+        // Test canvas rendering (Phase 1)
+        const testCanvas = document.createElement('canvas');
+        testCanvas.width = baselineOptions.mapWidth;
+        testCanvas.height = baselineOptions.mapHeight;
+        try {
+          renderToCanvas(testCanvas, {
+            width: baselineOptions.mapWidth,
+            height: baselineOptions.mapHeight
+          });
+          console.log('Canvas rendered (async - check browser console for confirmation)');
+        } catch (error) {
+          console.warn('Canvas rendering test failed:', error.message);
+        }
         
         // Get JSON data
         const jsonData = getMapData();

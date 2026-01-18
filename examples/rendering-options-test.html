@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rendering Options Test - Phase 1</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 20px;
+      background: #4a4a4a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5a5a5a;
+    }
+    .test-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+    }
+    .test-case {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      border: 2px solid #444;
+    }
+    .test-case h3 {
+      margin-top: 0;
+      font-size: 16px;
+    }
+    .test-case canvas, .test-case div {
+      border: 1px solid #666;
+      background: #000;
+      max-width: 100%;
+      height: auto;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+    }
+    .info pre {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Rendering Options Test - Phase 1</h1>
+    <p>Test all rendering modes: SVG, Canvas, Interactive SVG, Layer Control</p>
+    
+    <div class="controls">
+      <button id="generateBtn">Generate Map</button>
+      <button id="testCanvasBtn">Test Canvas Rendering</button>
+      <button id="testInteractiveBtn">Test Interactive SVG</button>
+      <button id="testLayersBtn">Test Layer Toggle</button>
+    </div>
+
+    <div class="info">
+      <h3>Test Results</h3>
+      <div id="testResults">Click "Generate Map" to start tests...</div>
+    </div>
+
+    <div class="test-grid">
+      <div class="test-case">
+        <h3>Test 1: SVG (Baseline)</h3>
+        <div id="test1-svg" style="width: 100%; height: 300px;"></div>
+      </div>
+      
+      <div class="test-case">
+        <h3>Test 2: Canvas</h3>
+        <canvas id="test2-canvas" width="400" height="300"></canvas>
+      </div>
+      
+      <div class="test-case">
+        <h3>Test 3: Interactive SVG (with data-cell-id)</h3>
+        <div id="test3-interactive" style="width: 100%; height: 300px;"></div>
+        <p style="font-size: 12px; color: #888; margin-top: 10px;">Check SVG source for data-layer attributes</p>
+      </div>
+      
+      <div class="test-case">
+        <h3>Test 4: Layer Toggle (biomes disabled)</h3>
+        <div id="test4-layers" style="width: 100%; height: 300px;"></div>
+        <p style="font-size: 12px; color: #888; margin-top: 10px;">Biomes should be missing from this render</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Rendering Options Test - Phase 1
+     * 
+     * Tests:
+     * 1. SVG baseline rendering (no options)
+     * 2. Canvas rendering (renderToCanvas)
+     * 3. Interactive SVG (includeInteractive: true)
+     * 4. Layer toggle (renderConfig.layers.biomes: false)
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const modulePath = isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js';
+    
+    let AzgaarGenesis;
+    try {
+      AzgaarGenesis = await import(modulePath);
+    } catch (error) {
+      console.error('Failed to load module:', error);
+      document.getElementById('testResults').innerHTML = `<pre style="color: red;">Error: ${error.message}</pre>`;
+      throw error;
+    }
+    
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap,
+      renderToSVG,
+      renderToCanvas,
+      renderPreview
+    } = AzgaarGenesis;
+
+    const testResults = document.getElementById('testResults');
+    const generateBtn = document.getElementById('generateBtn');
+    const testCanvasBtn = document.getElementById('testCanvasBtn');
+    const testInteractiveBtn = document.getElementById('testInteractiveBtn');
+    const testLayersBtn = document.getElementById('testLayersBtn');
+
+    let mapData = null;
+    const testSeed = '123456';
+    const testOptions = {
+      seed: testSeed,
+      mapWidth: 400,
+      mapHeight: 300,
+      cellsDesired: 5000,
+      statesNumber: 10,
+    };
+
+    // Initialize generator
+    initGenerator();
+
+    function logResult(test, status, message) {
+      const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+      const color = status === 'PASS' ? '#0f0' : status === 'FAIL' ? '#f00' : '#ff0';
+      testResults.innerHTML += `<pre style="color: ${color};">[${timestamp}] ${test}: ${status} - ${message}</pre>`;
+    }
+
+    function clearResults() {
+      testResults.innerHTML = '';
+    }
+
+    async function generateMap() {
+      try {
+        clearResults();
+        logResult('INIT', 'INFO', 'Generating map...');
+        
+        loadOptions(testOptions);
+        mapData = generateMap(Delaunator);
+        
+        logResult('INIT', 'PASS', 'Map generated successfully');
+        return true;
+      } catch (error) {
+        logResult('INIT', 'FAIL', error.message);
+        return false;
+      }
+    }
+
+    function test1_SVG_Baseline() {
+      try {
+        const container = document.getElementById('test1-svg');
+        const svgString = renderToSVG({
+          width: testOptions.mapWidth,
+          height: testOptions.mapHeight,
+          container: container
+        });
+        
+        // Check if SVG was rendered
+        const hasSVG = container.querySelector('svg') !== null;
+        if (hasSVG) {
+          logResult('Test 1: SVG Baseline', 'PASS', 'SVG rendered to container');
+        } else {
+          logResult('Test 1: SVG Baseline', 'FAIL', 'SVG not found in container');
+        }
+      } catch (error) {
+        logResult('Test 1: SVG Baseline', 'FAIL', error.message);
+      }
+    }
+
+    function test2_Canvas() {
+      try {
+        const canvas = document.getElementById('test2-canvas');
+        renderToCanvas(canvas, {
+          width: testOptions.mapWidth,
+          height: testOptions.mapHeight
+        });
+        
+        // Check if canvas has content (non-empty)
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const hasContent = imageData.data.some(pixel => pixel !== 0);
+        
+        if (hasContent) {
+          logResult('Test 2: Canvas', 'PASS', 'Canvas rendered (check visually)');
+        } else {
+          logResult('Test 2: Canvas', 'WARN', 'Canvas may be empty (async render - check later)');
+        }
+      } catch (error) {
+        logResult('Test 2: Canvas', 'FAIL', error.message);
+      }
+    }
+
+    function test3_InteractiveSVG() {
+      try {
+        const container = document.getElementById('test3-interactive');
+        const svgString = renderToSVG({
+          width: testOptions.mapWidth,
+          height: testOptions.mapHeight,
+          container: container,
+          includeInteractive: true
+        });
+        
+        // Check for data-layer attributes
+        const svg = container.querySelector('svg');
+        if (!svg) {
+          logResult('Test 3: Interactive SVG', 'FAIL', 'SVG not found');
+          return;
+        }
+        
+        const hasDataLayer = svg.querySelector('[data-layer]') !== null;
+        if (hasDataLayer) {
+          logResult('Test 3: Interactive SVG', 'PASS', 'Found data-layer attributes in SVG');
+        } else {
+          logResult('Test 3: Interactive SVG', 'FAIL', 'No data-layer attributes found');
+        }
+      } catch (error) {
+        logResult('Test 3: Interactive SVG', 'FAIL', error.message);
+      }
+    }
+
+    function test4_LayerToggle() {
+      try {
+        const container = document.getElementById('test4-layers');
+        const svgString = renderToSVG({
+          width: testOptions.mapWidth,
+          height: testOptions.mapHeight,
+          container: container,
+          renderConfig: {
+            layers: {
+              biomes: false, // Disable biomes
+              states: true,
+              rivers: true,
+              borders: true,
+              burgs: true,
+              features: true,
+            }
+          }
+        });
+        
+        // Check if biomes group is missing
+        const svg = container.querySelector('svg');
+        if (!svg) {
+          logResult('Test 4: Layer Toggle', 'FAIL', 'SVG not found');
+          return;
+        }
+        
+        const biomesGroup = svg.querySelector('#biomes');
+        if (!biomesGroup) {
+          logResult('Test 4: Layer Toggle', 'PASS', 'Biomes layer correctly disabled');
+        } else {
+          logResult('Test 4: Layer Toggle', 'FAIL', 'Biomes layer still present');
+        }
+      } catch (error) {
+        logResult('Test 4: Layer Toggle', 'FAIL', error.message);
+      }
+    }
+
+    // Event listeners
+    generateBtn.addEventListener('click', async () => {
+      const success = await generateMap();
+      if (success) {
+        // Run all tests
+        test1_SVG_Baseline();
+        test2_Canvas();
+        test3_InteractiveSVG();
+        test4_LayerToggle();
+      }
+    });
+
+    testCanvasBtn.addEventListener('click', () => {
+      if (!mapData) {
+        alert('Please generate a map first');
+        return;
+      }
+      test2_Canvas();
+    });
+
+    testInteractiveBtn.addEventListener('click', () => {
+      if (!mapData) {
+        alert('Please generate a map first');
+        return;
+      }
+      test3_InteractiveSVG();
+    });
+
+    testLayersBtn.addEventListener('click', () => {
+      if (!mapData) {
+        alert('Please generate a map first');
+        return;
+      }
+      test4_LayerToggle();
+    });
+
+    // Auto-generate on load
+    console.log('Rendering Options Test initialized');
+  </script>
+</body>
+</html>

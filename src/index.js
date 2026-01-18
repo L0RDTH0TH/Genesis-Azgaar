@@ -6,13 +6,16 @@
  * =============================================================================
  */
 
-// Public API - stateful generator functions (SVG-only)
+// Public API - stateful generator functions
 export {
   initGenerator,
   loadOptions,
   generateMap,
   getMapData,
-  renderPreviewSVG,
+  renderPreviewSVG, // Legacy API (for backward compatibility)
+  renderToCanvas,   // Phase 1: Canvas rendering
+  renderToSVG,      // Phase 1: Enhanced SVG rendering (interactive/layers)
+  renderPreview,    // Phase 1: Unified render function
   loadMapData,
   resetGeneratorState,
 } from './generator.js';
