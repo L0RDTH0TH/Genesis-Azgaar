@@ -589,13 +589,108 @@ export function generatePartial(phasesToRun, DelaunatorClass = null) {
  * @throws {InitializationError} If generator not initialized
  * @throws {NoDataError} If no data generated yet
  */
-export function getMapData() {
+/**
+ * Get map data as JSON (Phase 5: supports cellId for local data extraction)
+ * @param {Object} options - Options object
+ * @param {number|null} options.cellId - Optional cell ID to return only local sub-data
+ * @param {boolean} options.includeLocalOnly - If true and cellId provided, exclude global data
+ * @returns {Object} Map data as JSON
+ * @throws {InitializationError} If generator not initialized
+ * @throws {NoDataError} If no data generated yet
+ * @throws {GenerationError} If cellId provided but dualGrid missing or cell not found
+ */
+export function getMapData(options = {}) {
   requireInitialized();
 
   if (!state.data) {
     throw new NoDataError();
   }
 
+  const { cellId = null, includeLocalOnly = false } = options;
+  
+  // Phase 5: If cellId provided, return local sub-data
+  if (cellId !== null && cellId !== undefined) {
+    if (!state.data.dualGrid) {
+      throw new GenerationError('Dual grid is required for local data extraction. Generate map with gridMode: "dualPrecursor" first.');
+    }
+    
+    const quad = state.data.dualGrid.level0Quads?.[cellId];
+    if (!quad) {
+      throw new GenerationError(`Cell ${cellId} not found in dualGrid.level0Quads`);
+    }
+    
+    // Get local data from subCaches or generate on-demand
+    const localCache = state.subCaches?.[cellId];
+    if (!localCache || !localCache.voronoi) {
+      // Not cached - would need to generate, but for now throw
+      throw new GenerationError(
+        `Local data for cell ${cellId} not found. Call generateLocal(${cellId}) first.`
+      );
+    }
+    
+    // Extract local data from cache
+    const localData = localCache.voronoi;
+    const localPack = localData.localPack || localData.pack;
+    const localGrid = localData.localGrid || localData.grid;
+    
+    // Return local-only structure
+    return {
+      seed: localData.seed || state.data.seed,
+      cellId,
+      options: {
+        ...state.data.options,
+        ...(localData.options || {}),
+      },
+      grid: localGrid ? {
+        cells: {
+          i: Array.from(localGrid.cells?.i || []),
+          h: Array.from(localGrid.cells?.h || []),
+          t: localGrid.cells?.t ? Array.from(localGrid.cells.t) : [],
+          temp: localGrid.cells?.temp ? Array.from(localGrid.cells.temp) : [],
+          prec: localGrid.cells?.prec ? Array.from(localGrid.cells.prec) : [],
+          f: localGrid.cells?.f ? Array.from(localGrid.cells.f) : [],
+          b: localGrid.cells?.b ? Array.from(localGrid.cells.b) : [],
+        },
+        points: localGrid.points ? localGrid.points.map(p => [...p]) : [],
+        vertices: localGrid.vertices ? {
+          p: localGrid.vertices.p ? localGrid.vertices.p.map(v => [...v]) : [],
+          v: localGrid.vertices.v ? deepCopy(localGrid.vertices.v) : [],
+          c: localGrid.vertices.c ? deepCopy(localGrid.vertices.c) : [],
+        } : {},
+        localBounds: localGrid.localBounds || null,
+        parentQuad: localGrid.parentQuad ? {
+          i: localGrid.parentQuad.i,
+          level: localGrid.parentQuad.level,
+          center: localGrid.parentQuad.center ? { ...localGrid.parentQuad.center } : null,
+        } : null,
+      } : null,
+      pack: localPack ? {
+        cells: {
+          i: Array.from(localPack.cells?.i || []),
+          p: localPack.cells?.p ? localPack.cells.p.map(p => [...p]) : [],
+          g: localPack.cells?.g ? Array.from(localPack.cells.g) : [],
+          h: localPack.cells?.h ? Array.from(localPack.cells.h) : [],
+          c: localPack.cells?.c ? deepCopy(localPack.cells.c) : [],
+          v: localPack.cells?.v ? deepCopy(localPack.cells.v) : [],
+          b: localPack.cells?.b ? Array.from(localPack.cells.b) : [],
+        },
+        vertices: localPack.vertices ? {
+          p: localPack.vertices.p ? localPack.vertices.p.map(v => [...v]) : [],
+          v: localPack.vertices.v ? deepCopy(localPack.vertices.v) : [],
+          c: localPack.vertices.c ? deepCopy(localPack.vertices.c) : [],
+        } : {},
+        features: localPack.features ? deepCopy(localPack.features) : [],
+        burgs: localPack.burgs ? deepCopy(localPack.burgs) : [],
+        states: localPack.states ? deepCopy(localPack.states) : [],
+        rivers: localPack.rivers ? deepCopy(localPack.rivers) : [],
+        cultures: localPack.cultures ? deepCopy(localPack.cultures) : [],
+        religions: localPack.religions ? deepCopy(localPack.religions) : [],
+        provinces: localPack.provinces ? deepCopy(localPack.provinces) : [],
+      } : null,
+    };
+  }
+
+  // Global data (existing logic)
   const { grid, pack, seed, options } = state.data;
 
   // Deep clone to avoid exposing internal references
@@ -837,17 +932,29 @@ export function renderToCanvas(canvas, options = {}) {
     // Note: Image loading is async - for true sync, would need direct canvas drawing
     if (img.complete || img.width > 0) {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Phase 5: Restore context if transform was applied
+      if (transform) {
+        ctx.restore();
+      }
       URL.revokeObjectURL(url);
     } else {
       // Fallback: queue async render (best effort)
       img.onload = () => {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Phase 5: Restore context if transform was applied
+        if (transform) {
+          ctx.restore();
+        }
         URL.revokeObjectURL(url);
         if (typeof console !== 'undefined' && console.log) {
           console.log('Canvas rendered successfully');
         }
       };
       img.onerror = () => {
+        // Phase 5: Restore context if transform was applied (even on error)
+        if (transform) {
+          ctx.restore();
+        }
         URL.revokeObjectURL(url);
         if (typeof console !== 'undefined' && console.warn) {
           console.warn('Canvas rendering via Image failed - consider using SVG rendering instead');
@@ -863,13 +970,50 @@ export function renderToCanvas(canvas, options = {}) {
 }
 
 /**
+ * Get quad bounds from dualGrid for a given cellId (Phase 5 helper)
+ * @param {number} cellId - Cell/quad ID
+ * @returns {Object|null} Bounds {minX, minY, maxX, maxY} or null if not found
+ */
+function getQuadBounds(cellId) {
+  if (!state.data || !state.data.dualGrid || !state.data.dualGrid.level0Quads) {
+    return null;
+  }
+  
+  const quad = state.data.dualGrid.level0Quads[cellId];
+  if (!quad || !quad.verts || !state.data.dualGrid.points) {
+    return null;
+  }
+  
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  
+  for (const vertId of quad.verts) {
+    const point = state.data.dualGrid.points[vertId];
+    if (point) {
+      const x = point.x !== undefined ? point.x : point[0];
+      const y = point.y !== undefined ? point.y : point[1];
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  
+  if (minX === Infinity) return null;
+  
+  return { minX, minY, maxX, maxY };
+}
+
+/**
  * Render stored map data to SVG string (enhanced version with interactive/layers support)
+ * Phase 5: Supports cellId and zoomToCell for local rendering
  * @param {Object} options - Rendering options
  * @param {boolean} options.includeInteractive - If true, add data-cell-id attributes to paths
  * @param {Object} options.renderConfig - Layer configuration { layers: { biomes: true, states: true, ... } }
  * @param {number} options.width - SVG width (optional)
  * @param {number} options.height - SVG height (optional)
  * @param {HTMLElement} options.container - Container element for SVG (optional)
+ * @param {number|null} options.cellId - Optional cell ID for local rendering (Phase 5)
+ * @param {boolean} options.zoomToCell - If true and cellId provided, zoom viewBox to quad bounds (Phase 5)
  * @returns {string|null} SVG string if no container provided, null if appended to container
  * @throws {InitializationError} If generator not initialized
  * @throws {NoDataError} If no data generated yet
@@ -882,6 +1026,35 @@ export function renderToSVG(options = {}) {
   }
 
   try {
+    const { cellId = null, zoomToCell = false } = options;
+    
+    // Phase 5: Get local data if cellId provided
+    let dataToRender = state.data;
+    let viewBox = null;
+    
+    if (cellId !== null && cellId !== undefined) {
+      // Get local data from subCaches
+      const localCache = state.subCaches?.[cellId];
+      if (localCache && localCache.voronoi) {
+        const localData = localCache.voronoi;
+        // Create temporary data structure for local rendering
+        dataToRender = {
+          ...state.data,
+          pack: localData.localPack || localData.pack,
+          grid: localData.localGrid || localData.grid,
+        };
+      }
+      
+      // Phase 5: Calculate viewBox for zoom if requested
+      if (zoomToCell) {
+        const bounds = getQuadBounds(cellId);
+        if (bounds) {
+          const padding = 20; // Padding around quad
+          viewBox = `${bounds.minX - padding} ${bounds.minY - padding} ${bounds.maxX - bounds.minX + padding * 2} ${bounds.maxY - bounds.minY + padding * 2}`;
+        }
+      }
+    }
+    
     // Determine dimensions from container, options, or data
     let width = options.width;
     let height = options.height;
@@ -902,12 +1075,21 @@ export function renderToSVG(options = {}) {
       height = height || state.data.options.mapHeight || 600;
     }
 
-    const svgString = renderMapSVG(state.data, {
+    let svgString = renderMapSVG(dataToRender, {
       width,
       height,
       renderConfig,
       includeInteractive,
     });
+    
+    // Phase 5: Apply viewBox if zoomToCell is enabled
+    if (viewBox) {
+      // Insert viewBox into SVG string
+      svgString = svgString.replace(
+        /<svg([^>]*)>/,
+        `<svg$1 viewBox="${viewBox}">`
+      );
+    }
 
     if (container) {
       // Append or replace SVG in container
@@ -971,12 +1153,21 @@ export function renderPreview(options = {}) {
 export function generateLocal(cellId, phasesToRun = ['voronoi'], optionsOverride = {}, DelaunatorClass = null) {
   requireInitialized();
 
+  // INVARIANT: Generator must be initialized (Iteration 5 Section 6.7)
   if (!state.data) {
     throw new NoDataError();
   }
 
+  // INVARIANT: Dual grid must exist for local generation (Iteration 5 Section 6.7)
   if (!state.data.dualGrid) {
     throw new GenerationError('Dual grid is required for local generation. Generate map with gridMode: "dualPrecursor" first.');
+  }
+  
+  // INVARIANT: CellId must be valid (Iteration 5 Section 6.7)
+  const quad = state.data.dualGrid.level0Quads?.[cellId];
+  if (!quad) {
+    const maxCellId = (state.data.dualGrid.level0Quads?.length || 0) - 1;
+    throw new GenerationError(`Invalid cellId ${cellId}. Valid range: 0-${maxCellId}`);
   }
 
   if (DelaunatorClass === null && phasesToRun.includes(PHASES.VORONOI)) {
@@ -1000,10 +1191,15 @@ export function generateLocal(cellId, phasesToRun = ['voronoi'], optionsOverride
       DelaunatorClass
     );
 
-    // Log local generation
+    // Phase 5: Enhanced logging with bounds and timing
     const localCellCount = localPack.cells.i.length;
+    const bounds = localData.bounds || localGrid.localBounds;
     if (typeof console !== 'undefined' && console.log) {
       console.log(`Generated local Voronoi for cell ${cellId}: ${localCellCount} sub-cells`);
+      if (bounds) {
+        console.log(`  Bounds: (${bounds.minX.toFixed(1)}, ${bounds.minY.toFixed(1)}) to (${bounds.maxX.toFixed(1)}, ${bounds.maxY.toFixed(1)})`);
+        console.log(`  Size: ${(bounds.maxX - bounds.minX).toFixed(1)} x ${(bounds.maxY - bounds.minY).toFixed(1)}`);
+      }
     }
 
     // For Phase 4, we return the local grid/pack

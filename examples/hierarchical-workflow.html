@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hierarchical Workflow Test - Phase 5</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .workflow-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+    .step {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+      border: 2px solid #444;
+    }
+    .step h3 {
+      margin-top: 0;
+      font-size: 16px;
+      color: #4a9eff;
+    }
+    .step div {
+      border: 1px solid #666;
+      background: #000;
+      max-width: 100%;
+      height: 250px;
+      overflow: auto;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 15px;
+      background: #2a2a2a;
+      border-radius: 4px;
+    }
+    button {
+      padding: 10px 20px;
+      background: #4a4a4a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5a5a5a;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .info {
+      background: #2a2a2a;
+      padding: 15px;
+      border-radius: 4px;
+    }
+    .info pre {
+      background: #1a1a1a;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    input[type="number"] {
+      padding: 5px;
+      background: #1a1a1a;
+      color: #fff;
+      border: 1px solid #666;
+      border-radius: 4px;
+      width: 80px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Hierarchical Workflow Test - Phase 5</h1>
+    <p>Complete workflow: Generate global → Pick cell → Generate local → Render zoomed</p>
+    
+    <div class="controls">
+      <button id="step1Btn">Step 1: Generate Global Precursor</button>
+      <button id="step2Btn" disabled>Step 2: Pick Cell & Generate Local</button>
+      <button id="step3Btn" disabled>Step 3: Render Zoomed Local</button>
+      <button id="runAllBtn">Run All Steps</button>
+      <label style="color: #888; margin-left: 20px;">
+        Cell ID: <input type="number" id="cellIdInput" value="0" min="0" style="margin-left: 5px;">
+      </label>
+    </div>
+
+    <div class="info">
+      <h3>Workflow Status</h3>
+      <div id="status">Ready to start...</div>
+    </div>
+
+    <div class="workflow-steps">
+      <div class="step">
+        <h3>Step 1: Global Map (Precursor)</h3>
+        <div id="step1-output"></div>
+      </div>
+      
+      <div class="step">
+        <h3>Step 2: Local Voronoi (Cell Subdivision)</h3>
+        <div id="step2-output"></div>
+      </div>
+      
+      <div class="step">
+        <h3>Step 3: Zoomed Local View</h3>
+        <div id="step3-output"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * Hierarchical Workflow Test - Phase 5
+     * 
+     * Demonstrates complete workflow:
+     * 1. Generate global precursor map with dual grid
+     * 2. Pick a cell and generate local Voronoi subdivision
+     * 3. Render zoomed view of local sub-grid
+     */
+    
+    import Delaunator from 'https://cdn.jsdelivr.net/npm/delaunator@5.0.1/+esm';
+    
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const modulePath = isDev ? '/src/index.js' : '/dist/azgaar-genesis.esm.js';
+    
+    let AzgaarGenesis;
+    try {
+      AzgaarGenesis = await import(modulePath);
+    } catch (error) {
+      console.error('Failed to load module:', error);
+      document.getElementById('status').innerHTML = `<pre style="color: red;">Error: ${error.message}</pre>`;
+      throw error;
+    }
+    
+    const { 
+      initGenerator, 
+      loadOptions, 
+      generateMap,
+      generateLocal,
+      getMapData,
+      renderPreview
+    } = AzgaarGenesis;
+
+    const statusDiv = document.getElementById('status');
+    const step1Btn = document.getElementById('step1Btn');
+    const step2Btn = document.getElementById('step2Btn');
+    const step3Btn = document.getElementById('step3Btn');
+    const runAllBtn = document.getElementById('runAllBtn');
+    const cellIdInput = document.getElementById('cellIdInput');
+
+    const testSeed = '123456';
+    const baseOptions = {
+      seed: testSeed,
+      mapWidth: 400,
+      mapHeight: 300,
+      cellsDesired: 5000,
+      statesNumber: 10,
+      gridMode: 'dualPrecursor',
+    };
+
+    let globalData = null;
+    let localData = null;
+    let selectedCellId = 0;
+
+    // Initialize generator
+    initGenerator();
+
+    function updateStatus(message, type = 'info') {
+      const color = type === 'success' ? '#0f0' : type === 'error' ? '#f00' : '#ff0';
+      statusDiv.innerHTML = `<pre style="color: ${color};">${message}</pre>`;
+    }
+
+    async function step1GenerateGlobal() {
+      try {
+        updateStatus('Step 1: Generating global precursor map...', 'info');
+        step1Btn.disabled = true;
+        
+        loadOptions(baseOptions);
+        globalData = generateMap(Delaunator);
+        
+        // Render global map
+        const container = document.getElementById('step1-output');
+        renderPreview({
+          target: 'svg',
+          container: container,
+          width: 400,
+          height: 300
+        });
+        
+        const quadCount = (globalData.dualGrid?.level0Quads?.length || 0);
+        updateStatus(`Step 1: ✓ Global map generated (${quadCount} quads, ${globalData.pack.cells.i.length} Voronoi cells)`, 'success');
+        
+        // Enable step 2
+        step2Btn.disabled = false;
+        cellIdInput.max = quadCount - 1;
+        cellIdInput.value = Math.min(0, quadCount - 1);
+        
+      } catch (error) {
+        updateStatus(`Step 1: ✗ Failed: ${error.message}`, 'error');
+        step1Btn.disabled = false;
+      }
+    }
+
+    async function step2GenerateLocal() {
+      if (!globalData) {
+        updateStatus('Step 2: ✗ Generate global map first', 'error');
+        return;
+      }
+      
+      try {
+        selectedCellId = parseInt(cellIdInput.value, 10);
+        if (isNaN(selectedCellId) || selectedCellId < 0) {
+          updateStatus(`Step 2: ✗ Invalid cellId: ${selectedCellId}`, 'error');
+          return;
+        }
+        
+        const quadCount = (globalData.dualGrid?.level0Quads?.length || 0);
+        if (selectedCellId >= quadCount) {
+          updateStatus(`Step 2: ✗ CellId ${selectedCellId} out of range (0-${quadCount - 1})`, 'error');
+          return;
+        }
+        
+        updateStatus(`Step 2: Generating local Voronoi for cell ${selectedCellId}...`, 'info');
+        step2Btn.disabled = true;
+        
+        localData = generateLocal(selectedCellId, ['voronoi'], {}, Delaunator);
+        
+        // Render local (not zoomed yet)
+        const container = document.getElementById('step2-output');
+        renderPreview({
+          target: 'svg',
+          container: container,
+          width: 400,
+          height: 300,
+          cellId: selectedCellId,
+          zoomToCell: false
+        });
+        
+        const localCellCount = localData.localPack.cells.i.length;
+        updateStatus(`Step 2: ✓ Local Voronoi generated (${localCellCount} sub-cells)`, 'success');
+        
+        // Enable step 3
+        step3Btn.disabled = false;
+        
+      } catch (error) {
+        updateStatus(`Step 2: ✗ Failed: ${error.message}`, 'error');
+        step2Btn.disabled = false;
+      }
+    }
+
+    async function step3RenderZoomed() {
+      if (!localData) {
+        updateStatus('Step 3: ✗ Generate local Voronoi first', 'error');
+        return;
+      }
+      
+      try {
+        updateStatus(`Step 3: Rendering zoomed view of cell ${selectedCellId}...`, 'info');
+        step3Btn.disabled = true;
+        
+        // Render with zoom
+        const container = document.getElementById('step3-output');
+        renderPreview({
+          target: 'svg',
+          container: container,
+          width: 400,
+          height: 300,
+          cellId: selectedCellId,
+          zoomToCell: true
+        });
+        
+        // Test getMapData with cellId
+        const localMapData = getMapData({ cellId: selectedCellId });
+        
+        updateStatus(`Step 3: ✓ Zoomed view rendered (${localMapData.pack.cells.i.length} local cells)`, 'success');
+        
+      } catch (error) {
+        updateStatus(`Step 3: ✗ Failed: ${error.message}`, 'error');
+        step3Btn.disabled = false;
+      }
+    }
+
+    async function runAllSteps() {
+      runAllBtn.disabled = true;
+      await step1GenerateGlobal();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await step2GenerateLocal();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await step3RenderZoomed();
+      runAllBtn.disabled = false;
+      updateStatus('✓ All steps completed!', 'success');
+    }
+
+    // Event listeners
+    step1Btn.addEventListener('click', step1GenerateGlobal);
+    step2Btn.addEventListener('click', step2GenerateLocal);
+    step3Btn.addEventListener('click', step3RenderZoomed);
+    runAllBtn.addEventListener('click', runAllSteps);
+
+    console.log('Hierarchical Workflow Test initialized');
+  </script>
+</body>
+</html>

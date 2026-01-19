@@ -93,6 +93,8 @@
       <button id="generateLocalBtn">Generate Local Voronoi</button>
       <button id="testReproducibilityBtn">Test Reproducibility (Same Seed+CellId)</button>
       <button id="testCachingBtn">Test Caching (Regenerate Same Cell)</button>
+      <button id="testGetMapDataBtn">Test getMapData({ cellId })</button>
+      <button id="testZoomBtn">Test Zoom to Cell</button>
       <label style="color: #888; margin-left: 20px;">
         Cell ID: <input type="number" id="cellIdInput" value="0" min="0" style="margin-left: 5px;">
       </label>
@@ -148,7 +150,9 @@
       loadOptions, 
       generateMap,
       generateLocal,
-      renderToSVG
+      getMapData,
+      renderToSVG,
+      renderPreview
     } = AzgaarGenesis;
 
     const testResults = document.getElementById('testResults');
@@ -156,6 +160,8 @@
     const generateLocalBtn = document.getElementById('generateLocalBtn');
     const testReproducibilityBtn = document.getElementById('testReproducibilityBtn');
     const testCachingBtn = document.getElementById('testCachingBtn');
+    const testGetMapDataBtn = document.getElementById('testGetMapDataBtn');
+    const testZoomBtn = document.getElementById('testZoomBtn');
     const cellIdInput = document.getElementById('cellIdInput');
 
     const testSeed = '123456';
@@ -349,11 +355,78 @@
       }
     }
 
+    function testGetMapData() {
+      if (!globalData) {
+        logResult('✗ Please generate global map first', 'FAIL');
+        return;
+      }
+      
+      try {
+        const cellId = parseInt(cellIdInput.value, 10);
+        if (isNaN(cellId) || cellId < 0) {
+          logResult(`✗ Invalid cellId: ${cellId}`, 'FAIL');
+          return;
+        }
+        
+        // Generate local first if not already done
+        if (!localData || localData.cellId !== cellId) {
+          logResult(`Generating local for cell ${cellId} first...`, 'INFO');
+          localData = generateLocal(cellId, ['voronoi'], {}, Delaunator);
+        }
+        
+        logResult(`Testing getMapData({ cellId: ${cellId} })...`, 'INFO');
+        
+        const localMapData = getMapData({ cellId });
+        
+        if (localMapData.cellId === cellId) {
+          logResult(`✓ getMapData returned local data for cell ${cellId}`, 'PASS');
+          logResult(`  Local cells: ${localMapData.pack?.cells?.i?.length || 0}`, 'INFO');
+          logResult(`  Local grid points: ${localMapData.grid?.points?.length || 0}`, 'INFO');
+        } else {
+          logResult(`✗ getMapData did not return correct cellId`, 'FAIL');
+        }
+        
+      } catch (error) {
+        logResult(`✗ getMapData test failed: ${error.message}`, 'FAIL');
+      }
+    }
+
+    function testZoom() {
+      if (!globalData || !localData) {
+        logResult('✗ Please generate global map and local Voronoi first', 'FAIL');
+        return;
+      }
+      
+      try {
+        const cellId = parseInt(cellIdInput.value, 10);
+        logResult(`Testing zoom to cell ${cellId}...`, 'INFO');
+        
+        // Render with zoom
+        const container = document.getElementById('test2-local');
+        renderPreview({
+          target: 'svg',
+          container: container,
+          width: 400,
+          height: 300,
+          cellId: cellId,
+          zoomToCell: true
+        });
+        
+        logResult(`✓ Rendered with zoomToCell: true`, 'PASS');
+        logResult(`  Check visual: should be zoomed to quad bounds`, 'INFO');
+        
+      } catch (error) {
+        logResult(`✗ Zoom test failed: ${error.message}`, 'FAIL');
+      }
+    }
+
     // Event listeners
     generateGlobalBtn.addEventListener('click', generateGlobalMap);
     generateLocalBtn.addEventListener('click', generateLocalVoronoiForCell);
     testReproducibilityBtn.addEventListener('click', testReproducibility);
     testCachingBtn.addEventListener('click', testCaching);
+    testGetMapDataBtn.addEventListener('click', testGetMapData);
+    testZoomBtn.addEventListener('click', testZoom);
 
     console.log('Local Voronoi Test initialized');
   </script>

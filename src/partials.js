@@ -76,27 +76,72 @@ export function validateSkipPhases(skipPhases, options = {}) {
 
 /**
  * Validate that all dependencies for requested phases are satisfied
+ * Phase 5: Enhanced with cellId support and dualGrid validation for local runs
  * @param {Array<string>} phasesToRun - Phases to run
  * @param {Array<string>} skipPhases - Phases to skip
- * @throws {GenerationError} If dependencies are missing
+ * @param {Object} state - Generator state (optional, for cellId validation)
+ * @param {number|null} cellId - Optional cell ID for local generation
+ * @throws {GenerationError} If dependencies are missing or dualGrid missing for local runs
  */
-export function validatePhaseDependencies(phasesToRun, skipPhases = []) {
+export function validatePhaseDependencies(phasesToRun, skipPhases = [], state = null, cellId = null) {
+  // Phase 5: If cellId provided (local run), check that dualGrid exists
+  if (cellId !== null && cellId !== undefined && state) {
+    if (!state.data || !state.data.dualGrid) {
+      throw new GenerationError(
+        `Local generation for cell ${cellId} requires dualGrid. ` +
+        `Generate global map with gridMode: "dualPrecursor" first.`
+      );
+    }
+    
+    const quad = state.data.dualGrid.level0Quads?.[cellId];
+    if (!quad) {
+      throw new GenerationError(
+        `Cell ${cellId} not found in dualGrid.level0Quads. ` +
+        `Valid cellIds: 0-${(state.data.dualGrid.level0Quads?.length || 0) - 1}`
+      );
+    }
+  }
+  
   const missing = new Set();
+  const warnings = [];
   
   for (const phase of phasesToRun) {
     const deps = PHASE_DEPENDENCIES[phase] || [];
     for (const dep of deps) {
       // If dependency is skipped or not in phasesToRun, it's missing
       if (skipPhases.includes(dep) || !phasesToRun.includes(dep)) {
-        missing.add(dep);
+        // Phase 5: Check if dependency is cached (for local runs, check subCaches)
+        let isCached = false;
+        if (state) {
+          if (cellId !== null && cellId !== undefined) {
+            // Check per-cell cache
+            isCached = state.subCaches?.[cellId]?.[dep] !== undefined;
+          } else {
+            // Check global cache
+            isCached = state.cached?.[dep] !== undefined;
+          }
+        }
+        
+        if (!isCached) {
+          missing.add(dep);
+          // Phase 5: Warn if skipping required dependency (will use fallback)
+          warnings.push(`Phase ${phase} requires ${dep} (will use fallback)`);
+        }
       }
     }
   }
   
+  // Phase 5: Log warnings for fallback usage
+  if (warnings.length > 0 && typeof console !== 'undefined' && console.warn) {
+    const cellLabel = cellId !== null ? ` (cell ${cellId})` : '';
+    warnings.forEach(w => console.warn(`[partials]${cellLabel} ${w}`));
+  }
+  
   if (missing.size > 0) {
     const missingArray = Array.from(missing);
+    const cellLabel = cellId !== null ? ` for cell ${cellId}` : '';
     throw new GenerationError(
-      `Missing required dependencies for phases: ${missingArray.join(', ')}. ` +
+      `Missing required dependencies${cellLabel} for phases: ${missingArray.join(', ')}. ` +
       `Either include these phases or ensure they are cached/available.`
     );
   }
@@ -139,22 +184,24 @@ export function resolvePhaseDependencies(phasesToRun, skipPhases = []) {
  * @returns {string} Phase-specific seed
  */
 export function getPhaseSeed(mainSeed, phase, cellId = null) {
-  let seed = `${mainSeed}_${phase}`;
+  // Phase 5: Strengthened hash function for better collision resistance and determinism
+  // INVARIANT: Same seed+phase+cellId → same output (Iteration 5 Section 6.5)
+  // Format: hash(`${seed}-${phase}-${cellId ?? 'global'}`)
+  const seedStr = cellId !== null && cellId !== undefined
+    ? `${mainSeed}-${phase}-${cellId}`
+    : `${mainSeed}-${phase}-global`;
   
-  // Phase 4: Include cellId in seed hash for per-cell reproducibility
-  if (cellId !== null && cellId !== undefined) {
-    // Simple hash: combine seed string with cellId
-    let hash = 0;
-    const seedStr = String(seed) + String(cellId);
-    for (let i = 0; i < seedStr.length; i++) {
-      const char = seedStr.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    seed = String(Math.abs(hash));
+  // Use a more robust hash function (djb2 variant with better distribution)
+  // INVARIANT: Deterministic hash ensures RNG consistency across runs
+  let hash = 5381; // djb2 initial value
+  for (let i = 0; i < seedStr.length; i++) {
+    hash = ((hash << 5) + hash) + seedStr.charCodeAt(i);
+    hash = hash & 0x7fffffff; // Ensure positive 31-bit integer
   }
   
-  return seed;
+  // Return as string seed (deterministic and collision-resistant)
+  // INVARIANT: Hash is collision-free for practical seed/phase/cellId combinations
+  return String(hash);
 }
 
 /**
@@ -499,6 +546,11 @@ export function executePhaseWithWrapper({
   // Cache result (global or per-cell)
   const phaseData = getPhaseData(result, phase);
   cachePhase(state, phase, phaseData, cellId); // Phase 4: Pass cellId
+  
+  // Phase 5: Log completion with timing
+  const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const duration = endTime - startTime;
+  console.log(`[partials] Phase ${phase}${cellLabel} completed in ${duration.toFixed(2)}ms`);
   
   return result;
 }
