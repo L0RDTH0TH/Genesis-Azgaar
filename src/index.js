@@ -17,6 +17,7 @@ export {
   renderToCanvas,   // Phase 1: Canvas rendering
   renderToSVG,      // Phase 1: Enhanced SVG rendering (interactive/layers)
   renderPreview,    // Phase 1: Unified render function
+  registerCellClickHandler, // Phase 6: Register callback for cell clicks
   loadMapData,
   resetGeneratorState,
 } from './generator.js';

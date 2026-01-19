@@ -104,6 +104,87 @@ npm run preview
   - Full regression testing with built bundles
   - README updated with Phase 3 completion status
 
+## Hierarchical Generation (Iteration 5)
+
+**Phase 6: Complete Iteration 5 Implementation** ✅
+
+The library now supports hierarchical map generation with dual grid precursors and local Voronoi subdivision:
+
+### Key Features
+
+- **Dual Grid Precursor Mode**: Generate organic quad-based grids as precursors to Voronoi
+- **Local Voronoi Subdivision**: Generate detailed Voronoi diagrams within selected dual grid cells
+- **Interactive Cell Selection**: Click on dual grid quads to generate local detail
+- **Per-Cell Caching**: Efficient caching system for local generations
+- **Zoom-to-Cell Rendering**: Visual zoom and overlay options for local sub-grids
+
+### Usage Example
+
+```javascript
+import { 
+  initGenerator, 
+  loadOptions, 
+  generateMap, 
+  generateLocal,
+  registerCellClickHandler,
+  renderPreview,
+  getMapData
+} from 'azgaar-genesis';
+import Delaunator from 'delaunator';
+
+// Initialize
+initGenerator();
+
+// Generate global map with dual grid precursor
+loadOptions({
+  seed: '123456',
+  mapWidth: 1000,
+  mapHeight: 600,
+  gridMode: 'dualPrecursor' // Enable dual grid precursor
+});
+
+const globalData = generateMap(Delaunator);
+// globalData.dualGrid contains level0Quads for cell selection
+
+// Register click handler for interactive workflow
+registerCellClickHandler((cellId, event, quadBounds) => {
+  console.log(`Cell ${cellId} clicked!`, quadBounds);
+  
+  // Generate local Voronoi for clicked cell
+  const localData = generateLocal(cellId, ['voronoi'], {}, Delaunator);
+  console.log(`Generated ${localData.localPack.cells.i.length} local sub-cells`);
+  
+  // Render zoomed local view
+  renderPreview({
+    target: 'svg',
+    container: document.getElementById('localView'),
+    cellId: cellId,
+    zoomToCell: true,
+    overlayLocalOnGlobal: true // Show global faintly behind local
+  });
+});
+
+// Render global map with interactive quads
+renderPreview({
+  target: 'svg',
+  container: document.getElementById('globalView'),
+  includeInteractive: true // Enables click handling on dual grid quads
+});
+
+// Get local data
+const localMapData = getMapData({ cellId: 0 });
+```
+
+### API Reference
+
+- **`gridMode: 'dualPrecursor'`** - Enable dual grid as precursor to Voronoi
+- **`generateLocal(cellId, phasesToRun, optionsOverride, DelaunatorClass)`** - Generate local Voronoi within a cell
+- **`registerCellClickHandler(callback)`** - Register callback for cell clicks
+- **`renderPreview({ cellId, zoomToCell, overlayLocalOnGlobal, includeInteractive })`** - Render with cell selection support
+- **`getMapData({ cellId, includeLocalOnly })`** - Get map data (global or local)
+
+See `examples/hierarchical-workflow.html` for a complete interactive workflow demo.
+
 ## Public API
 
 The library provides a stateful API for map generation and rendering:
@@ -116,6 +197,7 @@ import {
   getMapData, 
   renderPreview,
   renderPreviewSVG,
+  registerCellClickHandler, // Phase 6: Interactive cell selection
   loadMapData
 } from 'azgaar-genesis';
 

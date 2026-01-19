@@ -156,7 +156,8 @@
       generateMap,
       generateLocal,
       getMapData,
-      renderPreview
+      renderPreview,
+      registerCellClickHandler
     } = AzgaarGenesis;
 
     const statusDiv = document.getElementById('status');
@@ -182,6 +183,18 @@
 
     // Initialize generator
     initGenerator();
+    
+    // Phase 6: Register click handler for interactive workflow
+    registerCellClickHandler((cellId, event, quadBounds) => {
+      updateStatus(`Cell ${cellId} clicked! Generating local detail...`, 'info');
+      selectedCellId = cellId;
+      cellIdInput.value = cellId;
+      
+      // Auto-advance to step 2
+      setTimeout(() => {
+        step2GenerateLocal();
+      }, 100);
+    });
 
     function updateStatus(message, type = 'info') {
       const color = type === 'success' ? '#0f0' : type === 'error' ? '#f00' : '#ff0';
@@ -196,13 +209,14 @@
         loadOptions(baseOptions);
         globalData = generateMap(Delaunator);
         
-        // Render global map
+        // Render global map with interactive click handler
         const container = document.getElementById('step1-output');
         renderPreview({
           target: 'svg',
           container: container,
           width: 400,
-          height: 300
+          height: 300,
+          includeInteractive: true // Phase 6: Enable click handling
         });
         
         const quadCount = (globalData.dualGrid?.level0Quads?.length || 0);

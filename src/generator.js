@@ -64,6 +64,7 @@ let state = {
   data: null, // { grid, pack, seed }
   cached: {}, // Phase cache for partial generation
   subCaches: {}, // Phase 4: Per-cell caches for local generations { [cellId]: { [phase]: data } }
+  cellClickHandler: null, // Phase 6: Registered callback for cell clicks
   initialized: false,
 };
 
@@ -466,6 +467,30 @@ function requireInitialized() {
 export function resetGeneratorState() {
   requireInitialized();
   state.data = null; // Clear generated data to allow new generation
+  state.cellClickHandler = null; // Phase 6: Clear click handler
+}
+
+/**
+ * Register a callback function for cell click events (Phase 6)
+ * @param {Function} callback - Callback function with signature (cellId, event, quadBounds) => void
+ *   - cellId: number - The clicked cell/quad ID from dualGrid.level0Quads
+ *   - event: Event - The original click event
+ *   - quadBounds: Object|null - Bounds {minX, minY, maxX, maxY} of the clicked quad, or null if not available
+ * @throws {InitializationError} If generator not initialized
+ * @throws {InvalidOptionError} If callback is not a function
+ */
+export function registerCellClickHandler(callback) {
+  requireInitialized();
+  
+  if (typeof callback !== 'function') {
+    throw new InvalidOptionError('callback', callback, 'Callback must be a function');
+  }
+  
+  state.cellClickHandler = callback;
+  
+  if (typeof console !== 'undefined' && console.log) {
+    console.log('[generator] Cell click handler registered');
+  }
 }
 
 /**
@@ -1014,6 +1039,7 @@ function getQuadBounds(cellId) {
  * @param {HTMLElement} options.container - Container element for SVG (optional)
  * @param {number|null} options.cellId - Optional cell ID for local rendering (Phase 5)
  * @param {boolean} options.zoomToCell - If true and cellId provided, zoom viewBox to quad bounds (Phase 5)
+ * @param {boolean} options.overlayLocalOnGlobal - If true and cellId provided, render global faintly behind local (Phase 6)
  * @returns {string|null} SVG string if no container provided, null if appended to container
  * @throws {InitializationError} If generator not initialized
  * @throws {NoDataError} If no data generated yet
@@ -1075,11 +1101,15 @@ export function renderToSVG(options = {}) {
       height = height || state.data.options.mapHeight || 600;
     }
 
+    // Phase 6: Add overlayLocalOnGlobal option for local rendering
+    const overlayLocalOnGlobal = options.overlayLocalOnGlobal === true && cellId !== null;
+    
     let svgString = renderMapSVG(dataToRender, {
       width,
       height,
       renderConfig,
       includeInteractive,
+      dualGrid: overlayLocalOnGlobal ? state.data.dualGrid : null, // Include dualGrid for overlay
     });
     
     // Phase 5: Apply viewBox if zoomToCell is enabled
@@ -1088,6 +1118,26 @@ export function renderToSVG(options = {}) {
       svgString = svgString.replace(
         /<svg([^>]*)>/,
         `<svg$1 viewBox="${viewBox}">`
+      );
+    }
+    
+    // Phase 6: If overlayLocalOnGlobal, render global faintly behind local
+    if (overlayLocalOnGlobal && state.data && state.data.dualGrid) {
+      // Render global map with reduced opacity as background
+      const globalSvgString = renderMapSVG(state.data, {
+        width,
+        height,
+        renderConfig: { layers: { biomes: true, states: true } }, // Minimal layers for background
+        includeInteractive: false,
+      });
+      
+      // Extract content from global SVG (remove svg tags)
+      const globalContent = globalSvgString.replace(/<svg[^>]*>|<\/svg>/g, '');
+      
+      // Insert global content as background layer with low opacity
+      svgString = svgString.replace(
+        /<rect x="0" y="0" width="[^"]*" height="[^"]*" fill="[^"]*" \/>/,
+        `<g opacity="0.2">${globalContent}</g>\n$&`
       );
     }
 

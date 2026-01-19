@@ -584,8 +584,11 @@ export function renderMapSVG(data, options = {}) {
     throw new Error('Map data with pack is required');
   }
 
-  const { pack, options: genOptions } = data;
+  const { pack, options: genOptions, dualGrid } = data;
   const { mapWidth, mapHeight } = genOptions || options;
+  
+  // Phase 6: Include dualGrid in data if provided via options
+  const dataWithDualGrid = options.dualGrid ? { ...data, dualGrid: options.dualGrid } : data;
 
   const width = options.width || mapWidth || 1000;
   const height = options.height || mapHeight || 600;
@@ -669,10 +672,57 @@ export function renderMapSVG(data, options = {}) {
     }
   }
 
+  // Phase 6: Add dual grid quads as clickable overlay if dualGrid exists and includeInteractive
+  const dualGridToRender = dataWithDualGrid.dualGrid || data.dualGrid;
+  if (includeInteractive && dualGridToRender && dualGridToRender.level0Quads) {
+    const dualGridOverlay = drawDualGridQuadsSVG(dualGridToRender, includeInteractive);
+    if (dualGridOverlay) {
+      layers.push(`<g id="dualGridQuads" opacity="0.3" stroke="#888" stroke-width="1" fill="none" pointer-events="all">${dualGridOverlay}</g>`);
+    }
+  }
+
   // Combine into complete SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
 ${layers.join('\n')}
 </svg>`;
 
   return svg;
+}
+
+/**
+ * Draw dual grid quads as SVG paths with data-cell-id attributes (Phase 6)
+ * @param {Object} dualGrid - Dual grid structure with level0Quads and points
+ * @param {boolean} includeInteractive - If true, add data-cell-id attributes
+ * @returns {string} SVG paths for dual grid quads
+ */
+function drawDualGridQuadsSVG(dualGrid, includeInteractive) {
+  if (!dualGrid || !dualGrid.level0Quads || !dualGrid.points) {
+    return '';
+  }
+  
+  const { level0Quads, points } = dualGrid;
+  const quadPaths = [];
+  
+  for (const quad of level0Quads) {
+    if (!quad.verts || quad.verts.length < 3) continue;
+    
+    // Build path from quad vertices
+    const pathPoints = [];
+    for (const vertId of quad.verts) {
+      const point = points[vertId];
+      if (point) {
+        const x = point.x !== undefined ? point.x : point[0];
+        const y = point.y !== undefined ? point.y : point[1];
+        pathPoints.push(`${x},${y}`);
+      }
+    }
+    
+    if (pathPoints.length < 3) continue;
+    
+    const pathData = `M ${pathPoints.join(' L ')} Z`;
+    const cellIdAttr = includeInteractive ? ` data-cell-id="${quad.i}"` : '';
+    quadPaths.push(`<path d="${pathData}"${cellIdAttr} style="cursor: pointer;" />`);
+  }
+  
+  return quadPaths.join('');
 }
